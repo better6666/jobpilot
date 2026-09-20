@@ -1,0 +1,93 @@
+name: build
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+# 打包流程。设计要点（都是本地实测踩过坑后固化的）：
+#   1. jdeps 对 Spring Boot fat jar 会漏报模块（看不进 BOOT-INF/lib），
+#      模块清单必须手写并用实跑验证，不能靠工具推断
+#   2. jpackage 输入目录里只能放 fat jar 一个文件，plain jar 同时在时
+#      两条 classpath 在 cfg 里互相覆盖，类路径只剩空壳
+#   3. Spring Boot fat jar 的主类是 JarLauncher，别指定 --main-class
+#   4. Windows 用 app-image（不依赖 WiX），macOS 用 dmg
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            pkg_type: dmg
+          - os: windows-latest
+            pkg_type: app-image
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: 构建并跑测试
+        run: ./gradlew build
+
+      - name: 裁剪运行时（模块清单经实跑验证，勿用 jdeps 推断）
+        run: |
+          jlink --add-modules java.base,java.desktop,java.instrument,java.logging,java.management,java.naming,java.net.http,java.security.jgss,java.security.sasl,java.sql,java.transaction.xa,java.xml,jdk.crypto.ec,jdk.unsupported \
+            --strip-debug --no-header-files --no-man-pages --compress=zip-6 \
+            --output build/runtime
+
+      - name: 打包
+        run: |
+          mkdir -p build/stage
+          cp build/libs/jobpilot-0.1.0.jar build/stage/
+          jpackage --type ${{ matrix.pkg_type }} --name JobPilot --app-version 0.1.0 \
+            --input build/stage --main-jar jobpilot-0.1.0.jar \
+            --runtime-image build/runtime --dest build/dist
+
+      - name: 冒烟测试（打包产物真跑一次，打 /api/health）
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            APP="build/dist/JobPilot.app/Contents/MacOS/JobPilot"
+          else
+            APP="build/dist/JobPilot/JobPilot.exe"
+          fi
+          "$APP" --server.port=18080 --license.enabled=false &
+          APP_PID=$!
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:18080/api/health && break
+            sleep 1
+          done
+          curl -sf http://localhost:18080/api/health || { echo "::error::打包产物启动失败"; exit 1; }
+          kill $APP_PID
+
+      - name: Windows 产物打 zip
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path build/dist/JobPilot -DestinationPath JobPilot-windows.zip
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: JobPilot-${{ runner.os }}
+          path: |
+            build/dist/*.dmg
+            JobPilot-windows.zip
+          if-no-files-found: error
+
+      - name: 附到 Release（仅 tag 触发）
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            build/dist/*.dmg JobPilot-windows.zip \
+            --title "JobPilot ${{ github.ref_name }}" \
+            --generate-notes

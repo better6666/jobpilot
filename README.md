@@ -80,6 +80,8 @@ JAVA_HOME=<你的JDK21路径> ./gradlew bootRun \
 
 自用免激活模式：`--license.enabled=false`，或 application.yaml 里改。
 
+**数据目录**：数据库和日志一律落在用户目录（macOS `~/Library/Application Support/JobPilot`，Windows `%APPDATA%\JobPilot`，Linux `~/.local/share/JobPilot`），**不相对进程工作目录**——打包成 .app / exe 后用户双击启动时工作目录是 `/` 或 System32，相对路径会直接崩（实测 `/db: Read-only file system`）。路径由 `SystemPaths` 统一算，`main()` 在启动前把绝对路径写进系统属性覆盖 yaml 里的兜底默认值；命令行参数优先级仍最高，开发时可用 `--spring.datasource.url=...` 覆盖。
+
 ### 3. 端到端流程（本地实测过）
 
 ```bash
@@ -211,23 +213,34 @@ npx wrangler deploy
 ### P5 打包分发
 
 - `./gradlew bootJar` 产出可执行 jar
-- 用 jlink 裁剪 JRE（实测 Corretto 21 + `java.base,java.sql,java.net.http,jdk.crypto.ec` 约 36MB），
-  再 jpackage 打双平台包（macOS / Windows），用户双击即用、不用装 JDK
+- 用 jlink 裁剪 JRE + jpackage 打双平台包（macOS dmg / Windows app-image），用户双击即用、不用装 JDK
 - 首次启动向导：填 api-base → 激活 → 开始投递
-- 端口被占用时自动顺延（今天联调踩过：9527 被旧进程占着就直接启动失败，这是售后第一大坑）
+- 端口被占用时自动顺延（联调踩过：9527 被旧进程占着就直接启动失败，这是售后第一大坑）
+
+**本地已验证**（macOS 侧全链路实跑通过）：jlink 裁剪运行时 52MB，jpackage 打出的 .app 共 90MB，1.3 秒启动，健康检查/建表/授权接口全部正常。CI 用 `.github/workflows/build.yml` 在 macos-latest 与 windows-latest 上自动出包并做冒烟测试，tag 推送时自动附到 Release。
+
+打包时固化的三个坑（改流程前先读）：
+
+1. **jdeps 对 Spring Boot fat jar 会漏报模块**——它看不进 `BOOT-INF/lib` 里的嵌套 jar，只报 `java.base,java.net.http`，实际缺 `java.desktop`（java.beans）和 `java.instrument`（Tomcat），打出来的包启动即崩。模块清单只能靠实跑验证
+2. **jpackage 输入目录里只能放 fat jar 一个文件**——plain jar 同时在目录里时，两条 classpath 在 cfg 里互相覆盖（properties 后 key 覆盖前 key），最终类路径只剩空壳
+3. **Spring Boot fat jar 的主类是 `JarLauncher`**，不是业务类，指定 `--main-class` 会直接报 ClassNotFoundException
+
+Windows 侧两个预期问题：app-image 未签名会触发 SmartScreen"Windows 已保护你的电脑"（要么买代码签名证书，要么给图文指引教用户点"更多信息→仍要运行"）；Java + 浏览器自动化程序容易被杀毒软件误报。
 
 ## 七、目录结构
 
 ```
 jobpilot/
+├── .github/workflows/build.yml  # CI：双平台打包 + 冒烟测试 + Release
 ├── build.gradle.kts              # 依赖与构建
 ├── src/main/java/com/jobpilot/
-│   ├── JobPilotApplication.java  # 入口（启动前建 db 目录）
+│   ├── JobPilotApplication.java  # 入口（建用户数据目录、按平台设绝对路径）
 │   ├── common/                   # 统一响应体、跨域过滤器
 │   ├── system/                   # 配置表、建表、健康检查、路径
 │   └── license/                  # 卡密：校验、门禁、控制器、激活页数据
 ├── src/test/java/com/jobpilot/
-│   └── license/                  # 门禁 / 状态机 / 控制器单测（Mockito，不连库不发网请求）
+│   ├── license/                  # 门禁 / 状态机 / 控制器单测
+│   └── system/                   # 数据目录路径单测
 ├── src/main/resources/
 │   ├── application.yaml
 │   └── static/license.html       # 用户激活页

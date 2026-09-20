@@ -2,6 +2,8 @@ spring:
   application:
     name: jobpilot
   datasource:
+    # 此默认值仅作兜底：JobPilotApplication.main() 会按平台算出用户目录下的
+    # 绝对路径并写进系统属性覆盖它（相对路径在双击启动时必崩）
     url: jdbc:sqlite:./db/jobpilot.db
     driver-class-name: org.sqlite.JDBC
     hikari:
@@ -21,6 +23,7 @@ logging:
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
   file:
+    # 同上：实际路径由 main() 指向用户目录下的 logs/，这里只是兜底
     name: ./target/logs/jobpilot.log
   logback:
     rollingpolicy:

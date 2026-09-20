@@ -8,6 +8,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.Path;
 
 @SpringBootApplication
 @EnableScheduling
@@ -15,10 +16,20 @@ import java.nio.file.Files;
 public class JobPilotApplication {
 
     public static void main(String[] args) throws IOException {
-        // SQLite 不会自动创建库文件所在目录，而 Hikari 连接池在 Bean 创建阶段就要建连，
-        // 目录不存在会直接让启动失败（SchemaInitializer 建表跑得更晚，救不了场）。
-        // 所以必须在 Spring 启动之前把目录建好。
-        Files.createDirectories(SystemPaths.dataDir());
+        // 数据目录一律落用户目录（见 SystemPaths）：双击 .app / exe 启动时工作目录是 /
+        // 或 System32，相对路径必崩。SQLite 不会自建目录，Hikari 建连又早于建表，
+        // 所以启动前先把目录建好。
+        Path dataDir = SystemPaths.dataDir();
+        Files.createDirectories(dataDir);
+        Files.createDirectories(dataDir.resolve("logs"));
+
+        // 数据库与日志的绝对路径走系统属性：优先级高于 application.yaml 的默认值，
+        // 又低于命令行参数，开发时 --spring.datasource.url=... 仍可覆盖。
+        System.setProperty("spring.datasource.url",
+                "jdbc:sqlite:" + dataDir.resolve("jobpilot.db"));
+        System.setProperty("logging.file.name",
+                dataDir.resolve("logs").resolve("jobpilot.log").toString());
+
         SpringApplication.run(JobPilotApplication.class, args);
     }
 }
