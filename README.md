@@ -4,6 +4,9 @@
 
 **许可**：专有软件，保留所有权利。未经授权不得复制、修改或再分发。
 
+**仓库**：https://github.com/better6666/jobpilot
+**线上卡密服务**：https://jobpilot.better999.dpdns.org/
+
 ## 一、整体架构
 
 ```
