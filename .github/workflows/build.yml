@@ -19,9 +19,7 @@ jobs:
       matrix:
         include:
           - os: macos-latest
-            pkg_type: dmg
           - os: windows-latest
-            pkg_type: app-image
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -43,13 +41,13 @@ jobs:
             --strip-debug --no-header-files --no-man-pages --compress=zip-6 \
             --output build/runtime
 
-      - name: 打包
+      - name: 打包 app-image（两个平台通用，也是冒烟测试的对象）
         run: |
           mkdir -p build/stage
           cp build/libs/jobpilot-0.1.0.jar build/stage/
           # app-version 首段不能为 0：macOS dmg 打包器会直接拒（实测报
           # "The first number in an app-version cannot be zero or negative"）
-          jpackage --type ${{ matrix.pkg_type }} --name JobPilot --app-version 1.0.0 \
+          jpackage --type app-image --name JobPilot --app-version 1.0.0 \
             --input build/stage --main-jar jobpilot-0.1.0.jar \
             --runtime-image build/runtime --dest build/dist
 
@@ -69,6 +67,15 @@ jobs:
           done
           curl -sf http://localhost:18080/api/health || { echo "::error::打包产物启动失败"; exit 1; }
           kill $APP_PID
+
+      # dmg 只能从 app-image 转：直接 --type dmg 时 jpackage 会把中间 .app 删掉，
+      # 之后既没法冒烟测试也没法 zip。所以固定走"先 app-image，测完再转 dmg"。
+      - name: macOS 转 dmg
+        if: runner.os == 'macOS'
+        run: |
+          jpackage --type dmg --name JobPilot --app-version 1.0.0 \
+            --app-image build/dist/JobPilot.app --dest build/dist
+          rm -rf build/dist/JobPilot.app
 
       - name: Windows 产物打 zip
         if: runner.os == 'Windows'
