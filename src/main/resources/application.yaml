@@ -1,0 +1,47 @@
+spring:
+  application:
+    name: jobpilot
+  datasource:
+    url: jdbc:sqlite:./db/jobpilot.db
+    driver-class-name: org.sqlite.JDBC
+    hikari:
+      maximum-pool-size: 5
+      connection-test-query: SELECT 1
+  output:
+    ansi:
+      enabled: always
+
+server:
+  port: 9527
+
+logging:
+  level:
+    root: INFO
+    com.jobpilot: DEBUG
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
+  file:
+    name: ./target/logs/jobpilot.log
+  logback:
+    rollingpolicy:
+      max-history: 30
+      max-file-size: 10MB
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    banner: false
+    db-config:
+      db-type: sqlite
+
+# 卡密校验配置
+# enabled=false 时完全跳过校验（自用模式）
+# api-base 指向 license-server 部署后的地址，例如 https://jobpilot-license.xxx.workers.dev
+license:
+  enabled: true
+  api-base: ""
+  card-key: ""
+  verify-interval-minutes: 10
+  grace-hours: 72
+  fail-open: false

@@ -1,0 +1,26 @@
+name = "jobpilot-license"
+main = "src/index.ts"
+compatibility_date = "2026-09-01"
+
+# 自定义域名（国内网络比 workers.dev 稳；dpdns.org 是 CF 代理的免费域名）
+# 注意：routes 必须放在所有 [[d1_databases]] / [[kv_namespaces]] 表格之前，
+# 否则会被 TOML 当成上一个表格的字段而静默失效。
+routes = [
+  { pattern = "jobpilot.better999.dpdns.org", custom_domain = true }
+]
+
+# 静态资源：激活页 hosted 在这个域名下（public/ 目录）。
+# 带 main 时，未命中静态文件的请求才会进 Worker，所以 /api/... /admin/... 不受影响。
+assets = { directory = "./public" }
+
+# 自定义域名存在时 wrangler 会默认关掉 workers.dev，这里显式保留两个入口都可用
+workers_dev = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "jobpilot-license"
+database_id = "65f9e271-43f6-4032-88ff-1d45d563be45"
+
+[[kv_namespaces]]
+binding = "RATE_LIMIT"
+id = "8560e1266b05425abba499947e150775"

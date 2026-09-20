@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JobPilot 卡密激活</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: #f5f6f8; color: #1f2329; min-height: 100vh;
+    display: flex; align-items: center; justify-content: center; padding: 24px;
+  }
+  .card {
+    background: #fff; border-radius: 12px; padding: 32px; width: 100%; max-width: 460px;
+    box-shadow: 0 2px 12px rgba(0,0,0,.06);
+  }
+  h1 { font-size: 20px; margin-bottom: 4px; }
+  .sub { font-size: 13px; color: #8a8f99; margin-bottom: 24px; }
+  .state {
+    display: inline-block; padding: 4px 12px; border-radius: 999px;
+    font-size: 13px; font-weight: 600; margin-bottom: 16px;
+  }
+  .state.ok { background: #e8f5e9; color: #2e7d32; }
+  .state.warn { background: #fff3e0; color: #e65100; }
+  .state.bad { background: #ffebee; color: #c62828; }
+  .msg { font-size: 14px; color: #4e5560; margin-bottom: 20px; line-height: 1.6; }
+  .info { font-size: 13px; color: #4e5560; background: #f7f8fa; border-radius: 8px;
+          padding: 12px 14px; margin-bottom: 20px; line-height: 1.8; }
+  .info b { color: #1f2329; }
+  label { display: block; font-size: 13px; color: #4e5560; margin-bottom: 6px; }
+  input {
+    width: 100%; padding: 10px 12px; border: 1px solid #d5d8de; border-radius: 8px;
+    font-size: 14px; letter-spacing: 1px; margin-bottom: 14px; outline: none;
+  }
+  input:focus { border-color: #3370ff; }
+  .row { display: flex; gap: 10px; }
+  button {
+    flex: 1; padding: 10px 0; border: none; border-radius: 8px; font-size: 14px;
+    cursor: pointer; background: #3370ff; color: #fff;
+  }
+  button.secondary { background: #f0f1f3; color: #4e5560; }
+  button:disabled { opacity: .6; cursor: default; }
+  .toast { font-size: 13px; margin-top: 14px; min-height: 20px; }
+  .toast.err { color: #c62828; }
+  .toast.ok { color: #2e7d32; }
+  details { margin-bottom: 20px; font-size: 13px; color: #8a8f99; }
+  details summary { cursor: pointer; }
+  .api-row { display: flex; gap: 8px; margin-top: 10px; }
+  .api-row input { letter-spacing: 0; font-size: 13px; margin-bottom: 0; }
+  .api-row button { flex: 0 0 72px; padding: 8px 0; font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>JobPilot 卡密激活</h1>
+  <div class="sub">输入卡密即可使用全部功能 · 一卡一机 · 支持有限次换绑</div>
+
+  <span id="state" class="state bad">加载中…</span>
+  <div id="msg" class="msg"></div>
+  <div id="info" class="info" style="display:none"></div>
+
+  <label for="cardKey">卡密（形如 GK-XXXX-XXXX-XXXX-XXXX）</label>
+  <input id="cardKey" placeholder="GK-XXXX-XXXX-XXXX-XXXX" autocomplete="off">
+  <div class="row">
+    <button id="btnActivate">激活</button>
+    <button id="btnUnbind" class="secondary">解绑本机</button>
+  </div>
+  <div id="toast" class="toast"></div>
+
+  <details>
+    <summary>连不上？点这里设置后端地址</summary>
+    <div class="api-row">
+      <input id="apiBase" placeholder="http://localhost:9527" autocomplete="off">
+      <button id="btnSaveApi" class="secondary">保存</button>
+    </div>
+  </details>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+// 后端地址优先级：URL ?api= 参数 > 本地存储 > 页面托管位置
+// 页面由本机后端托管（localhost:9527）时用同源；托管在 CF 上时默认指向本机后端
+const params = new URLSearchParams(location.search);
+const servedByBackend = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname) && location.port === '9527';
+let apiBase = params.get('api')
+  || localStorage.getItem('jobpilot.api')
+  || (servedByBackend ? location.origin : 'http://localhost:9527');
+
+function base() {
+  if (apiBase) return apiBase.replace(/\/+$/, '');
+  return location.origin;
+}
+
+const STATE_TEXT = {
+  OFF: ['ok', '自用模式'],
+  UNACTIVATED: ['bad', '未激活'],
+  ACTIVE: ['ok', '已激活'],
+  GRACE: ['warn', '宽限期'],
+  EXPIRED: ['bad', '已到期'],
+  REVOKED: ['bad', '已失效'],
+  NETWORK_BLOCKED: ['bad', '服务端不可达']
+};
+
+async function refresh() {
+  try {
+    const res = await fetch(base() + '/api/license/status');
+    const json = await res.json();
+    render(json.data);
+  } catch (e) {
+    $('state').className = 'state bad';
+    $('state').textContent = '无法连接本地服务';
+    $('msg').textContent = '请确认 JobPilot 已在本机启动，并在下方"后端地址"里确认地址（默认 http://localhost:9527）。';
+  }
+}
+
+function render(s) {
+  if (!s) return;
+  const [cls, text] = STATE_TEXT[s.state] || ['bad', s.state];
+  $('state').className = 'state ' + cls;
+  $('state').textContent = text + (s.allowed ? '' : '（投递已拦截）');
+  $('msg').textContent = s.message || '';
+
+  const lines = [];
+  if (s.cardKeyMasked) lines.push('卡密：<b>' + s.cardKeyMasked + '</b>');
+  if (s.type === 'time' || s.type === 'trial') {
+    lines.push('剩余天数：<b>' + (s.remainingDays ?? '-') + '</b> 天');
+    if (s.expiresAt) lines.push('到期时间：<b>' + s.expiresAt.replace('T', ' ').slice(0, 16) + '</b>');
+  }
+  if (s.type === 'quota') {
+    lines.push('剩余次数：<b>' + (s.quotaRemaining ?? '-') + '</b> / ' + (s.quotaTotal ?? '-'));
+  }
+  if (lines.length) {
+    $('info').innerHTML = lines.join('<br>');
+    $('info').style.display = 'block';
+  } else {
+    $('info').style.display = 'none';
+  }
+}
+
+function toast(text, ok) {
+  $('toast').textContent = text;
+  $('toast').className = 'toast ' + (ok ? 'ok' : 'err');
+}
+
+async function activate() {
+  const cardKey = $('cardKey').value.trim();
+  if (!cardKey) return toast('请先输入卡密', false);
+  $('btnActivate').disabled = true;
+  try {
+    const res = await fetch(base() + '/api/license/activate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cardKey })
+    });
+    const json = await res.json();
+    if (json.success) { toast('激活成功', true); $('cardKey').value = ''; }
+    else toast(json.message || '激活失败', false);
+    if (json.data) render(json.data);
+  } catch (e) {
+    toast('请求失败：' + e.message, false);
+  } finally {
+    $('btnActivate').disabled = false;
+  }
+}
+
+async function unbind() {
+  if (!confirm('解绑后本机将无法投递，且会消耗一次换绑次数（终身 3 次、每次冷却 7 天）。确定解绑？')) return;
+  try {
+    const res = await fetch(base() + '/api/license/unbind', { method: 'POST' });
+    const json = await res.json();
+    toast(json.success ? '已解绑' : (json.message || '解绑失败'), json.success);
+    if (json.data) render(json.data);
+  } catch (e) {
+    toast('请求失败：' + e.message, false);
+  }
+}
+
+$('btnActivate').onclick = activate;
+$('btnUnbind').onclick = unbind;
+$('cardKey').addEventListener('keydown', (e) => { if (e.key === 'Enter') activate(); });
+$('apiBase').value = base();
+$('btnSaveApi').onclick = () => {
+  const v = $('apiBase').value.trim().replace(/\/+$/, '');
+  if (!v) { toast('请填写后端地址，如 http://localhost:9527', false); return; }
+  apiBase = v;
+  localStorage.setItem('jobpilot.api', v);
+  toast('后端地址已保存', true);
+  refresh();
+};
+refresh();
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>

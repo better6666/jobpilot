@@ -1,0 +1,9 @@
+.gradle/
+build/
+db/
+*.db
+target/
+node_modules/
+.wrangler/
+.dev.vars
+.DS_Store
