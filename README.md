@@ -96,8 +96,13 @@ curl -X POST http://localhost:9527/api/license/activate \
   -H 'Content-Type: application/json' \
   -d '{"cardKey":"<上一步返回的卡号>"}'
 
-# 3. 未激活时投递入口返回 402；激活后放行
+# 3. 门禁行为：任意平台的 /api/<平台>/start 投递入口，
+#    未激活时返回 402（连端点没实现都会被拦住，不会漏成 404）；
+#    激活后穿过门禁——当前投递引擎还没移植（P1），所以是 404，属预期
 curl -X POST http://localhost:9527/api/boss/start
+
+# 4. 解绑：释放设备占用（服务端终身 3 次、每次冷却 7 天）
+curl -X POST http://localhost:9527/api/license/unbind
 ```
 
 想让本机后端连线上 Worker（而不是本地 8787），启动时加：
@@ -107,6 +112,18 @@ curl -X POST http://localhost:9527/api/boss/start
 ```
 
 这条链路已实测：CF 发卡 → 本机后端激活 → 门禁放行 → 托管在 CF 的激活页跨域读到本机状态。
+
+### 4. 测试
+
+```bash
+./gradlew test        # Java 侧 30 个单测：门禁过滤器 + 授权状态机 + 控制器入参校验
+npm test              # license-server 侧：卡密生成/时长等纯逻辑
+npm run typecheck     # Worker 侧 tsc --noEmit
+```
+
+Java 测试全部用 Mockito 顶掉 ConfigService 与 LicenseClient，不连数据库、不发网络请求，
+覆盖的关键路径：未激活 402 拦截、激活成功落库、服务端拒绝（REVOKED/EXPIRED 映射）、
+服务端不可达的宽限判定（GRACE vs NETWORK_BLOCKED）、解绑、心跳边界、fail-open。
 
 ## 四、部署卡密服务端到 Cloudflare
 
@@ -194,8 +211,10 @@ npx wrangler deploy
 ### P5 打包分发
 
 - `./gradlew bootJar` 产出可执行 jar
-- 配 JRE 打双平台包（macOS / Windows）
+- 用 jlink 裁剪 JRE（实测 Corretto 21 + `java.base,java.sql,java.net.http,jdk.crypto.ec` 约 36MB），
+  再 jpackage 打双平台包（macOS / Windows），用户双击即用、不用装 JDK
 - 首次启动向导：填 api-base → 激活 → 开始投递
+- 端口被占用时自动顺延（今天联调踩过：9527 被旧进程占着就直接启动失败，这是售后第一大坑）
 
 ## 七、目录结构
 
@@ -204,9 +223,11 @@ jobpilot/
 ├── build.gradle.kts              # 依赖与构建
 ├── src/main/java/com/jobpilot/
 │   ├── JobPilotApplication.java  # 入口（启动前建 db 目录）
-│   ├── common/                   # 统一响应体
+│   ├── common/                   # 统一响应体、跨域过滤器
 │   ├── system/                   # 配置表、建表、健康检查、路径
 │   └── license/                  # 卡密：校验、门禁、控制器、激活页数据
+├── src/test/java/com/jobpilot/
+│   └── license/                  # 门禁 / 状态机 / 控制器单测（Mockito，不连库不发网请求）
 ├── src/main/resources/
 │   ├── application.yaml
 │   └── static/license.html       # 用户激活页
