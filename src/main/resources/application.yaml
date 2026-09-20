@@ -48,3 +48,13 @@ license:
   verify-interval-minutes: 10
   grace-hours: 72
   fail-open: false
+
+# 浏览器自动化（Boss 投递）
+# headless 必须 false：扫码登录、滑块验证都要真人看窗口
+# channel=chrome 用本机 Chrome（反检测最好）；留空则用 playwright 自带 chromium
+browser:
+  headless: false
+  slow-mo-ms: 50
+  channel: chrome
+  width: 1440
+  height: 900

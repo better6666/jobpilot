@@ -118,7 +118,7 @@ curl -X POST http://localhost:9527/api/license/unbind
 ### 4. 测试
 
 ```bash
-./gradlew test        # Java 侧 30 个单测：门禁过滤器 + 授权状态机 + 控制器入参校验
+./gradlew test        # Java 侧 84 个单测：门禁过滤器 + 授权状态机 + 控制器入参校验 + 启动链路
 npm test              # license-server 侧：卡密生成/时长等纯逻辑
 npm run typecheck     # Worker 侧 tsc --noEmit
 ```
@@ -126,6 +126,10 @@ npm run typecheck     # Worker 侧 tsc --noEmit
 Java 测试全部用 Mockito 顶掉 ConfigService 与 LicenseClient，不连数据库、不发网络请求，
 覆盖的关键路径：未激活 402 拦截、激活成功落库、服务端拒绝（REVOKED/EXPIRED 映射）、
 服务端不可达的宽限判定（GRACE vs NETWORK_BLOCKED）、解绑、心跳边界、fail-open。
+
+`JobPilotApplicationStartTest` 是唯一真起一遍 Spring 容器的用例（数据目录用系统属性指到
+临时目录，不碰真库），盯的是"配置端口被占用时应用照样起来并换端口"——这个行为以前只在
+生产环境暴露过，回归了也只能从用户那句"打不开"里发现。
 
 ## 四、部署卡密服务端到 Cloudflare
 
@@ -188,12 +192,27 @@ npx wrangler deploy
 - 投递入口门禁（未激活 402）
 - 激活页 license.html
 
-### P1 单平台跑通（Boss 直聘）⬅️ 当前阶段
+### P1 单平台跑通（Boss 直聘）✅ 已完成（2026-09-20 实机验证通过）
 
-- 移植 Playwright 驱动层（patchright driver 装配，见旧工程 build.gradle.kts 的做法）
-- Boss 平台：登录态复用 → 岗位列表 → JD 抓取 → 投递动作
-- 投递记录落 SQLite（复用 config 表同库，新建 deliveries 表）
-- 管理页最小可用版（先 license.html 风格的单页，不上 Next.js）
+- 移植 Playwright 驱动层：patchright driver 装配（`installPatchrightDriver` 任务 npm 装包 → 拷到 `build/patchright-driver/package` → `playwright.cli.dir` 指向它），单线程 dispatcher 保证 Playwright 调用不跨线程
+- Boss 平台：登录态复用（读 `bst` cookie，免扫码）→ 搜索页无限滚动加载 → 逐个点卡片拦 `/wapi/zpgeek/job/detail.json` 拿结构化数据 → 详情页「立即沟通」→ 处理「已向BOSS发送消息」确认框 → 聊天页输入打招呼语 → 发送
+- 投递记录落 SQLite：`deliveries` 表（同库），(platform, encrypt_id, encrypt_user_id) 唯一索引兜底去重；已投递才拦截，预演/失败可重跑
+- 打分过滤：职位/学历黑名单一票否决 + 关键词分组加减分，阈值可配（规则从旧工程 SCORE_RULES 移植，JSON 存 config 表）
+- 管理页最小可用版：`boss.html` 单页（license.html 风格）——状态徽章、计数器、配置表单、实时日志、投递记录表；启动/停止按钮；预演模式默认开
+
+实机验证结论（macOS，真实 Chrome + 真实账号）：
+
+- 未激活时 `POST /api/boss/start` 返回 402；本地卡密服务激活后放行
+- 免扫码登录自动识别；搜索页 300 个岗位全部加载；卡片详情全部拦到
+- 预演模式：5 个岗位全部记 `预演`，零真实发送
+- 真实模式：2 个岗位成功发出打招呼语并记 `已投递`；去重正确跳过已处理岗位
+
+实机验证逼出来的四个坑（改这段代码前先读，都已写进代码注释）：
+
+1. **点「立即沟通」后的确认框**：框里真正的「继续沟通」是 `A.btn-startchat`，必须按**自身文本**精确匹配点。对话框文字会渗进页面大容器 div，用包含匹配（`:has-text`）会先点到容器，等于点遮罩——框关了但聊天页没打开
+2. **已聊过的岗位按钮是「继续沟通」不是「立即沟通」**，按钮识别两种都要认
+3. **列表第一个卡片默认选中态**，直接点不触发详情接口，必须先点第二个再切回——且这与 `maxJobsPerKeyword` 无关，只跑 1 个岗位时同样要热身，否则必然超时
+4. **服务端任何拒绝都不能挡住启动**：缓存 token 失效、api-base 配错，一律降级成未激活态让用户换卡（历史上有两次这类崩溃）
 
 ### P2 其余平台
 
@@ -215,15 +234,26 @@ npx wrangler deploy
 - `./gradlew bootJar` 产出可执行 jar
 - 用 jlink 裁剪 JRE + jpackage 打双平台包（macOS dmg / Windows app-image），用户双击即用、不用装 JDK
 - 首次启动向导：填 api-base → 激活 → 开始投递
-- 端口被占用时自动顺延（联调踩过：9527 被旧进程占着就直接启动失败，这是售后第一大坑）
+- 端口被占用时自动顺延，启动后自动开一个像软件的窗口（联调踩过：9527 被旧进程占着就直接启动失败，且没有窗口、不打开浏览器，用户看到的就是"双击了没反应"，这是售后第一大坑）
 
-**本地已验证**（macOS 侧全链路实跑通过）：jlink 裁剪运行时 52MB，jpackage 打出的 .app 共 90MB，1.3 秒启动，健康检查/建表/授权接口全部正常。CI 用 `.github/workflows/build.yml` 在 macos-latest 与 windows-latest 上自动出包并做冒烟测试，tag 推送时自动附到 Release。
+**本地已验证**（macOS 侧全链路实跑通过）：jlink 裁剪运行时 52MB，jpackage 打出的 .app 共 134MB（driver-bundle 只留当前平台 node，瘦身约 170MB），启动后从 jar 内嵌资源解压 patchright driver 1.62.1 + node v24.19.0 到用户数据目录，真机启动系统 Chrome 成功；健康检查/建表/授权接口/根路径跳转全部正常。端口三种场景都从 dmg 装机后实跑过：9527 被 Java 进程占着时自动改到 9528 并打开浏览器、9527 被只绑 0.0.0.0 的进程占着时同样顺延、9527 空闲时原样用 9527。CI 用 `.github/workflows/build.yml` 在 macos-latest 与 windows-latest 上自动出包并做冒烟测试（含 driver/node 解压校验），tag 推送时自动附到 Release。
 
-打包时固化的三个坑（改流程前先读）：
+打包时固化的坑（改流程前先读）：
 
 1. **jdeps 对 Spring Boot fat jar 会漏报模块**——它看不进 `BOOT-INF/lib` 里的嵌套 jar，只报 `java.base,java.net.http`，实际缺 `java.desktop`（java.beans）和 `java.instrument`（Tomcat），打出来的包启动即崩。模块清单只能靠实跑验证
 2. **jpackage 输入目录里只能放 fat jar 一个文件**——plain jar 同时在目录里时，两条 classpath 在 cfg 里互相覆盖（properties 后 key 覆盖前 key），最终类路径只剩空壳
-3. **Spring Boot fat jar 的主类是 `JarLauncher`**，不是业务类，指定 `--main-class` 会直接报 ClassNotFoundException
+3. **Spring Boot fat jar 的主类是 `JarLauncher`**，不是业务类，指定 `--main-class` 会直接报 ClassNotFoundException（不指定时 jpackage 会读 manifest 自己找对）
+4. **fat jar 不能用 `java.util.zip` 重写**——为了给 driver-bundle 瘦身试过重打包 fat jar，zip 结构明明完好（`unzip -t` 通过）但 Spring Boot loader 再也读不到 `BOOT-INF/lib`，表现为 `NoClassDefFoundError: org/slf4j/LoggerFactory`。裁剪必须发生在 bootJar 之前：现在是 `trimDriverBundle` 任务产出单平台版 jar，从 `runtimeClasspath` 里顶掉全量的那个
+5. **playwright 认 node 只认 `<driverDir>/node`**——不看 PATH，patchright 的 npm 包里也没有 node，用户机器更不会装。所以 fat jar 里必须带 driver-bundle，首次启动把当前平台那份 node 解压到 driver 目录旁边（`PlaywrightDriverSupport.ensureNodeExecutable`）；解压不出来就宁可不认领这个 driver，否则启动浏览器时报 `Exec failed, error: 2`
+6. **`cli.js` 是占位文件时 driver 起来就退**——报 `Failed to read message from driver, pipe closed`，没有任何有用信息。装配 driver 目录后要确认 `package/cli.js` 是真身（几百字节，`node package/cli.js` 有正常退出码）；曾经被单测写进一个 12 字节的假 cli.js 污染过开发态 driver 目录，测试因此改为走 `playwright.cli.dir` 指向临时目录，不碰真实 driver
+7. **`SpringApplication.run(Class, String...)` 是静态方法**——`app.addListeners(...)` 之后写 `app.run(Xxx.class, args)` 编译不报错，但静态的那个会另起一个 `SpringApplication`，前面注册的监听器被整个丢掉。表现为"端口顺延没生效、启动后不打开浏览器、双击什么都不发生"，而且日志里毫无异常。要调实例方法 `app.run(args)`。这条由 `JobPilotApplicationStartTest` 兜底：它真起一遍应用并断言端口被占时照样起来
+8. **端口顺延要在 Web 服务器绑定之前动手**——监听 `ApplicationEnvironmentPreparedEvent`，往 `Environment` 里 `addFirst` 一个 `server.port`；等 Tomcat 起来了再改就晚了。探测要"绑通配地址 + 连 127.0.0.1"两步：只绑通配地址的话，macOS 上 Java 的通配绑定会落到双栈 IPv6 socket，只绑 `0.0.0.0` 或只绑 `127.0.0.1` 的进程它一律探不到（两边都 listen、谁都连不上），所以补一个到 `127.0.0.1:<port>` 的连接探测。**但不能顺带探 `::1`**：开着代理/VPN 的 mac 上连一个肯定没人监听的 `::1` 端口也连得通（连接被中间层接走，接着 read 超时），每个端口都误报"被占用"，顺延逻辑整个失效——比漏探严重得多，而且日志里看不出来。`PortFallbackListenerTest` 对通配/回环两种占用者各有一个用例兜底
+
+启动链路还有一处和端口相关：前端页面靠"是不是本机后端托管"决定 API 地址，判断条件不能带端口号（顺延后端口会变），且同源要优先于 `localStorage` 里存过的旧地址，否则会连到别的进程上。
+
+界面是本地网页，没有原生窗口，所以启动后用 Chrome 的**应用模式**（`--app=`）打开：没有地址栏、没有标签页，有独立的 Dock 图标，看起来就是原生软件而不是"一个网站"。程序本来就要求本机装着 Chrome（`channel=chrome` 做反检测），不引入新依赖；它走用户自己的默认 profile，和自动化那边 `<数据目录>/browser-data` 的独立 profile 互不干扰。三处实测结论：`open` 必须带 `-n`（Chrome 已在运行时少了 `-n` 只把已有窗口翻到前面，不新开窗口）；`--window-size` 对应用窗口无效（传 900x600 照样开 1200x822）；`open -na` 找不到应用时退出码非 0，据此回落到默认浏览器。想退回老行为设 `jobpilot.app-window=false`，彻底不打开设 `jobpilot.open-page=false`。
+
+9. **冒烟测试必须离开仓库根目录再启动打包产物**——driver 候选里有一项是"当前目录下的 `build/patchright-driver`"（开发态兜底），在仓库根目录启动会认领开发态 driver，node 就不会解压到用户数据目录，后面那句"driver 目录里没有解压出的 node"直接判失败。最终用户双击启动时的工作目录也不是仓库根目录，所以冒烟测试也 `cd` 到中性目录再拉起 `$APP`（路径随之改成绝对路径）
 
 Windows 侧两个预期问题：app-image 未签名会触发 SmartScreen"Windows 已保护你的电脑"（要么买代码签名证书，要么给图文指引教用户点"更多信息→仍要运行"）；Java + 浏览器自动化程序容易被杀毒软件误报。
 
@@ -232,18 +262,24 @@ Windows 侧两个预期问题：app-image 未签名会触发 SmartScreen"Windows
 ```
 jobpilot/
 ├── .github/workflows/build.yml  # CI：双平台打包 + 冒烟测试 + Release
-├── build.gradle.kts              # 依赖与构建
+├── build.gradle.kts              # 依赖与构建（含 patchright driver 装配任务）
 ├── src/main/java/com/jobpilot/
 │   ├── JobPilotApplication.java  # 入口（建用户数据目录、按平台设绝对路径）
 │   ├── common/                   # 统一响应体、跨域过滤器
 │   ├── system/                   # 配置表、建表、健康检查、路径
+│   ├── browser/                  # Playwright 驱动层：单线程 dispatcher、持久上下文
+│   ├── boss/                     # Boss 平台：驱动、编排、打分、选项、落库、管理页 API
 │   └── license/                  # 卡密：校验、门禁、控制器、激活页数据
 ├── src/test/java/com/jobpilot/
-│   ├── license/                  # 门禁 / 状态机 / 控制器单测
+│   ├── license/                  # 门禁 / 状态机 / 客户端健壮性 / 控制器单测
+│   ├── boss/                     # 打分 / URL 构造 / 详情解析 / 去重落库单测
 │   └── system/                   # 数据目录路径单测
 ├── src/main/resources/
 │   ├── application.yaml
-│   └── static/license.html       # 用户激活页
+│   ├── boss-options.json         # 374 城市 + 学历/经验/薪资等筛选项码表
+│   └── static/
+│       ├── license.html          # 用户激活页
+│       └── boss.html             # 投递管理页（配置/启动/日志/记录）
 └── license-server/               # CF Worker 卡密服务端（独立部署）
     ├── src/index.ts              # API：activate/verify/report/unbind + admin
     ├── src/lib/cards.ts          # 卡密生成等纯逻辑

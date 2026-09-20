@@ -56,14 +56,33 @@ public class LicenseClient {
     }
 
     /**
-     * @return 响应体 JSON；网络不可达返回 null，由调用方按宽限逻辑处理
+     * @return 响应体 JSON；网络不可达（未配置地址 / 地址非法 / 连不上）返回 null，
+     *         由调用方按宽限逻辑处理
      * @throws LicenseServerException 服务端返回了明确的业务错误
      */
     public JsonNode post(String apiBase, String path, Map<String, Object> body) {
-        String url = (apiBase == null ? "" : apiBase.replaceAll("/+$", "")) + path;
+        String base = apiBase == null ? "" : apiBase.trim();
+        if (base.isBlank()) {
+            log.warn("未配置 license.api-base，{} 请求跳过（按服务端不可达处理）", path);
+            return null;
+        }
+        URI uri;
+        try {
+            uri = URI.create(base.replaceAll("/+$", "") + path);
+        } catch (IllegalArgumentException e) {
+            log.warn("license.api-base 不是合法地址: {}（{}）", base, e.getMessage());
+            return null;
+        }
+        // "localhost:8787" 这种写法 URI.create 会把 localhost 解析成 scheme，
+        // 所以不能只查 scheme 是否为 null，必须白名单校验
+        String scheme = uri.getScheme();
+        if (scheme == null || (!scheme.equalsIgnoreCase("http") && !scheme.equalsIgnoreCase("https"))) {
+            log.warn("license.api-base 不是合法的 http(s) 地址: {}", base);
+            return null;
+        }
         try {
             String json = objectMapper.writeValueAsString(body);
-            HttpRequest request = HttpRequest.newBuilder(URI.create(url))
+            HttpRequest request = HttpRequest.newBuilder(uri)
                     .header("Content-Type", "application/json")
                     .timeout(Duration.ofSeconds(15))
                     .POST(HttpRequest.BodyPublishers.ofString(json))
@@ -83,7 +102,7 @@ public class LicenseClient {
                     error.path("message").asText("服务端返回 " + status));
         } catch (LicenseServerException e) {
             throw e;
-        } catch (IOException | InterruptedException e) {
+        } catch (IOException | InterruptedException | IllegalArgumentException e) {
             if (e instanceof InterruptedException) {
                 Thread.currentThread().interrupt();
             }

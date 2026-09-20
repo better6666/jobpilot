@@ -220,6 +220,34 @@ class LicenseServiceTest {
     }
 
     @Test
+    void 启动时缓存token被服务端拒绝时降级REVOKED不挡住启动() {
+        LicenseRecord record = recordWithToken();
+        record.setLastVerifyOkAt(Instant.now());
+        givenStoredRecord(record);
+        when(licenseClient.post(eq(API_BASE), eq("/verify"), anyMap()))
+                .thenThrow(new LicenseClient.LicenseServerException(401, "TOKEN_INVALID", "激活信息无效，请重新激活"));
+
+        // 直接调用即断言：抛异常会让测试失败
+        service.init();
+
+        assertEquals(LicenseState.REVOKED, service.status().getState());
+        assertFalse(service.isAllowed());
+        assertEquals("激活信息无效，请重新激活", service.status().getMessage());
+    }
+
+    @Test
+    void 心跳时token被服务端拒绝时降级REVOKED不抛异常() {
+        givenStoredRecord(recordWithToken());
+        when(licenseClient.post(eq(API_BASE), eq("/verify"), anyMap()))
+                .thenThrow(new LicenseClient.LicenseServerException(401, "TOKEN_INVALID", "激活信息无效，请重新激活"));
+
+        service.heartbeat();
+
+        assertEquals(LicenseState.REVOKED, service.status().getState());
+        assertFalse(service.isAllowed());
+    }
+
+    @Test
     void 解绑成功后清除token回到未激活() throws Exception {
         givenStoredRecord(recordWithToken());
         when(licenseClient.post(eq(API_BASE), eq("/unbind"), anyMap()))

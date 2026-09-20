@@ -7,3 +7,10 @@ node_modules/
 .wrangler/
 .dev.vars
 .DS_Store
+
+# 密钥与用户数据：一个都不能进公开仓库
+.env
+*.pem
+cookies/
+browser-data/
+resume.jpg

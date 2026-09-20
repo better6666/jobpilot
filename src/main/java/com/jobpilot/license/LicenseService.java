@@ -50,7 +50,13 @@ public class LicenseService {
         }
         LicenseRecord record = load();
         if (record != null && notBlank(record.getToken())) {
-            doVerify(record);
+            try {
+                doVerify(record);
+            } catch (LicenseClient.LicenseServerException e) {
+                // 服务端说 token 失效（换过库/卡被作废）不能挡住启动，
+                // 降级成未激活态，用户在激活页重新填卡即可
+                publish(mapServerCode(e.getCode()), e.getMessage(), record);
+            }
             return;
         }
         String cardKey = notBlank(properties.getCardKey())
@@ -114,7 +120,12 @@ public class LicenseService {
         if (record == null || !notBlank(record.getToken())) {
             return;
         }
-        doVerify(record);
+        try {
+            doVerify(record);
+        } catch (LicenseClient.LicenseServerException e) {
+            // 运行中卡被作废/换库：更新状态并放行拦截，但不影响应用其他功能
+            publish(mapServerCode(e.getCode()), e.getMessage(), record);
+        }
     }
 
     /** 解绑当前设备（服务端限次：终身 3 次、每次冷却 7 天） */

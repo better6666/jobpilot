@@ -51,21 +51,39 @@ jobs:
             --input build/stage --main-jar jobpilot-0.1.0.jar \
             --runtime-image build/runtime --dest build/dist
 
-      - name: 冒烟测试（打包产物真跑一次，打 /api/health）
+      - name: 冒烟测试（打包产物真跑一次：health + driver/node 解压 + 根路径跳转）
         shell: bash
         run: |
+          # 必须离开仓库根目录再启动：driver 候选里有一项是"当前目录下的
+          # build/patchright-driver"（开发态兜底），在仓库根目录启动会认领开发态
+          # driver，node 就不会解压到用户数据目录，后面的 node/cli.js 校验等于没验。
+          # 最终用户双击启动时的工作目录也不是仓库根目录，这样才贴合真实场景
+          cd "${RUNNER_TEMP:-/tmp}"
           if [ "$RUNNER_OS" = "macOS" ]; then
-            APP="build/dist/JobPilot.app/Contents/MacOS/JobPilot"
+            APP="$GITHUB_WORKSPACE/build/dist/JobPilot.app/Contents/MacOS/JobPilot"
+            NODE="$HOME/Library/Application Support/JobPilot/driver/node"
           else
-            APP="build/dist/JobPilot/JobPilot.exe"
+            APP="$GITHUB_WORKSPACE/build/dist/JobPilot/JobPilot.exe"
+            NODE="$APPDATA/JobPilot/driver/node.exe"
           fi
-          "$APP" --server.port=18080 --license.enabled=false &
+          rm -rf "$(dirname "$NODE")"
+          # open-page=false：CI 里不开浏览器窗口（跑在无头 runner 上，开了也没人看，
+          # 白等一轮子进程）。启动链路另由装机后的真机验证覆盖
+          "$APP" --server.port=18080 --license.enabled=false --jobpilot.open-page=false &
           APP_PID=$!
-          for i in $(seq 1 30); do
+          for i in $(seq 1 60); do
             curl -sf http://localhost:18080/api/health && break
             sleep 1
           done
           curl -sf http://localhost:18080/api/health || { echo "::error::打包产物启动失败"; exit 1; }
+          # 根路径必须跳到前端页而不是 404（回归过一次）
+          curl -sf -o /dev/null http://localhost:18080/ || { echo "::error::根路径不可达"; exit 1; }
+          # 打包版没有 node 也能跑：node 必须从 jar 里的 driver-bundle 解压出来
+          [ -x "$NODE" ] || { echo "::error::driver 目录里没有解压出的 node: $NODE"; exit 1; }
+          "$NODE" --version || { echo "::error::解压出的 node 跑不起来"; exit 1; }
+          # patchright 的 cli.js 必须是真身：npm 包里的 cli.js 只有 12 字节的占位
+          CLI="$(dirname "$NODE")/package/cli.js"
+          [ "$(wc -c < "$CLI")" -gt 100 ] || { echo "::error::cli.js 疑似占位文件: $CLI"; exit 1; }
           kill $APP_PID
 
       # dmg 只能从 app-image 转：直接 --type dmg 时 jpackage 会把中间 .app 删掉，

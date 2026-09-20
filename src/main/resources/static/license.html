@@ -80,13 +80,15 @@
 <script>
 const $ = (id) => document.getElementById(id);
 
-// 后端地址优先级：URL ?api= 参数 > 本地存储 > 页面托管位置
-// 页面由本机后端托管（localhost:9527）时用同源；托管在 CF 上时默认指向本机后端
+// 后端地址优先级：URL ?api= 参数 > 页面托管位置（本机后端）> 本地存储
+// 页面由本机后端托管时同源一定是对的（端口不一定是 9527：被占用会顺延），
+// 所以本地存储里存的旧地址不能盖过它，否则端口顺延后会连到别的进程上；
+// 托管在 CF 上时才轮到本地存储里手填的地址
 const params = new URLSearchParams(location.search);
-const servedByBackend = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname) && location.port === '9527';
+const servedByBackend = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
 let apiBase = params.get('api')
-  || localStorage.getItem('jobpilot.api')
-  || (servedByBackend ? location.origin : 'http://localhost:9527');
+  || (servedByBackend ? location.origin : localStorage.getItem('jobpilot.api'))
+  || 'http://localhost:9527';
 
 function base() {
   if (apiBase) return apiBase.replace(/\/+$/, '');
