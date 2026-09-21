@@ -47,9 +47,14 @@ jobs:
           cp build/libs/jobpilot-0.1.0.jar build/stage/
           # app-version 首段不能为 0：macOS dmg 打包器会直接拒（实测报
           # "The first number in an app-version cannot be zero or negative"）
+          # 卡密服务端地址烧进 cfg：装机版双击启动时没有地方传命令行参数，
+          # api-base 留空就连不上服务端，用户看到的永远是"未激活"。
+          # 系统属性优先级低于命令行参数，本地联调仍可用
+          # --license.api-base=http://127.0.0.1:8787 覆盖
           jpackage --type app-image --name JobPilot --app-version 1.0.0 \
             --input build/stage --main-jar jobpilot-0.1.0.jar \
-            --runtime-image build/runtime --dest build/dist
+            --runtime-image build/runtime --dest build/dist \
+            --java-options "-Dlicense.api-base=https://jobpilot.better999.dpdns.org"
 
       - name: 冒烟测试（打包产物真跑一次：health + driver/node 解压 + 根路径跳转）
         shell: bash

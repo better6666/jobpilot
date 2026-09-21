@@ -115,6 +115,14 @@ curl -X POST http://localhost:9527/api/license/unbind
 
 这条链路已实测：CF 发卡 → 本机后端激活 → 门禁放行 → 托管在 CF 的激活页跨域读到本机状态。
 
+**装机版的卡密服务端地址是烧进 `.app` 里的**（`Contents/app/JobPilot.cfg` 的 `java-options=-Dlicense.api-base=https://jobpilot.better999.dpdns.org`，由 jpackage 的 `--java-options` 写入）。双击启动没有传参的地方，api-base 留空就连不上服务端，用户看到的永远是"未激活"——所以出厂必须带生产地址。系统属性优先级**低于**命令行参数，本地联调照样能覆盖：
+
+```bash
+"/Applications/JobPilot.app/Contents/MacOS/JobPilot" --license.api-base=http://127.0.0.1:8787
+```
+
+验证装机版连的是哪一端，用一张**只存在于本地库**的卡去激活：连本地会拿到 `DEVICE_LIMIT`（卡在本地、已绑过），连生产会拿到 `CARD_NOT_FOUND`。两种错误码不同，一看就知道。
+
 ### 4. 测试
 
 ```bash
