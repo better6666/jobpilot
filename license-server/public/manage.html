@@ -74,6 +74,13 @@
     font-size: 13px; color: #4e5560; line-height: 1.8; white-space: pre-wrap;
   }
   .reply b { color: #1f2329; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .chips span {
+    background: #f0f6ff; color: #1f4fd8; border: 1px solid #cfe0ff; border-radius: 6px;
+    padding: 3px 10px; font-size: 12px; cursor: pointer; font-family: ui-monospace, monospace;
+  }
+  .chips span:hover { background: #e0ecff; }
+  .chips span.on { background: #3370ff; color: #fff; border-color: #3370ff; }
 </style>
 </head>
 <body>
@@ -187,8 +194,17 @@
       </div>
       <div class="field">
         <label for="aiModel">模型名</label>
-        <input id="aiModel" type="text" placeholder="deepseek-chat / gpt-4o-mini" autocomplete="off">
-        <div class="hint">三项填全才算配好；缺任何一项，客户那边会看到"平台没开 AI 中转"并引导去用自己的接口。</div>
+        <div class="row">
+          <input id="aiModel" type="text" placeholder="deepseek-chat / gpt-4o-mini" autocomplete="off"
+                 style="flex:1;min-width:260px">
+          <button id="btnAiModels" class="secondary small" type="button">拉取模型</button>
+        </div>
+        <div class="hint">
+          三项填全才算配好；缺任何一项，客户那边会看到"平台没开 AI 中转"并引导去用自己的接口。
+          不想手打模型名就点「拉取模型」——用上面刚填的地址和 Key 去中转站问一份，点一下直接填入，
+          地址和 Key 不用先保存。
+        </div>
+        <div id="aiModelChips" class="chips"></div>
       </div>
       <div class="row">
         <button id="btnAiSave">保存</button>
@@ -572,8 +588,53 @@ async function testAiSettings() {
   }
 }
 
+/**
+ * 拉中转站的模型列表。地址和 Key 用输入框里当前的值——用户常常是刚敲完
+ * 就想看有哪些模型，这时候库里存的还是旧的（甚至是空的）。
+ * Key 只在这次请求里带，服务端不会把它回显出来。
+ */
+async function fetchAiModels() {
+  const body = {};
+  if ($('aiBaseUrl').value.trim()) body.base_url = $('aiBaseUrl').value.trim();
+  if (aiKeyEdited && $('aiApiKey').value.trim()) body.api_key = $('aiApiKey').value.trim();
+
+  $('btnAiModels').disabled = true;
+  $('aiModelChips').innerHTML = '';
+  try {
+    const json = await admin('/admin/ai/models', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    const d = json.data || {};
+    if (!d.ok || !d.models || !d.models.length) {
+      toast($('aiToast'), d.error || '没拉到任何模型', false);
+      return;
+    }
+    const current = $('aiModel').value.trim();
+    const box = $('aiModelChips');
+    for (const m of d.models) {
+      const chip = document.createElement('span');
+      chip.textContent = m;
+      chip.title = '点击填入模型名';
+      if (m === current) chip.className = 'on';
+      chip.onclick = () => {
+        $('aiModel').value = m;
+        for (const c of box.children) c.className = c === chip ? 'on' : '';
+      };
+      box.appendChild(chip);
+    }
+    toast($('aiToast'), '拉到 ' + d.models.length + ' 个模型，点一下填入', true);
+  } catch (e) {
+    toast($('aiToast'), e.message, false);
+  } finally {
+    $('btnAiModels').disabled = false;
+  }
+}
+
 $('btnAiSave').onclick = saveAiSettings;
 $('btnAiTest').onclick = testAiSettings;
+$('btnAiModels').onclick = fetchAiModels;
 $('aiApiKey').addEventListener('input', () => { aiKeyEdited = true; });
 $('btnAiClearKey').onclick = () => {
   $('aiApiKey').value = '';

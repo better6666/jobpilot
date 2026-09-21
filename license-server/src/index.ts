@@ -8,7 +8,12 @@ import {
   addDays,
   daysLeft
 } from './lib/cards'
-import { normalizeRelayBaseUrl, maskKey } from './lib/relay'
+import {
+  normalizeRelayBaseUrl,
+  maskKey,
+  modelListPaths,
+  parseModelList
+} from './lib/relay'
 
 export interface Env {
   DB: D1Database
@@ -200,24 +205,7 @@ async function callRelay(
   }
   const body = await response.text()
   if (response.status < 200 || response.status >= 300) {
-    let detail = ''
-    try {
-      const parsed = JSON.parse(body) as { error?: { message?: string }; message?: string }
-      detail = parsed.error?.message ?? parsed.message ?? ''
-    } catch {
-      detail = body.length > 200 ? body.slice(0, 200) : body
-    }
-    const reason =
-      response.status === 401 || response.status === 403
-        ? '中转拒绝了（key 无效或没有该模型权限）'
-        : response.status === 404
-          ? '中转地址或模型不存在'
-          : response.status === 429
-            ? '中转限流'
-            : response.status >= 500
-              ? '中转服务端错误'
-              : '中转返回 ' + response.status
-    return { error: detail ? reason + '：' + detail : reason }
+    return { error: describeRelayStatus(response.status, body) }
   }
   try {
     const parsed = JSON.parse(body) as { choices?: { message?: { content?: string } }[] }
@@ -227,6 +215,80 @@ async function callRelay(
   } catch {
     return { error: '中转响应不是合法 JSON' }
   }
+}
+
+/**
+ * 拉中转站的模型列表，给管理页"模型名"用——填好地址和 Key 点一下就出列表，
+ * 不用去中转站文档里抄模型名再手打。
+ *
+ * <p>逐个路径试（见 {@link modelListPaths}）：各家中转站挂 /models 的位置
+ * 不统一，只试标准那条的话，一半的站会 404 然后用户以为 key 错了。
+ * 有一个路径返回得了非空列表就收工。
+ */
+async function listRelayModels(
+  baseUrl: string,
+  apiKey: string
+): Promise<{ models: string[] } | { error: string }> {
+  const paths = modelListPaths(baseUrl)
+  if (paths.length === 0) return { error: '中转地址没配或不是 http(s) 地址' }
+  if (!apiKey) return { error: 'API Key 没配' }
+
+  let lastError = ''
+  for (const path of paths) {
+    let response: Response
+    try {
+      response = await fetch(path, {
+        method: 'GET',
+        headers: { Authorization: 'Bearer ' + apiKey },
+        signal: AbortSignal.timeout(20000)
+      })
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      lastError = '连接中转失败或超时: ' + msg
+      continue
+    }
+    const body = await response.text()
+    if (response.status < 200 || response.status >= 300) {
+      // 404 只说明这个路径没有，换下一条；别的状态码是 key 或权限问题，
+      // 换路径也白搭，直接结束
+      if (response.status === 404) {
+        lastError = '该地址下没有 /models 接口'
+        continue
+      }
+      return { error: describeRelayStatus(response.status, body) }
+    }
+    let models: string[] = []
+    try {
+      models = parseModelList(JSON.parse(body))
+    } catch {
+      return { error: '中转响应不是合法 JSON' }
+    }
+    if (models.length > 0) return { models }
+    lastError = '中转没返回任何模型'
+  }
+  return { error: lastError || '没找到模型列表接口' }
+}
+
+/** 非 2xx 的中转响应翻成人话。和 callRelay 里的判断保持一套说法 */
+function describeRelayStatus(status: number, body: string): string {
+  let detail = ''
+  try {
+    const parsed = JSON.parse(body) as { error?: { message?: string }; message?: string }
+    detail = parsed.error?.message ?? parsed.message ?? ''
+  } catch {
+    detail = body.length > 200 ? body.slice(0, 200) : body
+  }
+  const reason =
+    status === 401 || status === 403
+      ? '中转拒绝了（key 无效或没有该模型权限）'
+      : status === 404
+        ? '中转地址或模型不存在'
+        : status === 429
+          ? '中转限流'
+          : status >= 500
+            ? '中转服务端错误'
+            : '中转返回 ' + status
+  return detail ? reason + '：' + detail : reason
 }
 
 // ---------------------------------------------------------------- 应用
@@ -662,6 +724,29 @@ app.post('/admin/ai/test', async (c) => {
     return ok({ ok: false, error: result.error, base_url: baseUrl })
   }
   return ok({ ok: true, reply: result.text, base_url: baseUrl, model })
+})
+
+/**
+ * 拉中转站的模型列表。和 /admin/ai/test 一样可以带临时覆盖值——用户刚把地址
+ * 和 Key 敲进去、还没保存时就想看有哪些模型可选，这时候库里还是旧的。
+ *
+ * <p>key 只在这个请求里用，响应里一个字符都不带回。
+ */
+app.post('/admin/ai/models', async (c) => {
+  const body = await c.req
+    .json<{ base_url?: string; api_key?: string }>()
+    .catch(() => null)
+  const existing = await getAiRelay(c.env.DB)
+  const baseUrl = normalizeRelayBaseUrl(body?.base_url ?? existing?.base_url ?? '')
+  const apiKey = (body?.api_key ?? existing?.api_key ?? '').trim()
+  if (!baseUrl || !apiKey) {
+    return ok({ ok: false, error: '地址 / Key 没填全，先填好再拉' })
+  }
+  const result = await listRelayModels(baseUrl, apiKey)
+  if ('error' in result) {
+    return ok({ ok: false, error: result.error, base_url: baseUrl })
+  }
+  return ok({ ok: true, models: result.models, base_url: baseUrl })
 })
 
 export default app

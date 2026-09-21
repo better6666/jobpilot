@@ -333,6 +333,7 @@ Windows 侧两个预期问题：app-image 未签名会触发 SmartScreen"Windows
 - `POST /api/ai/info`：客户端问"平台有没有开中转"，返回模型名或不可用原因；拿不到配置回 503
 - `POST /api/ai/chat`：客户端发 `{token, device_id, user, temperature}`，服务端验卡（卡被作废回 403）+ 限流（每卡 120 次/分，超了回 429）后调中转；中转没配回 503，中转本身报错回 502，客户端拿到失败一律退回固定话术
 - `GET/PUT /admin/settings` + `POST /admin/ai/test`：管理平台 `manage.html` 新增「平台 AI 中转配置」卡片，填地址/Key/模型，Key 只写不读（保存时留空 = 不动，点"清除 Key" = 删掉），能就地测一句真实生成
+- `POST /admin/ai/models`：模型名不用手打。用输入框里当前的地址和 Key 去中转站拉一份列表，点一下直接填入，地址和 Key 不用先保存。各家中转站挂 `/models` 的位置和返回形状都不统一，所以路径按"地址本身 → 去掉尾部 `/v1` → 同域名根"挨个试（404 就换下一条），形状认 `{data:[{id}]}` / `{data:["名"]}` / `{models:[...]}` / 顶层数组。兜底路径可能命中同域名下的另一套服务，所以拉到的列表仍要点过「测试连通」才算数
 - 客户端 `AiController`：`mode` 字段（`platform`/`custom`），旧配置（`mode` 为 null）按"客户自己填过地址和 key"判成 custom；`platformInfo` 负责把"没配中转""连不上服务端"翻成客户看得懂的话，`ai.html` 按模式显隐接口字段并实时重算状态徽章
 
 **本地已验证**（全链路实跑通过）：`wrangler dev --local` + `db:init` 建出 settings 表，`manage.html` 配上地址/Key/模型并测连通成功（Key 在列表里显示为打码形式），再起一个全新安装实例用真卡密激活：`/api/ai/config` 返回 `mode:"platform"`、`platformAvailable:true`、模型名正确，而地址/Key/模型三个字段全是空的——客户确实零配置。同一个实例 `/api/ai/test` 走平台代理拿到了中转返回的话术，页面"测试连接"显示"平台中转 / 模型名"。服务端各分支都单独打过：卡密缺失 400、卡密不对 401、卡被作废 403、没配中转 503。想自己复现这套联调，`license-server/README.md` 的"平台 AI 中转"一节写了怎么用一个假中转站在本地跑。
