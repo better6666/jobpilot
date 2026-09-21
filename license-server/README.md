@@ -36,6 +36,11 @@
 
 卡种：`time`（时长卡，激活即计时）/ `quota`（次数卡）/ `trial`（试用卡，每设备限一次）。
 
+`/report` 由客户端在每次**投递成功**后异步调用（异步是为了不拖慢投递节奏，
+失败会补报），预演和投递失败不计数。`quota_used` 加到 `quota_total` 就封顶，
+`/verify` 随后返回 403 `QUOTA_EXHAUSTED`，客户端据此把状态转成已到期并停掉跑批。
+时长卡/试用卡调这个接口会回 400 `NOT_QUOTA_CARD`，所以客户端对已知非次数卡的卡不发。
+
 > `public/index.html` 是 `../src/main/resources/static/license.html` 的副本，由 Worker 的
 > `assets` 配置托管。改激活页请改源文件后重新复制，别只改一份。
 

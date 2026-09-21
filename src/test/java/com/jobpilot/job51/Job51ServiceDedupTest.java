@@ -55,6 +55,9 @@ class Job51ServiceDedupTest {
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper =
             new com.fasterxml.jackson.databind.ObjectMapper();
 
+    @Mock
+    private LicenseService licenseService;
+
     private Job51Service service;
 
     @BeforeEach
@@ -69,7 +72,8 @@ class Job51ServiceDedupTest {
                 new Job51Options(new com.fasterxml.jackson.databind.ObjectMapper()),
                 new RunCoordinator(),
                 new GreetingService(new AiProperties(configService), new AiService(objectMapper), deliveryMapper,
-                        mock(LicenseService.class), new LicenseProperties()));
+                        licenseService, new LicenseProperties()),
+                licenseService);
     }
 
     private Job51JobCard card() {

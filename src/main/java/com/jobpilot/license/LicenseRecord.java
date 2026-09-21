@@ -28,4 +28,7 @@ public class LicenseRecord {
     private Long quotaTotal;
 
     private Long quotaRemaining;
+
+    /** 次数卡已用次数，来自 /report 的响应；时长卡恒为 null */
+    private Long quotaUsed;
 }

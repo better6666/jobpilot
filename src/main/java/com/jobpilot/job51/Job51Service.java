@@ -12,6 +12,7 @@ import com.jobpilot.delivery.LoginResult;
 import com.jobpilot.delivery.PlatformConfig;
 import com.jobpilot.delivery.ProgressListener;
 import com.jobpilot.delivery.RunCoordinator;
+import com.jobpilot.license.LicenseService;
 import com.jobpilot.delivery.ScoreResult;
 import com.microsoft.playwright.Page;
 import org.springframework.stereotype.Service;
@@ -38,8 +39,8 @@ public class Job51Service extends DeliveryService<Job51JobCard> {
 
     public Job51Service(Job51Properties properties, Job51Driver driver, DeliveryMapper mapper,
                         BrowserManager browserManager, Job51Options options, RunCoordinator coordinator,
-                        GreetingService greetingService) {
-        super(mapper, browserManager, coordinator, greetingService);
+                        GreetingService greetingService, LicenseService licenseService) {
+        super(mapper, browserManager, coordinator, greetingService, licenseService);
         this.properties = properties;
         this.driver = driver;
         this.options = options;

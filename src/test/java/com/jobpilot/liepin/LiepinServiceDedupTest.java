@@ -57,6 +57,9 @@ class LiepinServiceDedupTest {
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper =
             new com.fasterxml.jackson.databind.ObjectMapper();
 
+    @Mock
+    private LicenseService licenseService;
+
     private LiepinService service;
 
     @BeforeEach
@@ -72,7 +75,8 @@ class LiepinServiceDedupTest {
                 new LiepinOptions(new com.fasterxml.jackson.databind.ObjectMapper()),
                 new RunCoordinator(),
                 new GreetingService(new AiProperties(configService), new AiService(objectMapper), deliveryMapper,
-                        mock(LicenseService.class), new LicenseProperties()));
+                        licenseService, new LicenseProperties()),
+                licenseService);
     }
 
     private LiepinJobCard card() {

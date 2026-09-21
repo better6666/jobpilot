@@ -3,6 +3,7 @@ package com.jobpilot.delivery;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.jobpilot.ai.GreetingService;
 import com.jobpilot.browser.BrowserManager;
+import com.jobpilot.license.LicenseService;
 import com.microsoft.playwright.Page;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
@@ -44,17 +45,22 @@ public abstract class DeliveryService<C extends JobCard> {
     private final BrowserManager browserManager;
     private final RunCoordinator coordinator;
     private final GreetingService greetingService;
+    private final LicenseService licenseService;
 
     private volatile RunStatus status = RunStatus.idle();
     private volatile boolean stopRequested;
+    /** 已经因为"卡密不能用"停过一次了，避免每张卡片都打一行日志 */
+    private volatile boolean stoppedForLicense;
     private Future<?> currentRun;
 
     protected DeliveryService(DeliveryMapper mapper, BrowserManager browserManager,
-                              RunCoordinator coordinator, GreetingService greetingService) {
+                              RunCoordinator coordinator, GreetingService greetingService,
+                              LicenseService licenseService) {
         this.mapper = mapper;
         this.browserManager = browserManager;
         this.coordinator = coordinator;
         this.greetingService = greetingService;
+        this.licenseService = licenseService;
     }
 
     // ------------------------------------------------------------------
@@ -145,6 +151,7 @@ public abstract class DeliveryService<C extends JobCard> {
             return "「" + holder + "」正在投递，请先等它结束";
         }
         stopRequested = false;
+        stoppedForLicense = false;
         status = RunStatus.running(keywords.size(), config.isDryRun(), displayName());
         appendLog("投递任务启动：" + String.join("、", keywords)
                 + (config.isDryRun() ? "（预演模式，不会真发消息）" : ""));
@@ -260,6 +267,16 @@ public abstract class DeliveryService<C extends JobCard> {
      * 包成 protected 是为了能单测：mock 掉 mapper 和适配器，不碰浏览器。
      */
     protected void processCard(C card, String keyword, PlatformConfig config, Page listPage) {
+        // 次数卡在投递过程中用完（上报后服务端确认剩余为 0）就得停：
+        // 继续发就是免费帮客户投，卖卡的那一方白亏
+        if (licenseService.exhausted()) {
+            stopRequested = true;
+            if (!stoppedForLicense) {
+                stoppedForLicense = true;
+                appendLog("卡密已不能使用（次数已用完或已到期），本次任务停止");
+            }
+            return;
+        }
         String target = brief(card);
         status.setScanned(status.getScanned() + 1);
         try {
@@ -288,6 +305,8 @@ public abstract class DeliveryService<C extends JobCard> {
                 case DELIVERED -> {
                     record(card, keyword, "已投递", null, score, outcome.greeting(), existing);
                     status.setDelivered(status.getDelivered() + 1);
+                    // 次数卡扣减。异步发、失败不打断投递，见 LicenseService.reportUsage
+                    licenseService.reportUsage(1);
                 }
                 case PREVIEW -> {
                     record(card, keyword, "预演", null, score, outcome.greeting(), existing);

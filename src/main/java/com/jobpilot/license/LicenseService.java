@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jobpilot.system.ConfigService;
 import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.DependsOn;
@@ -18,6 +19,10 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Collections;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * 卡密校验核心。
@@ -41,6 +46,16 @@ public class LicenseService {
     private final ObjectMapper objectMapper;
 
     private volatile LicenseStatus status;
+
+    /** 攒着还没上报成功的投递次数。失败时加回去，下次投递成功时接着报 */
+    private final AtomicInteger pendingReports = new AtomicInteger();
+
+    /** 单线程：上报顺序即投递顺序，也不会并发进 flushReports */
+    private final ExecutorService reportExecutor = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "license-report");
+        t.setDaemon(true);
+        return t;
+    });
 
     @PostConstruct
     public void init() {
@@ -104,6 +119,8 @@ public class LicenseService {
         record.setToken(token);
         record.setDeviceId(deviceId);
         record.setLastVerifyOkAt(Instant.now());
+        // 换卡就是新额度，上一张卡攒着没报上去的次数不能算到新卡头上
+        pendingReports.set(0);
         applyServerFields(record, data);
         save(record);
         publish(LicenseState.ACTIVE, "卡密已激活", record);
@@ -146,6 +163,8 @@ public class LicenseService {
         record.setRemainingDays(null);
         record.setQuotaTotal(null);
         record.setQuotaRemaining(null);
+        record.setQuotaUsed(null);
+        pendingReports.set(0);
         save(record);
         publish(LicenseState.UNACTIVATED, "已解绑，可重新激活", record);
         return snapshot();
@@ -183,7 +202,104 @@ public class LicenseService {
         return Map.of("token", record.getToken(), "device_id", record.getDeviceId());
     }
 
+    /**
+     * 上报投递次数（次数卡扣减）。投递成功一次调一次。
+     *
+     * <p>三条设计约束，都是被"投递不能被卡密拖住"逼出来的：
+     * <ul>
+     *   <li><b>异步</b>：跑批跑在浏览器 dispatcher 线程上，同步等一次跨境 HTTP
+     *       会把每张卡片的间隔拉长一倍，节奏一规律就是机器特征。所以只累加计数、
+     *       丢给单线程 executor 去发。</li>
+     *   <li><b>失败不丢</b>：服务端不可达时把计数放回去，下次投递成功时接着报。
+     *       反过来（宁可少报不可漏报）才是对卖卡的一方公平——客户端断网不能
+     *       变成免费用。</li>
+     *   <li><b>失败不打断投递</b>：上报失败只记日志。卡是不是真不能用了由心跳
+     *       和 {@link #exhausted()} 判断，那一侧已经有宽限逻辑。</li>
+     * </ul>
+     *
+     * <p>时长卡/试用卡不报：服务端对非次数卡一律回 400，每投一个都白跑一趟。
+     * 只在这张卡的类型已经确认不是 quota 时跳过——类型还没拿到（null）时照报，
+     * 让服务端去判，免得漏记。
+     */
+    public void reportUsage(int n) {
+        if (n <= 0) {
+            return;
+        }
+        pendingReports.addAndGet(n);
+        try {
+            reportExecutor.execute(this::flushReports);
+        } catch (RejectedExecutionException e) {
+            // 已经在关机了，计数留着也没用
+            log.debug("上报线程已关闭，丢弃 {} 次投递上报", n);
+        }
+    }
+
+    /** 跑批中每次投递前看一眼：卡是不是已经不能用了。自用模式和 fail-open 下一律 false。 */
+    public boolean exhausted() {
+        if (!properties.isEnabled() || properties.isFailOpen()) {
+            return false;
+        }
+        return !status().isAllowed();
+    }
+
     // ---------------------------------------------------------------- internal
+
+    /** 把攒下的次数一次性发出去。单线程 executor 保证不会并发进这个方法。 */
+    private void flushReports() {
+        int n = pendingReports.getAndSet(0);
+        if (n <= 0) {
+            return;
+        }
+        try {
+            doReport(n);
+        } catch (Exception e) {
+            // 放回去等下次投递成功时重试；这里不能抛，executor 会吞掉后续任务
+            pendingReports.addAndGet(n);
+            log.warn("投递次数上报失败（{} 次，将稍后重试）: {}", n, e.toString());
+        }
+    }
+
+    private void doReport(int n) {
+        if (!properties.isEnabled()) {
+            return;
+        }
+        LicenseRecord record = load();
+        if (record == null || !notBlank(record.getToken()) || !notBlank(record.getDeviceId())) {
+            return;
+        }
+        String type = record.getType();
+        if (type != null && !"quota".equals(type)) {
+            return;
+        }
+        JsonNode node = licenseClient.post(properties.getApiBase(), "/report", Map.of(
+                "token", record.getToken(),
+                "device_id", record.getDeviceId(),
+                "n", n));
+        if (node == null) {
+            // 网络不可达：抛出去让 flushReports 把计数放回去
+            throw new LicenseClient.LicenseUnavailableException("卡密服务端不可达");
+        }
+        JsonNode data = node.path("data");
+        Long used = data.path("quota_used").isNull() ? null : data.path("quota_used").asLong();
+        Long remaining = data.path("quota_remaining").isNull() ? null : data.path("quota_remaining").asLong();
+        record.setQuotaUsed(used);
+        record.setQuotaRemaining(remaining);
+        record.setLastVerifyOkAt(Instant.now());
+        save(record);
+        log.info("投递次数已上报 | 本次 {} | 已用 {} | 剩余 {}", n, used, remaining);
+        if (remaining != null && remaining <= 0) {
+            publish(LicenseState.EXPIRED, "卡密次数已用完", record);
+        } else {
+            // 只刷新快照里的次数，判定状态不变——不然激活页的"剩余次数"
+            // 要等下一次心跳才动，客户刚投完那几个看不到变化
+            publish(status().getState(), status().getMessage(), record);
+        }
+    }
+
+    @PreDestroy
+    public void shutdown() {
+        reportExecutor.shutdown();
+    }
 
     private void doVerify(LicenseRecord record) {
         JsonNode node = licenseClient.post(properties.getApiBase(), "/verify",
@@ -222,6 +338,9 @@ public class LicenseService {
         record.setRemainingDays(data.path("remaining_days").isNull() ? null : data.path("remaining_days").asLong());
         record.setQuotaTotal(data.path("quota_total").isNull() ? null : data.path("quota_total").asLong());
         record.setQuotaRemaining(data.path("quota_remaining").isNull() ? null : data.path("quota_remaining").asLong());
+        if (!data.path("quota_used").isNull()) {
+            record.setQuotaUsed(data.path("quota_used").asLong());
+        }
     }
 
     private void publish(LicenseState state, String message, LicenseRecord record) {

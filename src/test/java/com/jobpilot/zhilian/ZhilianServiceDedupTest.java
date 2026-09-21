@@ -52,6 +52,9 @@ class ZhilianServiceDedupTest {
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper =
             new com.fasterxml.jackson.databind.ObjectMapper();
 
+    @Mock
+    private LicenseService licenseService;
+
     private ZhilianService service;
 
     @BeforeEach
@@ -66,7 +69,8 @@ class ZhilianServiceDedupTest {
                 new ZhilianOptions(new com.fasterxml.jackson.databind.ObjectMapper()),
                 new RunCoordinator(),
                 new GreetingService(new AiProperties(configService), new AiService(objectMapper), deliveryMapper,
-                        mock(LicenseService.class), new LicenseProperties()));
+                        licenseService, new LicenseProperties()),
+                licenseService);
     }
 
     private ZhilianJobCard card() {

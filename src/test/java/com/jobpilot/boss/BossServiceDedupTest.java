@@ -23,6 +23,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
@@ -56,6 +57,9 @@ class BossServiceDedupTest {
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper =
             new com.fasterxml.jackson.databind.ObjectMapper();
 
+    @Mock
+    private LicenseService licenseService;
+
     private BossService service;
 
     @BeforeEach
@@ -71,7 +75,8 @@ class BossServiceDedupTest {
                 new BossOptions(new com.fasterxml.jackson.databind.ObjectMapper()),
                 new RunCoordinator(),
                 new GreetingService(new AiProperties(configService), new AiService(objectMapper), deliveryMapper,
-                        mock(LicenseService.class), new LicenseProperties()));
+                        licenseService, new LicenseProperties()),
+                licenseService);
     }
 
     private BossJobCard card() {
@@ -188,5 +193,41 @@ class BossServiceDedupTest {
         assertEquals("投递失败", captor.getValue().getDeliveryStatus());
         assertEquals("触发每日投递上限", captor.getValue().getFailReason());
         assertEquals(1, service.status().getFailed());
+    }
+
+    @Test
+    void 投递成功要上报次数次数卡才扣得动() {
+        when(deliveryMapper.selectOne(any())).thenReturn(null);
+        when(driver.deliver(any(), any(), any(), anyBoolean(), any(), any()))
+                .thenReturn(DeliveryOutcome.delivered("您好"));
+
+        service.processCardForTest(card(), "陈列设计", properties.get(), null);
+
+        verify(licenseService).reportUsage(1);
+    }
+
+    @Test
+    void 预演和投递失败都不上报() {
+        when(deliveryMapper.selectOne(any())).thenReturn(null);
+        when(driver.deliver(any(), any(), any(), anyBoolean(), any(), any()))
+                .thenReturn(DeliveryOutcome.failed("未找到聊天输入框"));
+
+        service.processCardForTest(card(), "陈列设计", properties.get(), null);
+
+        verify(licenseService, never()).reportUsage(anyInt());
+    }
+
+    @Test
+    void 卡密次数用完时不再投直接停() {
+        when(licenseService.exhausted()).thenReturn(true);
+        when(deliveryMapper.selectOne(any())).thenReturn(null);
+
+        service.processCardForTest(card(), "陈列设计", properties.get(), null);
+
+        verify(driver, never()).deliver(any(), any(), any(), anyBoolean(), any(), any());
+        verify(deliveryMapper, never()).insert(any(Delivery.class));
+        assertEquals(0, service.status().getScanned());
+        assertTrue(service.status().getLogs().stream()
+                .anyMatch(l -> l.contains("卡密已不能使用")));
     }
 }
