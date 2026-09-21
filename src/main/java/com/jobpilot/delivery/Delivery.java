@@ -1,4 +1,4 @@
-package com.jobpilot.boss;
+package com.jobpilot.delivery;
 
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
@@ -7,16 +7,18 @@ import lombok.Data;
 
 /**
  * 投递记录。一个岗位一条（platform + encrypt_id + encrypt_user_id 唯一），
- * 状态流转：预演/未投递 → 已投递 / 投递失败 / 已过滤。
+ * 四个平台共用一张表：platform 列区分，索引也带着它，互不干扰。
+ *
+ * 状态流转：预演 → 已投递 / 投递失败 / 已过滤。
  */
 @Data
 @TableName("deliveries")
-public class BossDelivery {
+public class Delivery {
 
     @TableId(value = "id", type = IdType.AUTO)
     private Long id;
 
-    /** 平台标识，固定 boss；P2 加平台时同表复用 */
+    /** 平台标识：boss / liepin / job51 / zhilian */
     private String platform;
     /** 触发本次投递的搜索关键词 */
     private String keyword;
@@ -32,7 +34,7 @@ public class BossDelivery {
     private String bossName;
     private String bossTitle;
     private String jobUrl;
-    /** 实际发送的打招呼语（预演时为将要发送的话术） */
+    /** 实际发送的招呼语（预演时为将要发送的话术） */
     private String greeting;
     /** 预演 / 未投递 / 已投递 / 已过滤 / 投递失败 */
     private String deliveryStatus;

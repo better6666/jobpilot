@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JobPilot · 投递</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: #f5f6f8; color: #1f2329; min-height: 100vh; padding: 24px;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; }
+  .top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; gap: 12px; flex-wrap: wrap; }
+  h1 { font-size: 20px; }
+  .top a { font-size: 13px; color: #3370ff; text-decoration: none; }
+  .top select { padding: 6px 10px; border: 1px solid #d5d8de; border-radius: 8px; font-size: 13px; background: #fff; }
+  .card {
+    background: #fff; border-radius: 12px; padding: 24px; margin-bottom: 16px;
+    box-shadow: 0 2px 12px rgba(0,0,0,.06);
+  }
+  h2 { font-size: 15px; margin-bottom: 14px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px 16px; }
+  label { display: block; font-size: 12px; color: #8a8f99; margin-bottom: 4px; }
+  input[type=text], input[type=number], select, textarea {
+    width: 100%; padding: 8px 10px; border: 1px solid #d5d8de; border-radius: 8px;
+    font-size: 13px; outline: none; background: #fff; font-family: inherit;
+  }
+  input:focus, select:focus, textarea:focus { border-color: #3370ff; }
+  textarea { resize: vertical; }
+  .full { grid-column: 1 / -1; }
+  #filterFields { display: contents; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  button {
+    padding: 9px 18px; border: none; border-radius: 8px; font-size: 14px;
+    cursor: pointer; background: #3370ff; color: #fff;
+  }
+  button.secondary { background: #f0f1f3; color: #4e5560; }
+  button.danger { background: #e64545; }
+  button:disabled { opacity: .6; cursor: default; }
+  .state { display: inline-block; padding: 4px 12px; border-radius: 999px;
+           font-size: 13px; font-weight: 600; }
+  .state.ok { background: #e8f5e9; color: #2e7d32; }
+  .state.run { background: #e3f0ff; color: #1565c0; }
+  .state.warn { background: #fff3e0; color: #e65100; }
+  .state.bad { background: #ffebee; color: #c62828; }
+  .counters { display: flex; gap: 20px; flex-wrap: wrap; margin: 14px 0; font-size: 13px; color: #4e5560; }
+  .counters b { color: #1f2329; font-size: 16px; margin-right: 2px; }
+  .switch { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #1f2329;
+            background: #fff8e6; border: 1px solid #ffe1a6; border-radius: 8px; padding: 10px 12px; }
+  .switch input { width: 16px; height: 16px; }
+  .logs {
+    background: #1f2329; color: #d7dae0; border-radius: 8px; padding: 12px 14px;
+    font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 12px;
+    height: 220px; overflow-y: auto; white-space: pre-wrap; line-height: 1.7;
+  }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #f0f1f3; }
+  th { font-size: 12px; color: #8a8f99; font-weight: 500; }
+  .tag { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; }
+  .tag.ok { background: #e8f5e9; color: #2e7d32; }
+  .tag.skip { background: #f0f1f3; color: #8a8f99; }
+  .tag.bad { background: #ffebee; color: #c62828; }
+  .tag.warn { background: #fff3e0; color: #e65100; }
+  .toast { font-size: 13px; margin-top: 10px; min-height: 18px; }
+  .toast.err { color: #c62828; }
+  .toast.ok { color: #2e7d32; }
+  .hint { font-size: 12px; color: #8a8f99; margin-top: 6px; line-height: 1.6; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <h1 id="pageTitle">JobPilot · 投递</h1>
+    <div class="row">
+      <select id="platformSwitch" title="切换平台"></select>
+      <a href="/index.html">首页</a>
+      <a href="/license.html" target="_blank">卡密管理 →</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="row" style="justify-content: space-between;">
+      <div class="row">
+        <span id="runState" class="state ok">读取中…</span>
+        <span id="runMsg" style="font-size:13px;color:#8a8f99"></span>
+      </div>
+      <div class="row">
+        <span id="licenseTag" class="state ok">卡密：读取中…</span>
+      </div>
+    </div>
+    <div class="counters">
+      <span><b id="cScanned">0</b>已扫描</span>
+      <span><b id="cDelivered">0</b>已投递</span>
+      <span><b id="cPreviewed">0</b>预演</span>
+      <span><b id="cFiltered">0</b>已过滤</span>
+      <span><b id="cFailed">0</b>失败</span>
+      <span><b id="cSkipped">0</b>跳过</span>
+      <span id="keywordInfo" style="color:#8a8f99"></span>
+    </div>
+    <div class="row">
+      <button id="btnStart">开始投递</button>
+      <button id="btnStop" class="danger" disabled>停止</button>
+      <span id="loginHint" class="hint" style="margin:0">投递会在本机打开 Chrome 窗口，扫码登录后自动进行；窗口不要最小化。</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>投递配置</h2>
+    <div class="grid">
+      <div class="full">
+        <label>搜索关键词（每行一个）</label>
+        <textarea id="keywords" rows="3" placeholder="陈列设计&#10;视觉设计"></textarea>
+      </div>
+      <div>
+        <label>城市</label>
+        <input id="city" type="text" list="cityList" placeholder="上海">
+        <datalist id="cityList"></datalist>
+      </div>
+      <div id="filterFields"></div>
+      <div>
+        <label>每个关键词最多处理岗位数</label>
+        <input id="maxJobs" type="number" min="1" max="200" value="50">
+      </div>
+      <div>
+        <label>岗位间隔秒数（随机取一半到满值）</label>
+        <input id="waitSeconds" type="number" min="3" max="120" value="10">
+      </div>
+      <div>
+        <label>扫码登录等待分钟数</label>
+        <input id="loginTimeout" type="number" min="1" max="30" value="5">
+      </div>
+      <div class="full" id="sayHiWrap">
+        <label>打招呼话术</label>
+        <textarea id="sayHi" rows="3"></textarea>
+      </div>
+      <div class="full">
+        <label>打分规则（JSON：threshold 阈值；titleReject/degreeReject 一票否决；jobRules/degreeRules/experienceRules/industryRules/jdRules 为 {match, score} 加减分列表）</label>
+        <textarea id="scoreRules" rows="10" style="font-family:Menlo,Consolas,monospace;font-size:12px"></textarea>
+        <div class="hint">基准分 0，命中规则加分/减分，达到 threshold 才投递。留空规则 + threshold 0 = 全部投递。</div>
+      </div>
+      <div class="full">
+        <div class="switch">
+          <input type="checkbox" id="dryRun">
+          <label for="dryRun" style="margin:0;color:#1f2329;font-size:13px">
+            <b>预演模式</b>：走完整流程但不真投，记录显示"预演"。第一次用建议先开着跑一遍确认筛选符合预期。
+          </label>
+        </div>
+      </div>
+      <div class="full" id="inactiveHrWrap">
+        <div class="switch" style="background:#f7f8fa;border-color:#e8e9ec">
+          <input type="checkbox" id="filterInactiveHr">
+          <label for="filterInactiveHr" style="margin:0;color:#1f2329;font-size:13px">
+            过滤不活跃 HR（活跃描述里带"年"，如"3 年前活跃"）
+          </label>
+        </div>
+      </div>
+    </div>
+    <div class="row" style="margin-top:16px">
+      <button id="btnSave">保存配置</button>
+      <span id="saveToast" class="toast"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>运行日志</h2>
+    <div id="logs" class="logs">（还没有日志）</div>
+  </div>
+
+  <div class="card">
+    <div class="row" style="justify-content:space-between;margin-bottom:12px">
+      <h2 style="margin:0">投递记录</h2>
+      <button id="btnClear" class="secondary" style="padding:6px 12px;font-size:13px">清空记录</button>
+    </div>
+    <div style="overflow-x:auto">
+    <table>
+      <thead>
+        <tr><th>时间</th><th>状态</th><th>公司</th><th>岗位</th><th>薪资</th><th>得分</th><th>原因</th><th>关键词</th></tr>
+      </thead>
+      <tbody id="deliveryRows">
+        <tr><td colspan="8" style="color:#8a8f99">暂无记录</td></tr>
+      </tbody>
+    </table>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+/**
+ * 四个平台的差异全在这张表里：筛选项、薪资是下拉还是文本框、有没有话术和
+ * HR 活跃度过滤。加平台只改这里 + 后端一个 /api/{platform} 控制器。
+ */
+const PLATFORMS = {
+  boss: {
+    name: 'Boss 直聘',
+    filters: ['jobType', 'salary', 'experience', 'degree', 'scale', 'stage'],
+    salaryKind: 'select',
+    sayHi: true,
+    filterInactiveHr: true,
+    loginHint: '投递会在本机打开 Chrome 窗口，扫码登录后自动进行；窗口不要最小化。'
+  },
+  liepin: {
+    name: '猎聘',
+    filters: ['salary'],
+    salaryKind: 'select',
+    sayHi: false,
+    filterInactiveHr: false,
+    loginHint: '猎聘需要扫码登录。窗口打开后扫码，登录态会记住，下次不用再扫。'
+  },
+  job51: {
+    name: '51job',
+    filters: ['salary'],
+    salaryKind: 'select',
+    sayHi: false,
+    filterInactiveHr: false,
+    loginHint: '51job 用已保存的登录 Cookie，一般不用扫码；Cookie 失效会弹登录页。'
+  },
+  zhilian: {
+    name: '智联招聘',
+    filters: [],
+    salaryKind: 'text',
+    sayHi: false,
+    filterInactiveHr: false,
+    loginHint: '智联招聘需要微信扫码登录。列表页没有接口，字段从页面逐条读，跑得比别的平台慢。'
+  }
+};
+
+const FILTER_LABELS = {
+  jobType: '职位类型', salary: '薪资', experience: '经验',
+  degree: '学历', scale: '公司规模', stage: '融资阶段'
+};
+
+const STATE_MAP = {
+  IDLE: ['ok', '空闲'],
+  RUNNING: ['run', '运行中'],
+  STOPPING: ['warn', '停止中'],
+  FINISHED: ['ok', '已完成']
+};
+
+const STATUS_TAG = {
+  '已投递': 'ok', '预演': 'warn', '已过滤': 'skip', '投递失败': 'bad'
+};
+
+const platform = new URLSearchParams(location.search).get('platform');
+const meta = PLATFORMS[platform];
+if (!meta) {
+  location.replace('/index.html');
+} else {
+  init();
+}
+
+async function api(path, options) {
+  const res = await fetch(path, options);
+  return res.json();
+}
+
+function toast(text, ok) {
+  $('saveToast').textContent = text;
+  $('saveToast').className = 'toast ' + (ok ? 'ok' : 'err');
+}
+
+function fillSelect(id, options, selected) {
+  const sel = $(id);
+  sel.innerHTML = '';
+  for (const opt of options) {
+    const el = document.createElement('option');
+    el.value = opt.code;
+    el.textContent = opt.name;
+    if (selected != null && String(selected) === String(opt.code)) el.selected = true;
+    sel.appendChild(el);
+  }
+}
+
+/** 按平台把筛选项渲染出来。薪资可能是下拉框也可能是文本框（智联是原始金额区间） */
+function renderFilters(config, options) {
+  const host = $('filterFields');
+  host.innerHTML = '';
+  for (const field of meta.filters) {
+    const cell = document.createElement('div');
+    if (field === 'salary' && meta.salaryKind === 'text') {
+      cell.innerHTML = `<label>薪资区间（元，形如 12000,20000；留空=不限）</label>
+        <input id="salaryText" type="text" placeholder="12000,20000">`;
+      host.appendChild(cell);
+      $('salaryText').value = (config && config.salary) || '';
+      continue;
+    }
+    cell.innerHTML = `<label>${FILTER_LABELS[field] || field}</label><select id="${field}"></select>`;
+    host.appendChild(cell);
+    fillSelect(field, options[field] || [], config ? config[field] : '');
+  }
+}
+
+async function loadOptions() {
+  return (await api(`/api/${platform}/options`)).data || {};
+}
+
+async function loadConfig() {
+  const c = (await api(`/api/${platform}/config`)).data;
+  if (!c) return;
+  $('keywords').value = (c.keywords || []).join('\n');
+  $('city').value = c.city || '';
+  renderFilters(c, window.__options || {});
+  $('maxJobs').value = c.maxJobsPerKeyword;
+  $('waitSeconds').value = c.waitSeconds;
+  $('loginTimeout').value = c.loginTimeoutMinutes;
+  if (meta.sayHi) $('sayHi').value = c.sayHi || '';
+  $('scoreRules').value = JSON.stringify(c.scoreRules || {}, null, 2);
+  $('dryRun').checked = !!c.dryRun;
+  if (meta.filterInactiveHr) $('filterInactiveHr').checked = !!c.filterInactiveHr;
+}
+
+/** 只提交这个平台认的字段，别的字段后端不认，发了也是白发 */
+function readConfig() {
+  let scoreRules;
+  try {
+    scoreRules = JSON.parse($('scoreRules').value || '{}');
+  } catch (e) {
+    toast('打分规则不是合法 JSON：' + e.message, false);
+    return null;
+  }
+  const body = {
+    keywords: $('keywords').value.split('\n').map(s => s.trim()).filter(Boolean),
+    city: $('city').value.trim(),
+    maxJobsPerKeyword: Number($('maxJobs').value) || 50,
+    waitSeconds: Number($('waitSeconds').value) || 10,
+    loginTimeoutMinutes: Number($('loginTimeout').value) || 5,
+    dryRun: $('dryRun').checked,
+    scoreRules
+  };
+  if (meta.salaryKind === 'text') {
+    body.salary = $('salaryText').value.trim();
+  } else if ($('salary')) {
+    body.salary = $('salary').value;
+  }
+  for (const field of meta.filters) {
+    if (field !== 'salary' && $(field)) body[field] = $(field).value;
+  }
+  if (meta.sayHi) body.sayHi = $('sayHi').value;
+  if (meta.filterInactiveHr) body.filterInactiveHr = $('filterInactiveHr').checked;
+  return body;
+}
+
+async function saveConfig() {
+  const body = readConfig();
+  if (!body) return;
+  const json = await api(`/api/${platform}/config`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  toast(json.success ? '配置已保存' : (json.message || '保存失败'), json.success);
+}
+
+async function refreshStatus() {
+  try {
+    const s = (await api(`/api/${platform}/status`)).data;
+    if (!s) return;
+    const [cls, text] = STATE_MAP[s.state] || ['ok', s.state];
+    $('runState').className = 'state ' + cls;
+    $('runState').textContent = text + (s.dryRun && s.state === 'RUNNING' ? '（预演）' : '');
+    $('runMsg').textContent = s.message || '';
+    $('cScanned').textContent = s.scanned;
+    $('cDelivered').textContent = s.delivered;
+    $('cPreviewed').textContent = s.previewed;
+    $('cFiltered').textContent = s.filtered;
+    $('cFailed').textContent = s.failed;
+    $('cSkipped').textContent = s.skipped;
+    $('keywordInfo').textContent = s.totalKeywords
+      ? `关键词 ${s.keywordIndex}/${s.totalKeywords}${s.currentKeyword ? '：' + s.currentKeyword : ''}`
+      : '';
+    $('btnStart').disabled = s.state === 'RUNNING' || s.state === 'STOPPING';
+    $('btnStop').disabled = !(s.state === 'RUNNING' || s.state === 'STOPPING');
+    const logs = s.logs || [];
+    $('logs').textContent = logs.length ? logs.join('\n') : '（还没有日志）';
+    $('logs').scrollTop = $('logs').scrollHeight;
+
+    const ls = (await api(`/api/${platform}/license`)).data;
+    if (ls) {
+      $('licenseTag').textContent = '卡密：' + (ls.state || '-') + (ls.allowed ? '' : '（投递被拦截）');
+      $('licenseTag').className = 'state ' + (ls.allowed ? 'ok' : 'bad');
+    }
+  } catch (e) { /* 后端重启中，下一轮再试 */ }
+}
+
+async function refreshDeliveries() {
+  try {
+    const rows = (await api(`/api/${platform}/deliveries?limit=50`)).data || [];
+    if (!rows.length) {
+      $('deliveryRows').innerHTML = '<tr><td colspan="8" style="color:#8a8f99">暂无记录</td></tr>';
+      return;
+    }
+    $('deliveryRows').innerHTML = rows.map(r => {
+      const tag = STATUS_TAG[r.deliveryStatus] || 'skip';
+      const time = (r.createdAt || '').replace('T', ' ').slice(5, 16);
+      return `<tr>
+        <td>${time}</td>
+        <td><span class="tag ${tag}">${r.deliveryStatus || '-'}</span></td>
+        <td>${esc(r.brandName)}</td>
+        <td>${esc(r.jobName)}</td>
+        <td>${esc(r.salaryDesc)}</td>
+        <td>${r.score == null ? '-' : r.score}</td>
+        <td>${esc(r.failReason || r.greeting || '')}</td>
+        <td>${esc(r.keyword)}</td>
+      </tr>`;
+    }).join('');
+  } catch (e) { /* 忽略 */ }
+}
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"]/g,
+    c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
+
+function init() {
+  document.title = 'JobPilot · ' + meta.name + '投递';
+  $('pageTitle').textContent = 'JobPilot · ' + meta.name + '投递';
+  $('loginHint').textContent = meta.loginHint;
+
+  const sw = $('platformSwitch');
+  sw.innerHTML = Object.entries(PLATFORMS)
+    .map(([key, m]) => `<option value="${key}"${key === platform ? ' selected' : ''}>${m.name}</option>`)
+    .join('');
+  sw.onchange = () => { location.href = '/delivery.html?platform=' + sw.value; };
+
+  $('sayHiWrap').style.display = meta.sayHi ? '' : 'none';
+  $('inactiveHrWrap').style.display = meta.filterInactiveHr ? '' : 'none';
+
+  $('btnStart').onclick = async () => {
+    const json = await api(`/api/${platform}/start`, { method: 'POST' });
+    if (!json.success) toast(json.message || '启动失败', false);
+    refreshStatus();
+  };
+  $('btnStop').onclick = async () => {
+    await api(`/api/${platform}/stop`, { method: 'POST' });
+    refreshStatus();
+  };
+  $('btnSave').onclick = saveConfig;
+  $('btnClear').onclick = async () => {
+    if (!confirm('清空后所有投递记录删除，已投递的岗位会被重新投递。确定清空？')) return;
+    await api(`/api/${platform}/deliveries`, { method: 'DELETE' });
+    refreshDeliveries();
+  };
+
+  (async () => {
+    // 码表要先于配置：配置里选中的筛选项码要靠码表回填
+    window.__options = await loadOptions();
+    $('cityList').innerHTML = (window.__options.cities || [])
+      .map(c => `<option value="${c.name}">${c.code}</option>`).join('');
+    await loadConfig();
+    await refreshStatus();
+    await refreshDeliveries();
+    setInterval(refreshStatus, 3000);
+    setInterval(refreshDeliveries, 10000);
+  })();
+}
+</script>
+</body>
+</html>

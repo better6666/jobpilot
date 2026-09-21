@@ -1,4 +1,4 @@
-package com.jobpilot.boss;
+package com.jobpilot.delivery;
 
 import lombok.AllArgsConstructor;
 import lombok.Data;

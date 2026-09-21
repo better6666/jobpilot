@@ -249,3 +249,7 @@ tasks.named<JavaExec>("bootRun") {
     // 开发态每重启一次就弹浏览器太吵，地址固定 9527 也不需要自动打开
     systemProperty("jobpilot.open-page", "false")
 }
+
+tasks.register("printRuntimeClasspath") {
+    doLast { println(sourceSets["main"].runtimeClasspath.asPath) }
+}

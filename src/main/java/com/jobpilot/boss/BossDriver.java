@@ -1,6 +1,11 @@
 package com.jobpilot.boss;
 
 import com.jobpilot.browser.BrowserManager;
+import com.jobpilot.delivery.CardConsumer;
+import com.jobpilot.delivery.DeliveryOutcome;
+import com.jobpilot.delivery.DeliveryStatus;
+import com.jobpilot.delivery.LoginResult;
+import com.jobpilot.delivery.ProgressListener;
 import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.Response;
@@ -13,7 +18,6 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
 import java.util.function.BooleanSupplier;
-import java.util.function.Consumer;
 
 /**
  * Boss 直聘浏览器操作层。
@@ -44,29 +48,6 @@ public class BossDriver {
 
     public BossDriver(BrowserManager browserManager) {
         this.browserManager = browserManager;
-    }
-
-    public enum LoginResult {
-        LOGGED_IN, TIMEOUT
-    }
-
-    public enum DeliveryStatus {
-        /** 真发成功了 */
-        DELIVERED,
-        /** 预演模式，没真发 */
-        PREVIEW,
-        /** 单个岗位失败（继续跑下一个） */
-        FAILED,
-        /** 连续失败达到上限或页面提示今日上限，必须停 */
-        LIMIT
-    }
-
-    public record DeliveryOutcome(DeliveryStatus status, String failReason, String greeting) {
-    }
-
-    /** 进度回调：消息走日志 + 管理页，停止信号由调用方提供 */
-    public interface ProgressListener {
-        void onProgress(String message);
     }
 
     private static final String BOSS_DOMAIN = "https://www.zhipin.com";
@@ -142,7 +123,7 @@ public class BossDriver {
      */
     public void processKeyword(String searchUrl, String keyword, int maxCards,
                                ProgressListener listener, BooleanSupplier stop,
-                               CardCallback callback) {
+                               CardConsumer<BossJobCard> callback) {
         Page page = browserManager.context().newPage();
         configureTimeouts(page);
         try {
@@ -188,10 +169,10 @@ public class BossDriver {
         }
     }
 
-    /** 每个岗位的处理回调。在 dispatcher 线程内同步调用，listPage 停在该卡片的详情面板上 */
-    public interface CardCallback {
-        void accept(BossJobCard card, Page listPage);
-    }
+    /**
+     * 每个岗位的处理回调由编排层提供（{@link CardConsumer}），在 dispatcher
+     * 线程内同步调用，页面保持该卡片选中，回调里可以投递。
+     */
 
     /**
      * 点击第 i 个卡片并拦截 detail.json。

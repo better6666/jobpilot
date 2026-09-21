@@ -1,4 +1,4 @@
-package com.jobpilot.boss;
+package com.jobpilot.delivery;
 
 import org.junit.jupiter.api.Test;
 
@@ -6,17 +6,43 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-class BossScorerTest {
+class JobScorerTest {
 
-    private final BossScorer emptyScorer = new BossScorer(new ScoreRules());
+    private final JobScorer emptyScorer = new JobScorer(new ScoreRules());
 
-    private BossJobCard card(String jobName, String degree, String experience, String industry, String jd) {
-        BossJobCard card = new BossJobCard();
-        card.setJobName(jobName);
-        card.setDegreeName(degree);
-        card.setExperienceName(experience);
-        card.setIndustryName(industry);
-        card.setPostDescription(jd);
+    /** 只填打分用得到的字段，其余留 null——正好覆盖"字段采不到"的情况。 */
+    private static class Card implements JobCard {
+        private String jobName;
+        private String jobDegree;
+        private String jobExperience;
+        private String industryName;
+        private String postDescription;
+
+        @Override public String getJobId() { return null; }
+        @Override public String getBossId() { return null; }
+        @Override public String getJobName() { return jobName; }
+        @Override public String getBrandName() { return null; }
+        @Override public String getSalaryDesc() { return null; }
+        @Override public String getCityName() { return null; }
+        @Override public String getAreaDistrict() { return null; }
+        @Override public String getJobExperience() { return jobExperience; }
+        @Override public String getJobDegree() { return jobDegree; }
+        @Override public String getBossName() { return null; }
+        @Override public String getBossTitle() { return null; }
+        @Override public String getJobUrl() { return null; }
+        @Override public String getPostDescription() { return postDescription; }
+        @Override public String getIndustryName() { return industryName; }
+        @Override public String getBrandScaleName() { return null; }
+        @Override public String getBossActiveTimeDesc() { return null; }
+    }
+
+    private Card card(String jobName, String degree, String experience, String industry, String jd) {
+        Card card = new Card();
+        card.jobName = jobName;
+        card.jobDegree = degree;
+        card.jobExperience = experience;
+        card.industryName = industry;
+        card.postDescription = jd;
         return card;
     }
 
@@ -38,7 +64,7 @@ class BossScorerTest {
     void 职位黑名单一票否决() {
         ScoreRules rules = new ScoreRules();
         rules.setTitleReject(List.of("销售", "客服"));
-        BossScorer scorer = new BossScorer(rules);
+        JobScorer scorer = new JobScorer(rules);
 
         ScoreResult result = scorer.score(card("电话销售专员", "大专", "1年以内", "零售", ""));
         assertFalse(result.isPass());
@@ -51,7 +77,7 @@ class BossScorerTest {
     void 学历黑名单一票否决() {
         ScoreRules rules = new ScoreRules();
         rules.setDegreeReject(List.of("博士"));
-        BossScorer scorer = new BossScorer(rules);
+        JobScorer scorer = new JobScorer(rules);
 
         ScoreResult result = scorer.score(card("研究员", "博士", "经验不限", "科研", ""));
         assertFalse(result.isPass());
@@ -63,7 +89,7 @@ class BossScorerTest {
         ScoreRules rules = new ScoreRules();
         rules.setThreshold(20);
         rules.setJobRules(List.of(rule("陈列", 25), rule("设计", 10)));
-        BossScorer scorer = new BossScorer(rules);
+        JobScorer scorer = new JobScorer(rules);
 
         assertTrue(scorer.score(card("陈列设计实习生", "大专", "应届", "", "")).isPass());
         // 只命中"设计"（+10），到不了 20
@@ -75,9 +101,9 @@ class BossScorerTest {
         ScoreRules rules = new ScoreRules();
         rules.setThreshold(10);
         rules.setExperienceRules(List.of(rule("5年", -30)));
-        BossScorer scorer = new BossScorer(rules);
+        JobScorer scorer = new JobScorer(rules);
 
-        // Boss 的经验字段形如"5年以上"，包含"5年"
+        // 猎聘的经验字段形如"5年以上"，包含"5年"
         ScoreResult result = scorer.score(card("设计助理", "大专", "5年以上", "", ""));
         assertFalse(result.isPass());
         assertEquals(-30, result.getScore());
@@ -88,7 +114,7 @@ class BossScorerTest {
         ScoreRules rules = new ScoreRules();
         rules.setThreshold(10);
         rules.setIndustryRules(List.of(rule("ai", 25)));
-        BossScorer scorer = new BossScorer(rules);
+        JobScorer scorer = new JobScorer(rules);
 
         // 岗位方写"AI"，规则方写"ai"，也要命中
         assertTrue(scorer.score(card("AI 运营", "本科", "1年以内", "AI", "")).isPass());
@@ -99,7 +125,7 @@ class BossScorerTest {
         ScoreRules rules = new ScoreRules();
         rules.setThreshold(10);
         rules.setJdRules(List.of(rule("专业不限", 15), rule("仅限计算机", -30)));
-        BossScorer scorer = new BossScorer(rules);
+        JobScorer scorer = new JobScorer(rules);
 
         assertTrue(scorer.score(card("运营", "大专", "1年以内", "零售", "我们专业不限，欢迎投递")).isPass());
         assertFalse(scorer.score(card("运营", "大专", "1年以内", "零售", "仅限计算机专业")).isPass());
@@ -113,7 +139,7 @@ class BossScorerTest {
         rules.setExperienceRules(List.of(rule("应届", 10)));
         rules.setIndustryRules(List.of(rule("服装", 10)));
         rules.setJobRules(List.of(rule("陈列", 10)));
-        BossScorer scorer = new BossScorer(rules);
+        JobScorer scorer = new JobScorer(rules);
 
         ScoreResult result = scorer.score(card("陈列设计", "大专", "应届毕业生", "服装纺织", ""));
         assertTrue(result.isPass());
@@ -131,10 +157,10 @@ class BossScorerTest {
         rules.setThreshold(10);
         rules.setJobRules(List.of(rule("设计", 10)));
         rules.setTitleReject(List.of("销售"));
-        BossScorer scorer = new BossScorer(rules);
+        JobScorer scorer = new JobScorer(rules);
 
         // 全 null 字段：得 0 分，到不了阈值 10
-        ScoreResult result = scorer.score(new BossJobCard());
+        ScoreResult result = scorer.score(new Card());
         assertFalse(result.isPass());
         assertEquals(0, result.getScore());
         assertEquals("无命中规则", result.getReason());
@@ -146,7 +172,7 @@ class BossScorerTest {
         rules.setThreshold(5);
         rules.setJobRules(List.of(rule("设计", 50)));
         rules.setTitleReject(List.of("销售"));
-        BossScorer scorer = new BossScorer(rules);
+        JobScorer scorer = new JobScorer(rules);
 
         ScoreResult result = scorer.score(card("设计销售总监", "本科", "3-5年", "", ""));
         assertFalse(result.isPass());

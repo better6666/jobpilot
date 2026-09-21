@@ -61,7 +61,7 @@ class BossJobCardTest {
         assertEquals(2, card.getJobLabels().size());
         assertEquals(2, card.getSkills().size());
         assertEquals(1, card.getWelfare().size());
-        assertEquals("https://www.zhipin.com/job_detail/job-abc-123.html", card.jobUrl());
+        assertEquals("https://www.zhipin.com/job_detail/job-abc-123.html", card.getJobUrl());
     }
 
     @Test

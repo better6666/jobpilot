@@ -1,4 +1,4 @@
-package com.jobpilot.boss;
+package com.jobpilot.delivery;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -7,25 +7,29 @@ import java.util.List;
  * 岗位打分。纯函数，不碰浏览器和数据库，方便单测。
  *
  * 计算顺序：先一票否决，再逐组规则加减分，最后与阈值比较。
- * 匹配一律"包含且大小写不敏感"——Boss 的字段值不稳定
+ * 匹配一律"包含且大小写不敏感"——四家平台的字段值都不稳定
  * （"本科" / "本科及以上" / " 本科 "都会出现），精确等于会把规则全打飞。
+ *
+ * 字段走 {@link JobCard} 接口而不是各平台的卡片类，所以四个平台共用一套规则：
+ * 用户在 Boss 上调好的规则可以直接搬到猎聘/51job/智联。采不到的字段是 null，
+ * 对应规则组自动跳过，不会误加分。
  */
-public class BossScorer {
+public class JobScorer {
 
     private static final int REJECT_SCORE = -1000;
 
     private final ScoreRules rules;
 
-    public BossScorer(ScoreRules rules) {
+    public JobScorer(ScoreRules rules) {
         this.rules = rules != null ? rules : new ScoreRules();
     }
 
-    public ScoreResult score(BossJobCard card) {
+    public ScoreResult score(JobCard card) {
         List<String> hits = new ArrayList<>();
 
         String title = lower(card.getJobName());
-        String degree = lower(card.getDegreeName());
-        String experience = lower(card.getExperienceName());
+        String degree = lower(card.getJobDegree());
+        String experience = lower(card.getJobExperience());
         String industry = lower(card.getIndustryName());
         String jd = lower(card.getPostDescription());
 

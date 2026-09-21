@@ -1,6 +1,7 @@
 package com.jobpilot.boss;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.jobpilot.delivery.JobCard;
 import lombok.Data;
 
 import java.util.ArrayList;
@@ -9,9 +10,13 @@ import java.util.List;
 /**
  * 岗位卡片。数据来自列表页点击卡片时拦截的 /wapi/zpgeek/job/detail.json 响应，
  * 不解析 DOM——列表页 DOM 是虚拟滚动的，字段残缺且会变。
+ *
+ * 实现 {@link JobCard} 是为了让编排层（DeliveryService）只认平台无关的那套
+ * getter；Boss 自己的字段名（encryptId/encryptUserId）原样保留，数据库里的
+ * 列名和它们是对得上的。
  */
 @Data
-public class BossJobCard {
+public class BossJobCard implements JobCard {
 
     private String encryptId;
     private String encryptUserId;
@@ -34,8 +39,38 @@ public class BossJobCard {
     private List<String> welfare = new ArrayList<>();
 
     /** 详情页地址。Boss 的加密 id 同时是详情页 URL 的 securityId */
-    public String jobUrl() {
+    public String getJobUrl() {
         return encryptId == null ? null : "https://www.zhipin.com/job_detail/" + encryptId + ".html";
+    }
+
+    /** {@inheritDoc} Boss 的岗位唯一标识就是加密 id */
+    @Override
+    public String getJobId() {
+        return encryptId;
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public String getBossId() {
+        return encryptUserId;
+    }
+
+    /** {@inheritDoc} Boss 的字段叫 locationName */
+    @Override
+    public String getCityName() {
+        return locationName;
+    }
+
+    /** {@inheritDoc} Boss 的字段叫 experienceName */
+    @Override
+    public String getJobExperience() {
+        return experienceName;
+    }
+
+    /** {@inheritDoc} Boss 的字段叫 degreeName */
+    @Override
+    public String getJobDegree() {
+        return degreeName;
     }
 
     /**

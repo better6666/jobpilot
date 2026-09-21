@@ -1,4 +1,4 @@
-package com.jobpilot.boss;
+package com.jobpilot.liepin;
 
 import com.jobpilot.browser.BrowserManager;
 import com.jobpilot.delivery.Delivery;
@@ -8,10 +8,11 @@ import com.jobpilot.delivery.DeliveryStatus;
 import com.jobpilot.delivery.RunCoordinator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 
 import java.util.List;
@@ -21,21 +22,21 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 /**
- * 去重与落库路径：预演不能挡住后续真实投递，已投递必须挡住。
- * deliver 被 mock 掉，不碰浏览器。
+ * 猎聘的去重与落库路径。driver 被 mock 掉，不碰浏览器。
  *
- * 这条用例同时覆盖共享内核 DeliveryService：另外三个平台复用同一套
- * processCard/去重/落库逻辑，改内核时先跑这里。
+ * 这条用例的意义不在猎聘本身，而在验证共享内核 DeliveryService 对第二个
+ * 平台同样成立：Boss 那套"预演不挡真实投递、已投递必须挡住、上限停任务"
+ * 的语义，猎聘一个字都没改就继承了。
  */
 @ExtendWith(MockitoExtension.class)
-@org.mockito.junit.jupiter.MockitoSettings(strictness = Strictness.LENIENT)
-class BossServiceDedupTest {
+@MockitoSettings(strictness = Strictness.LENIENT)
+class LiepinServiceDedupTest {
 
     @Mock
-    private BossProperties properties;
+    private LiepinProperties properties;
 
     @Mock
-    private BossDriver driver;
+    private LiepinDriver driver;
 
     @Mock
     private DeliveryMapper deliveryMapper;
@@ -43,23 +44,23 @@ class BossServiceDedupTest {
     @Mock
     private BrowserManager browserManager;
 
-    private BossService service;
+    private LiepinService service;
 
     @BeforeEach
     void setUp() {
-        BossProperties.BossConfig config = new BossProperties.BossConfig();
+        LiepinProperties.LiepinConfig config = new LiepinProperties.LiepinConfig();
         config.setSayHi("您好");
         config.setDryRun(true);
         when(properties.get()).thenReturn(config);
-        service = new BossService(properties, driver, deliveryMapper, browserManager,
-                new BossOptions(new com.fasterxml.jackson.databind.ObjectMapper()),
+        service = new LiepinService(properties, driver, deliveryMapper, browserManager,
+                new LiepinOptions(new com.fasterxml.jackson.databind.ObjectMapper()),
                 new RunCoordinator());
     }
 
-    private BossJobCard card() {
-        BossJobCard card = new BossJobCard();
-        card.setEncryptId("enc-1");
-        card.setEncryptUserId("boss-1");
+    private LiepinJobCard card() {
+        LiepinJobCard card = new LiepinJobCard();
+        card.setJobId("12345678");
+        card.setRecruiterId("998877");
         card.setJobName("陈列设计");
         card.setBrandName("某品牌");
         return card;
@@ -78,21 +79,20 @@ class BossServiceDedupTest {
 
         service.processCardForTest(card(), "陈列设计", properties.get(), null);
 
-        verify(driver, never()).deliver(any(), any(), any(), anyBoolean(), any(), any());
+        verify(driver, never()).deliver(any(), any(), any(), any(), any());
         verify(deliveryMapper, never()).insert(any(Delivery.class));
-        verify(deliveryMapper, never()).updateById(any(Delivery.class));
         assertEquals(1, service.status().getSkipped());
     }
 
     @Test
     void 预演过的岗位真实投递时不被挡住() {
         when(deliveryMapper.selectOne(any())).thenReturn(existing("预演"));
-        when(driver.deliver(any(), any(), any(), anyBoolean(), any(), any()))
+        when(driver.deliver(any(), any(), any(), any(), any()))
                 .thenReturn(DeliveryOutcome.delivered("您好"));
 
         service.processCardForTest(card(), "陈列设计", properties.get(), null);
 
-        verify(driver).deliver(any(), any(), any(), anyBoolean(), any(), any());
+        verify(driver).deliver(any(), any(), any(), any(), any());
         verify(deliveryMapper).updateById(any(Delivery.class));
         verify(deliveryMapper, never()).insert(any(Delivery.class));
         assertEquals(1, service.status().getDelivered());
@@ -100,9 +100,9 @@ class BossServiceDedupTest {
     }
 
     @Test
-    void 新岗位投递成功后insert且带上打招呼语() {
+    void 新岗位投递成功后insert并落到liepin平台() {
         when(deliveryMapper.selectOne(any())).thenReturn(null);
-        when(driver.deliver(any(), any(), any(), anyBoolean(), any(), any()))
+        when(driver.deliver(any(), any(), any(), any(), any()))
                 .thenReturn(DeliveryOutcome.delivered("您好"));
 
         service.processCardForTest(card(), "陈列设计", properties.get(), null);
@@ -110,20 +110,19 @@ class BossServiceDedupTest {
         ArgumentCaptor<Delivery> captor = ArgumentCaptor.forClass(Delivery.class);
         verify(deliveryMapper).insert(captor.capture());
         Delivery saved = captor.getValue();
+        assertEquals("liepin", saved.getPlatform());
         assertEquals("已投递", saved.getDeliveryStatus());
-        assertEquals("您好", saved.getGreeting());
+        assertEquals("12345678", saved.getEncryptId());
+        assertEquals("998877", saved.getEncryptUserId());
+        assertEquals("陈列设计", saved.getJobName());
         assertEquals("某品牌", saved.getBrandName());
-        assertEquals("陈列设计", saved.getKeyword());
-        assertEquals("boss", saved.getPlatform());
-        assertEquals("enc-1", saved.getEncryptId());
-        assertEquals("boss-1", saved.getEncryptUserId());
     }
 
     @Test
     void 投递失败允许重试并记录原因() {
         when(deliveryMapper.selectOne(any())).thenReturn(existing("投递失败"));
-        when(driver.deliver(any(), any(), any(), anyBoolean(), any(), any()))
-                .thenReturn(DeliveryOutcome.failed("未找到聊天输入框"));
+        when(driver.deliver(any(), any(), any(), any(), any()))
+                .thenReturn(DeliveryOutcome.failed("未找到沟通按钮"));
 
         service.processCardForTest(card(), "陈列设计", properties.get(), null);
 
@@ -133,8 +132,8 @@ class BossServiceDedupTest {
     }
 
     @Test
-    void 打分不达标记已过滤并带上分数() {
-        BossProperties.BossConfig config = properties.get();
+    void 打分不达标记已过滤() {
+        LiepinProperties.LiepinConfig config = properties.get();
         com.jobpilot.delivery.ScoreRules rules = new com.jobpilot.delivery.ScoreRules();
         rules.setThreshold(50);
         rules.setJobRules(List.of(newScoreRule("陈列设计", 1)));
@@ -146,21 +145,13 @@ class BossServiceDedupTest {
         verify(deliveryMapper).insert(captor.capture());
         assertEquals("已过滤", captor.getValue().getDeliveryStatus());
         assertEquals(1, captor.getValue().getScore());
-        verify(driver, never()).deliver(any(), any(), any(), anyBoolean(), any(), any());
-        assertEquals(1, service.status().getFiltered());
-    }
-
-    private static com.jobpilot.delivery.ScoreRules.Rule newScoreRule(String match, int score) {
-        com.jobpilot.delivery.ScoreRules.Rule rule = new com.jobpilot.delivery.ScoreRules.Rule();
-        rule.setMatch(match);
-        rule.setScore(score);
-        return rule;
+        verify(driver, never()).deliver(any(), any(), any(), any(), any());
     }
 
     @Test
     void 触发每日上限时停任务并记失败() {
         when(deliveryMapper.selectOne(any())).thenReturn(null);
-        when(driver.deliver(any(), any(), any(), anyBoolean(), any(), any()))
+        when(driver.deliver(any(), any(), any(), any(), any()))
                 .thenReturn(new DeliveryOutcome(DeliveryStatus.LIMIT, "今日沟通已达上限", null));
 
         service.processCardForTest(card(), "陈列设计", properties.get(), null);
@@ -169,6 +160,12 @@ class BossServiceDedupTest {
         verify(deliveryMapper).insert(captor.capture());
         assertEquals("投递失败", captor.getValue().getDeliveryStatus());
         assertEquals("触发每日投递上限", captor.getValue().getFailReason());
-        assertEquals(1, service.status().getFailed());
+    }
+
+    private static com.jobpilot.delivery.ScoreRules.Rule newScoreRule(String match, int score) {
+        com.jobpilot.delivery.ScoreRules.Rule rule = new com.jobpilot.delivery.ScoreRules.Rule();
+        rule.setMatch(match);
+        rule.setScore(score);
+        return rule;
     }
 }

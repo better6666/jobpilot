@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JobPilot</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: #f5f6f8; color: #1f2329; min-height: 100vh; padding: 24px;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; }
+  .top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+  h1 { font-size: 22px; }
+  .top a { font-size: 13px; color: #3370ff; text-decoration: none; }
+  .sub { font-size: 13px; color: #8a8f99; margin-bottom: 20px; line-height: 1.7; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+  .pcard {
+    background: #fff; border-radius: 12px; padding: 20px; text-decoration: none;
+    color: inherit; box-shadow: 0 2px 12px rgba(0,0,0,.06);
+    border: 2px solid transparent; transition: border-color .15s;
+    display: block;
+  }
+  .pcard:hover { border-color: #3370ff; }
+  .pcard h2 { font-size: 17px; margin-bottom: 8px; }
+  .pcard p { font-size: 12px; color: #8a8f99; line-height: 1.7; }
+  .pcard .go { font-size: 13px; color: #3370ff; margin-top: 12px; display: block; }
+  .note {
+    background: #fff; border-radius: 12px; padding: 20px; margin-top: 20px;
+    box-shadow: 0 2px 12px rgba(0,0,0,.06); font-size: 13px; color: #4e5560; line-height: 1.9;
+  }
+  .note b { color: #1f2329; }
+  .note li { margin-left: 18px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <h1>JobPilot · 简历自动投递</h1>
+    <a href="/license.html" target="_blank">卡密管理 →</a>
+  </div>
+  <div class="sub">选一个平台开始。四个平台共用一套打分规则和投递记录，配置互不影响。</div>
+
+  <div class="cards">
+    <a class="pcard" href="/delivery.html?platform=boss">
+      <h2>Boss 直聘</h2>
+      <p>发消息给 HR。筛选项最多（职位类型/经验/学历/规模/融资阶段），有打招呼话术。</p>
+      <span class="go">进入 →</span>
+    </a>
+    <a class="pcard" href="/delivery.html?platform=liepin">
+      <h2>猎聘</h2>
+      <p>投递简历。列表页有接口，字段最全；筛选项只有薪资。</p>
+      <span class="go">进入 →</span>
+    </a>
+    <a class="pcard" href="/delivery.html?platform=job51">
+      <h2>51job</h2>
+      <p>列表页直接投递，一次点击完成。用已保存的登录 Cookie，一般不用扫码。</p>
+      <span class="go">进入 →</span>
+    </a>
+    <a class="pcard" href="/delivery.html?platform=zhilian">
+      <h2>智联招聘</h2>
+      <p>微信扫码登录。没有可拦的接口，字段从页面逐条读，跑得比别的平台慢。</p>
+      <span class="go">进入 →</span>
+    </a>
+  </div>
+
+  <div class="note">
+    <b>用之前</b>
+    <ul>
+      <li><b>先开预演模式</b>：走完整流程但不真投，记录显示"预演"。确认筛选符合预期再关。</li>
+      <li><b>一次只跑一个平台</b>：四个平台共用同一个 Chrome 窗口，同时启动会被全局运行锁拦下。</li>
+      <li><b>投递时窗口不要最小化</b>：页面在后台时部分站点会暂停渲染，导致点击落空。</li>
+      <li><b>智联只采得到职位名、经验、薪资</b>：学历/HR/行业/规模/JD 这几组打分规则在智联上不会命中。</li>
+    </ul>
+  </div>
+</div>
+</body>
+</html>

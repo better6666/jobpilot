@@ -118,7 +118,8 @@ curl -X POST http://localhost:9527/api/license/unbind
 ### 4. 测试
 
 ```bash
-./gradlew test        # Java 侧 84 个单测：门禁过滤器 + 授权状态机 + 控制器入参校验 + 启动链路
+./gradlew test        # Java 侧 202 个单测：门禁过滤器 + 授权状态机 + 控制器入参校验
+                      #   + 启动链路 + 四平台的 URL 构造 / 卡片解析 / 去重 / 打分
 npm test              # license-server 侧：卡密生成/时长等纯逻辑
 npm run typecheck     # Worker 侧 tsc --noEmit
 ```
@@ -126,6 +127,12 @@ npm run typecheck     # Worker 侧 tsc --noEmit
 Java 测试全部用 Mockito 顶掉 ConfigService 与 LicenseClient，不连数据库、不发网络请求，
 覆盖的关键路径：未激活 402 拦截、激活成功落库、服务端拒绝（REVOKED/EXPIRED 映射）、
 服务端不可达的宽限判定（GRACE vs NETWORK_BLOCKED）、解绑、心跳边界、fail-open。
+
+四平台的浏览器操作（Driver）不写单测——那需要真浏览器和真账号，由真机预演覆盖；
+单测盯的是**能从 DOM/JSON 里提出正确字段的纯函数**：URL 构造（含薪资归一、页码钳制、
+关键词编码）、卡片字段解析、`extractJobId`、去重与打分。每个平台都有一组用**实机抓到的
+真实片段**当夹具的用例（如 51job 的 `sensorsdata`、智联的 `jobdetail` 链接），平台改版时
+这些用例先红。
 
 `JobPilotApplicationStartTest` 是唯一真起一遍 Spring 容器的用例（数据目录用系统属性指到
 临时目录，不碰真库），盯的是"配置端口被占用时应用照样起来并换端口"——这个行为以前只在
@@ -214,15 +221,37 @@ npx wrangler deploy
 3. **列表第一个卡片默认选中态**，直接点不触发详情接口，必须先点第二个再切回——且这与 `maxJobsPerKeyword` 无关，只跑 1 个岗位时同样要热身，否则必然超时
 4. **服务端任何拒绝都不能挡住启动**：缓存 token 失效、api-base 配错，一律降级成未激活态让用户换卡（历史上有两次这类崩溃）
 
-### P2 其余平台
+### P2 其余平台 ✅ 已完成（猎聘 / 51job / 智联招聘，2026-09-21 真机验证通过）
 
-- 猎聘 / 51job / 智联，逐个按 P1 的模式接入
-- 平台 DOM 变化时只有对应 adapter 要改，门禁/记录/UI 不动
+三个平台都接到同一套共享内核上，没有复制四份编排：
 
-### P3 前端与管理页
+- 抽象出 `com.jobpilot.delivery`：`DeliveryService<C extends JobCard>` 管「采集 → 打分 → 去重 → 投递 → 落库」全流程，`CardConsumer`/`DeliveryOutcome`/`ProgressListener` 是适配器要实现的全部接口；Boss 已重构上去，另三个是新建
+- `RunCoordinator` 全局运行锁：四个平台共用同一个浏览器上下文，同一时刻只允许一个在跑，第二个启动直接返回"正在投递"
+- 每平台独立 config（`config_key = 平台名`），`deliveries` 表按 platform 隔离，唯一索引 (platform, encrypt_id, encrypt_user_id)
+- 管理页通用投递页 + 平台入口，四平台共用一套 UI
+- 城市/薪资码表做成 classpath JSON（liepin 14 个、job51 26 个、zhilian 42 个），离线可用
 
-- 决定是继续单页 HTML 还是上 Next.js（单页更利于打包分发，倾向继续单页）
-- 投递记录表格、筛选、统计
+真机验证结论（macOS，真实 Chrome + 真实账号，全部预演模式，零真实发送）：
+
+| 平台 | 数据源 | 采集结果 |
+|---|---|---|
+| 猎聘 | 拦 `api-c.liepin.com/...pc-search-job` | 列表/分页/投递入口都对上 |
+| 51job | 拦 `/api/job/search-pc` | 3 个岗位字段完整、记 `预演` |
+| 智联 | 纯 DOM（点卡片读详情面板） | 5 个岗位字段完整、记 `预演` |
+
+真机验证逼出来的坑（改这段代码前先读，都已写进代码注释）：
+
+1. **51job 的 jobId 不在任何链接里**。新版列表的 `a[href]` 全是公司页（`/all/coXXXX.html`），数字 jobId 只存在于卡片 div 的 `sensorsdata` 埋点 JSON 里（HTML 实体编码），和搜索接口返回的是同一个值。老工程那套 `div.ss` 排序下拉热身对现网已无效，已删
+2. **智联的关键词和薪资都必须走 query**。旧做法先导航 `/sou/jl639/p1` 再往输入框敲关键词，SPA 会跳到不含 `sl` 的地址，薪资过滤被悄悄丢掉（实测同一关键词有/无 `sl` 分别返回 20 和 11 条）。改成 `https://www.zhaopin.com/jobs?pageMode=search&jl=&kw=&sl=` 服务端渲染路由，两个条件都生效。注意智联的 `sl` 是**区间重叠**不是包含，`sl=12000,20000` 会放行 8000-15000
+3. **智联的 jobId 只在详情面板里**，列表卡片扫遍 `data-*` 属性一个都没有，唯一锚点还是公司页。所以每张卡都必须点一次面板。而面板 DOM 是复用的，点下去旧内容还在，靠 `waitFor` 标题或固定 sleep 都会读到上一张甚至下一张的面板——jobId 错等于去重错、真实模式下就是投错职位。现在用「列表卡标题对上 + jobdetail 链接和上一张不同」双条件轮询确认，投递前再用 `jobUrl` 精确校验一次面板
+4. **智联的面板字段容器和老台账写的不一样**：地区/经验/学历/招聘人数在 `ul.job-detail-summary__tags > li` 里，不在 `header-main` 的 span 里；学历**采得到**（`学历不限`/`大专`/`本科`），老台账"采不到"的结论作废。公司 meta 有两段和三段两种形态（融资阶段 · 规模 · 行业），规模按"含人"认、行业取末段
+5. **51job 的 `jobAreaString` 地区串可能用间隔号分隔**（`苏州·苏州工业园区`），拆分时要和 `-` 一起按最先出现的分隔符切
+
+### P3 前端与管理页 ✅ 已完成
+
+- 继续单页 HTML（更利于打包分发）：`index.html` 是平台选择页，`delivery.html?platform=boss|liepin|job51|zhilian` 一个通用投递页按 query 参数切平台，四平台共用一套 UI
+- 投递记录表格（每平台独立，`limit` 可调）、启动/停止、预演开关、实时日志
+- 仍未做：记录表的筛选与统计图表
 
 ### P4 话术与 AI 润色
 
@@ -266,20 +295,34 @@ jobpilot/
 ├── src/main/java/com/jobpilot/
 │   ├── JobPilotApplication.java  # 入口（建用户数据目录、按平台设绝对路径）
 │   ├── common/                   # 统一响应体、跨域过滤器
-│   ├── system/                   # 配置表、建表、健康检查、路径
+│   ├── system/                   # 配置表、建表、健康检查、路径、端口顺延、页面打开
 │   ├── browser/                  # Playwright 驱动层：单线程 dispatcher、持久上下文
-│   ├── boss/                     # Boss 平台：驱动、编排、打分、选项、落库、管理页 API
+│   ├── delivery/                 # 共享内核：JobCard/DeliveryService/去重/打分/运行锁
+│   ├── boss/                     # Boss 平台适配器（Driver/Service/Card/URL/Options/API）
+│   ├── liepin/                   # 猎聘平台适配器（同上五件套）
+│   ├── job51/                    # 51job 平台适配器（同上五件套）
+│   ├── zhilian/                  # 智联招聘平台适配器（同上五件套）
 │   └── license/                  # 卡密：校验、门禁、控制器、激活页数据
 ├── src/test/java/com/jobpilot/
 │   ├── license/                  # 门禁 / 状态机 / 客户端健壮性 / 控制器单测
+│   ├── delivery/                 # 打分与平台选项接口单测
 │   ├── boss/                     # 打分 / URL 构造 / 详情解析 / 去重落库单测
-│   └── system/                   # 数据目录路径单测
+│   ├── liepin/                   # URL 构造 / 卡片解析 / 去重落库单测
+│   ├── job51/                    # 同上 + sensorsdata 提 jobId 单测
+│   ├── zhilian/                  # URL 构造 / 卡片解析 / 面板字段 / 去重落库单测
+│   ├── browser/                  # driver 装配与 node 解包单测
+│   └── system/                   # 数据目录路径 / 端口顺延 / 应用启动单测
 ├── src/main/resources/
 │   ├── application.yaml
 │   ├── boss-options.json         # 374 城市 + 学历/经验/薪资等筛选项码表
+│   ├── liepin-options.json       # 猎聘城市/薪资码表（离线可用）
+│   ├── job51-options.json        # 51job 城市/薪资码表（离线可用）
+│   ├── zhilian-options.json      # 智联城市码表（离线可用）
 │   └── static/
 │       ├── license.html          # 用户激活页
-│       └── boss.html             # 投递管理页（配置/启动/日志/记录）
+│       ├── index.html            # 平台入口页（选平台进通用投递页）
+│       ├── delivery.html         # 通用投递管理页（配置/启动/日志/记录，?platform= 区分）
+│       └── boss.html             # Boss 专用页（保留兼容旧入口）
 └── license-server/               # CF Worker 卡密服务端（独立部署）
     ├── src/index.ts              # API：activate/verify/report/unbind + admin
     ├── src/lib/cards.ts          # 卡密生成等纯逻辑

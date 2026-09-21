@@ -1,4 +1,4 @@
-package com.jobpilot.boss;
+package com.jobpilot.delivery;
 
 import lombok.Data;
 
@@ -11,6 +11,9 @@ import java.util.List;
  *
  * 规则语义与旧工具一致，用户在原工程里调好的规则可以原样搬过来。
  * 出厂默认全部为空、threshold=0：不拦任何岗位，用户按自己的求职方向在管理页里配。
+ *
+ * 四个平台共用：Boss 的字段（学历/经验/行业/JD）在其余三个平台上都能取到，
+ * 差别只在 51job 和智联的 JD 要从详情页另取，取不到时 jdRules 自然不命中。
  */
 @Data
 public class ScoreRules {

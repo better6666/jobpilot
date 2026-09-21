@@ -1,12 +1,21 @@
-# 交接状态 —— 打包分发、双击启动与界面形态
+# 交接状态 —— 打包分发、双击启动、界面形态与 P2 三平台
 
-> `.ai/REQUIREMENTS.md` 是 P1 Boss 移植的需求台账，本篇记的是 packaging / 分发 / 启动链路侧的状态，
-> 两者互补。更新于 2026-09-21。
+> `.ai/REQUIREMENTS.md` 是 P1 Boss 移植的需求台账，`.ai/REQUIREMENTS-P2.md` 是
+> 猎聘/51job/智联三平台的台账，本篇记 packaging / 分发 / 启动链路侧的状态，
+> 三者互补。更新于 2026-09-21。
 
 ## 当前状态
 
 macOS 侧已交付并装机验证：`/Applications/JobPilot.app`（134MB，从 `build/dist/JobPilot-1.0.0.dmg` 装入）。
 Windows 侧只走 CI（`.github/workflows/build.yml`，tag 推送自动出包并附 Release），**未推送 tag，未发布**。
+
+**P2 三平台（猎聘 / 51job / 智联招聘）已实现并真机预演验证通过**，四平台共用一套
+`DeliveryService` 内核 + `RunCoordinator` 单运行锁 + 一个通用投递页。202 个单测全过。
+坑和字段容器都写进了 `.ai/REQUIREMENTS-P2.md` 第 5 节和各 Driver 的类注释，
+改那三个适配器之前先读。
+
+**装机版还是 P1 的包**（`/Applications/JobPilot.app` 里只有 Boss）。三平台要交付给用户
+得重新打包：`./gradlew bootJar` → jpackage，别直接推 tag，等用户明确要求。
 
 ## 界面形态：本地网页 + Chrome 应用模式窗口
 
@@ -59,12 +68,24 @@ Windows 侧只走 CI（`.github/workflows/build.yml`，tag 推送自动出包并
 
 ## 测试
 
-`./gradlew test`：84 个单测，0 失败。端口相关 7 个：`PortFallbackListenerTest`（5）+
-`JobPilotApplicationStartTest`（2）。启动链路（`LocalPageOpener`）由装机后的真机验证覆盖，
-CI 冒烟测试用 `--jobpilot.open-page=false` 关掉自动打开，不在 CI 里开浏览器。
+`./gradlew test`：202 个单测，0 失败（26 个测试类）。其中四平台适配器的纯函数
+（URL 构造、卡片字段解析、`extractJobId`、地区拆分、去重、打分、每日上限）约 129 个
+（Boss 18 / 猎聘 25 / 51job 44 / 智联 43），端口与启动 10 个：
+`PortFallbackListenerTest`（5）+ `JobPilotApplicationStartTest`（2）+ `SystemPathsTest`（3）。
+启动链路（`LocalPageOpener`）由装机后的真机验证覆盖，CI 冒烟测试用
+`--jobpilot.open-page=false` 关掉自动打开，不在 CI 里开浏览器。
+
+Driver 层（真浏览器操作）没有单测，靠真机预演覆盖——这也是为什么每个平台的解析测试里
+都放了**实机抓回来的真实 DOM 片段/接口返回**当夹具，平台改版时用例先红。
 
 ## 待办 / 注意
 
 - Windows 打包仍只在 CI 验证过，未签名会触发 SmartScreen
 - 需要发布时才推 tag（`v*`），推了就会自动附到 Release——**未经明确要求不要推**
 - `license-server/.dev.vars` 的 ADMIN_KEY 不进任何仓库文件
+- **装机版落后于代码**：`/Applications/JobPilot.app` 是 P1 的包，只有 Boss 一个平台。
+  三平台要交付需重新打包
+- 关掉应用窗口后端 Java 进程不退出（`pagehide` → `System.exit` 未做），
+  Dock 里是通用 Java 图标
+- 用户的 `boss` config 是真配置（城市上海、有话术），另三个平台的 config 行已删、
+  走代码默认值——用户自己在页面上填即可
