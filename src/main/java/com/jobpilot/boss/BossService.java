@@ -1,5 +1,6 @@
 package com.jobpilot.boss;
 
+import com.jobpilot.ai.GreetingService;
 import com.jobpilot.browser.BrowserManager;
 import com.jobpilot.delivery.DeliveryMapper;
 import com.jobpilot.delivery.DeliveryOutcome;
@@ -36,8 +37,9 @@ public class BossService extends DeliveryService<BossJobCard> {
     private final BossOptions options;
 
     public BossService(BossProperties properties, BossDriver driver, DeliveryMapper mapper,
-                       BrowserManager browserManager, BossOptions options, RunCoordinator coordinator) {
-        super(mapper, browserManager, coordinator);
+                       BrowserManager browserManager, BossOptions options, RunCoordinator coordinator,
+                       GreetingService greetingService) {
+        super(mapper, browserManager, coordinator, greetingService);
         this.properties = properties;
         this.driver = driver;
         this.options = options;
@@ -120,7 +122,11 @@ public class BossService extends DeliveryService<BossJobCard> {
     protected DeliveryOutcome deliver(BossJobCard card, Page listPage, PlatformConfig config,
                                       ProgressListener listener, BooleanSupplier stop) {
         BossProperties.BossConfig bossConfig = (BossProperties.BossConfig) config;
-        return driver.deliver(listPage, card, bossConfig.getSayHi(), bossConfig.isDryRun(),
+        GreetingService.Greeting greeting = greetingFor(card, config);
+        if (greeting.note() != null) {
+            appendLog("话术兜底 | " + brief(card) + " | " + greeting.note());
+        }
+        return driver.deliver(listPage, card, greeting.text(), bossConfig.isDryRun(),
                 listener, stop);
     }
 

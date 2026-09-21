@@ -100,7 +100,7 @@ curl -X POST http://localhost:9527/api/license/activate \
 
 # 3. 门禁行为：任意平台的 /api/<平台>/start 投递入口，
 #    未激活时返回 402（连端点没实现都会被拦住，不会漏成 404）；
-#    激活后穿过门禁——当前投递引擎还没移植（P1），所以是 404，属预期
+#    激活后穿过门禁，四个平台的投递引擎都在（P1/P2 已移植）
 curl -X POST http://localhost:9527/api/boss/start
 
 # 4. 解绑：释放设备占用（服务端终身 3 次、每次冷却 7 天）
@@ -118,8 +118,9 @@ curl -X POST http://localhost:9527/api/license/unbind
 ### 4. 测试
 
 ```bash
-./gradlew test        # Java 侧 202 个单测：门禁过滤器 + 授权状态机 + 控制器入参校验
+./gradlew test        # Java 侧 272 个单测：门禁过滤器 + 授权状态机 + 控制器入参校验
                       #   + 启动链路 + 四平台的 URL 构造 / 卡片解析 / 去重 / 打分
+                      #   + AI 话术（URL 归一 / 输出清洗 / 去重重试 / 兜底 / 配置读写与打码）
 npm test              # license-server 侧：卡密生成/时长等纯逻辑
 npm run typecheck     # Worker 侧 tsc --noEmit
 ```
@@ -148,6 +149,18 @@ Java 测试全部用 Mockito 顶掉 ConfigService 与 LicenseClient，不连数�
 | https://jobpilot-license.2333333434.workers.dev/ | 备用入口 |
 
 根路径就是激活页，`/api/info` 是服务信息，`/admin/*` 是管理接口。
+
+**卡密管理平台**（发卡 / 列表 / 作废 / 统计）在 `https://jobpilot.better999.dpdns.org/manage`，页面文件 `license-server/public/manage.html`。打开后第一件事是粘贴 ADMIN_KEY——key 只存在 `sessionStorage` 里（关标签页即失效，不落盘、不进仓库、不发请求到第三方），每次请求以 `Authorization: Bearer` 头带上，401 就提示重填。
+
+管理平台能做的事：
+
+| 面板 | 说明 |
+|---|---|
+| 运营统计 | 卡密总数 / 有效 / 已作废，按时长·次数·试用分型，24 小时内有心跳的设备数 |
+| 发卡 | time / quota / trial 三种，1-100 张一批，可设时长或次数、最大设备数、批次号、备注。**卡密明文只在创建响应里完整出现一次**，之后列表一律打码，所以要当场复制或下载 |
+| 卡密列表 | 按状态/批次筛选，展示打码卡号、剩余、已绑设备数、激活与到期时间；作废需输入完整卡号（列表只给打码值，这是故意的） |
+
+⚠️ 管理页的 URL 故意不放在 `/admin/*` 命名空间下。带 `main` 的 Worker 上静态资源优先于 Worker 提供，`/admin.html` 会被 Assets 307 到 `/admin`，而 `/admin/*` 又被 Bearer 中间件拦成 401——页面根本打不开。所以叫 `manage.html`，访问 `/manage`。
 
 对应资源：
 
@@ -253,12 +266,22 @@ npx wrangler deploy
 - 投递记录表格（每平台独立，`limit` 可调）、启动/停止、预演开关、实时日志
 - 仍未做：记录表的筛选与统计图表
 
-### P4 话术与 AI 润色
+### P4 话术与 AI 润色 ✅ 已完成（2026-09-21 装机版实机验证通过）
 
-- 打招呼话术模板池 + 随机/轮换（解决"话术重复很呆"的反馈）
-- AI 中转站接入：按 JD 生成个性化开场，失败降级到模板
+按岗位 JD 生成个性化打招呼语，接**任意 OpenAI 兼容接口**——官方（`api.openai.com`）和中转站都行，地址由用户在管理页自己填，代码里不预置任何 key 或默认端点。
 
-### P5 打包分发
+- `com.jobpilot.ai`：`AiConfig`（配置模型）/ `AiProperties`（存 config 表，key 只写不打码读）/ `AiService`（HTTP 客户端 + 地址归一 + 输出清洗 + 重试）/ `GreetingService`（拼提示词、去重、兜底）/ `AiController`（`/api/ai/*`）
+- 地址归一：`https://api.openai.com` 自动补 `/v1`；中转站自定义前缀（`/v1`、`/api/v3` 之类）原样保留；粘了整个 `.../chat/completions` 端点只砍掉结尾那截；协议头大小写不敏感
+- 输出清洗：去代码围栏、包裹引号、"话术："这类自带标签；多段输出只取第一段；空白压成空格；超长按最后一个标点截断
+- 去重：和最近 30 条投递话术比对，重复就带着上一句要求模型"换个切入点"重来一次，还重复才退回固定话术
+- 兜底链：AI 关着 / 三要素没配全 / 接口报错 / 输出为空 → 一律静默用固定话术，**不卡投递流程**
+- 重试策略：4xx 不重试（429 除外），5xx 与连接失败退避 {600ms, 1800ms} 最多 3 次；请求体不带 `max_tokens`、关流式（部分中转站对这两个字段挑食）
+- 管理页 `ai.html`：接口开关、地址、key（password 输入框 + "清除 Key"）、模型（可拉取 `/models` 列表点选）、人设、温度，"测试连接"直接看一句真实生成结果
+- key 的存取语义：请求体不传 = 保留原值，空串 = 清除，其他 = 替换。管理页从不回显明文 key，输入框留空时没法区分"没改"和"清空"，所以由这条规则兜底
+
+装机版实测结论：装机版激活卡密后门禁放行 → Boss 预演 50 个岗位零失败 → 2 条用了 AI 生成话术（清洗后无围栏残留），其余 48 条因假服务每次返回同一句话触发去重、按设计退回固定话术。
+
+### P5 打包分发 ✅ 已完成
 
 - `./gradlew bootJar` 产出可执行 jar
 - 用 jlink 裁剪 JRE + jpackage 打双平台包（macOS dmg / Windows app-image），用户双击即用、不用装 JDK
@@ -302,6 +325,7 @@ jobpilot/
 │   ├── liepin/                   # 猎聘平台适配器（同上五件套）
 │   ├── job51/                    # 51job 平台适配器（同上五件套）
 │   ├── zhilian/                  # 智联招聘平台适配器（同上五件套）
+│   ├── ai/                       # AI 话术：配置模型 / OpenAI 兼容客户端 / 话术生成与去重兜底
 │   └── license/                  # 卡密：校验、门禁、控制器、激活页数据
 ├── src/test/java/com/jobpilot/
 │   ├── license/                  # 门禁 / 状态机 / 客户端健壮性 / 控制器单测
@@ -310,6 +334,7 @@ jobpilot/
 │   ├── liepin/                   # URL 构造 / 卡片解析 / 去重落库单测
 │   ├── job51/                    # 同上 + sensorsdata 提 jobId 单测
 │   ├── zhilian/                  # URL 构造 / 卡片解析 / 面板字段 / 去重落库单测
+│   ├── ai/                       # 地址归一 / 输出清洗 / 去重重试 / 兜底 / 配置读写与打码
 │   ├── browser/                  # driver 装配与 node 解包单测
 │   └── system/                   # 数据目录路径 / 端口顺延 / 应用启动单测
 ├── src/main/resources/
@@ -322,7 +347,14 @@ jobpilot/
 │       ├── license.html          # 用户激活页
 │       ├── index.html            # 平台入口页（选平台进通用投递页）
 │       ├── delivery.html         # 通用投递管理页（配置/启动/日志/记录，?platform= 区分）
+│       ├── ai.html               # AI 话术配置页（接口开关/地址/key/模型/人设/测试连接）
 │       └── boss.html             # Boss 专用页（保留兼容旧入口）
+└── license-server/               # CF Worker 卡密服务端（独立部署）
+    ├── src/index.ts              # API：activate/verify/report/unbind + admin
+    ├── src/lib/cards.ts          # 卡密生成等纯逻辑
+    └── public/
+        ├── index.html            # 激活页（Worker 静态资源，用户在 CF 域名上打开）
+        └── manage.html           # 卡密管理平台（发卡/列表/作废/统计，key 只进 sessionStorage）
 └── license-server/               # CF Worker 卡密服务端（独立部署）
     ├── src/index.ts              # API：activate/verify/report/unbind + admin
     ├── src/lib/cards.ts          # 卡密生成等纯逻辑

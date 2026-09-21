@@ -1,6 +1,7 @@
 package com.jobpilot.delivery;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.jobpilot.ai.GreetingService;
 import com.jobpilot.browser.BrowserManager;
 import com.microsoft.playwright.Page;
 import jakarta.annotation.PreDestroy;
@@ -42,16 +43,18 @@ public abstract class DeliveryService<C extends JobCard> {
     private final DeliveryMapper mapper;
     private final BrowserManager browserManager;
     private final RunCoordinator coordinator;
+    private final GreetingService greetingService;
 
     private volatile RunStatus status = RunStatus.idle();
     private volatile boolean stopRequested;
     private Future<?> currentRun;
 
     protected DeliveryService(DeliveryMapper mapper, BrowserManager browserManager,
-                              RunCoordinator coordinator) {
+                              RunCoordinator coordinator, GreetingService greetingService) {
         this.mapper = mapper;
         this.browserManager = browserManager;
         this.coordinator = coordinator;
+        this.greetingService = greetingService;
     }
 
     // ------------------------------------------------------------------
@@ -94,6 +97,26 @@ public abstract class DeliveryService<C extends JobCard> {
     /** 页面是否提示今日投递/沟通上限：命中就必须停，继续点只会全量失败 */
     protected boolean limitReachedOnPage(Page page) {
         return false;
+    }
+
+    // ------------------------------------------------------------------
+    // 话术
+    // ------------------------------------------------------------------
+
+    /**
+     * 一个岗位要发的话术：AI 开着就按 JD 现生成，否则用配置里的固定话术。
+     *
+     * <p>放在基类而不是各平台的 deliver() 里，是因为"人设 / 中转站地址 /
+     * 去重 / 兜底"这套逻辑四平台共用，抄四遍的后果是以后改一处忘三处。
+     * 现在只有 Boss（打招呼语）和猎聘（IM 追问）真会用到。
+     */
+    protected GreetingService.Greeting greetingFor(C card, PlatformConfig config) {
+        return greetingService.compose(card, config.getSayHi());
+    }
+
+    /** 猎聘 IM 里的追问句 */
+    protected GreetingService.Greeting followUpFor(C card, PlatformConfig config) {
+        return greetingService.composeFollowUp(card, config.getSayHi());
     }
 
     // ------------------------------------------------------------------
@@ -194,6 +217,10 @@ public abstract class DeliveryService<C extends JobCard> {
             }
             status.setLoggedIn(true);
             appendLog("登录态就绪，开始采集岗位");
+            String ai = greetingService.describe();
+            if (ai != null) {
+                appendLog(ai);
+            }
 
             String city = cityCode(config);
             for (int k = 0; k < keywords.size(); k++) {

@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JobPilot 卡密管理平台</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: #f5f6f8; color: #1f2329; min-height: 100vh; padding: 24px;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; }
+  .top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; gap: 12px; flex-wrap: wrap; }
+  h1 { font-size: 20px; }
+  .top .row { gap: 10px; }
+  .top a { font-size: 13px; color: #3370ff; text-decoration: none; }
+  .card {
+    background: #fff; border-radius: 12px; padding: 24px; margin-bottom: 16px;
+    box-shadow: 0 2px 12px rgba(0,0,0,.06);
+  }
+  h2 { font-size: 15px; margin-bottom: 14px; }
+  label { display: block; font-size: 12px; color: #8a8f99; margin-bottom: 4px; }
+  input[type=text], input[type=password], input[type=number], select, textarea {
+    width: 100%; padding: 8px 10px; border: 1px solid #d5d8de; border-radius: 8px;
+    font-size: 13px; outline: none; background: #fff; font-family: inherit;
+  }
+  input:focus, select:focus, textarea:focus { border-color: #3370ff; }
+  .field { margin-bottom: 14px; }
+  .hint { font-size: 12px; color: #8a8f99; margin-top: 6px; line-height: 1.7; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  button {
+    padding: 9px 18px; border: none; border-radius: 8px; font-size: 14px;
+    cursor: pointer; background: #3370ff; color: #fff;
+  }
+  button.secondary { background: #f0f1f3; color: #4e5560; }
+  button.danger { background: #e64545; }
+  button.small { padding: 6px 12px; font-size: 12px; }
+  button:disabled { opacity: .6; cursor: default; }
+  .state { display: inline-block; padding: 4px 12px; border-radius: 999px;
+           font-size: 13px; font-weight: 600; }
+  .state.ok { background: #e8f5e9; color: #2e7d32; }
+  .state.bad { background: #ffebee; color: #c62828; }
+  .state.off { background: #f0f1f3; color: #8a8f99; }
+  .toast { font-size: 13px; min-height: 18px; }
+  .toast.err { color: #c62828; }
+  .toast.ok { color: #2e7d32; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px 16px; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+  .stat { background: #f7f8fa; border-radius: 10px; padding: 14px 16px; }
+  .stat .k { font-size: 12px; color: #8a8f99; margin-bottom: 6px; }
+  .stat .v { font-size: 22px; font-weight: 600; color: #1f2329; }
+  .stat .v small { font-size: 12px; font-weight: 400; color: #8a8f99; margin-left: 4px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #f0f1f3; white-space: nowrap; }
+  th { font-size: 12px; color: #8a8f99; font-weight: 500; }
+  td.wrap { white-space: normal; word-break: break-all; }
+  .tag { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; }
+  .tag.ok { background: #e8f5e9; color: #2e7d32; }
+  .tag.bad { background: #ffebee; color: #c62828; }
+  .tag.warn { background: #fff3e0; color: #e65100; }
+  .tag.off { background: #f0f1f3; color: #8a8f99; }
+  .keys {
+    background: #1f2329; color: #d7dae0; border-radius: 8px; padding: 12px 14px;
+    font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 12px;
+    line-height: 1.9; max-height: 200px; overflow-y: auto; white-space: pre-wrap;
+  }
+  .table-scroll { overflow-x: auto; }
+  .empty { color: #8a8f99; font-size: 13px; padding: 18px 0; text-align: center; }
+  .keybar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .keybar input { flex: 1; min-width: 260px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <h1>JobPilot · 卡密管理平台</h1>
+    <div class="row">
+      <a href="/" target="_blank">用户激活页 →</a>
+      <span id="connState" class="state off">未连接</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>管理密钥</h2>
+    <div class="keybar">
+      <input id="adminKey" type="password" placeholder="粘贴 ADMIN_KEY" autocomplete="new-password">
+      <button id="btnConnect" class="small">连接</button>
+      <button id="btnDisconnect" class="secondary small">清除</button>
+    </div>
+    <div class="hint">
+      密钥只保存在当前标签页的 sessionStorage 里，关掉标签页即失效，不写入任何文件。
+      密钥在 CF 上由 <code>wrangler secret put ADMIN_KEY</code> 设置，本地在 .dev.vars 里。
+    </div>
+    <div id="keyToast" class="toast" style="margin-top:10px"></div>
+  </div>
+
+  <div id="panel" style="display:none">
+    <div class="card">
+      <div class="row" style="justify-content:space-between;margin-bottom:14px">
+        <h2 style="margin:0">运营统计</h2>
+        <button id="btnRefresh" class="secondary small">刷新</button>
+      </div>
+      <div id="stats" class="stats"></div>
+    </div>
+
+    <div class="card">
+      <h2>发卡</h2>
+      <div class="grid">
+        <div>
+          <label>类型</label>
+          <select id="fType">
+            <option value="time">时长卡（按天）</option>
+            <option value="quota">次数卡（按次）</option>
+            <option value="trial">试用卡</option>
+          </select>
+        </div>
+        <div>
+          <label>数量（1~100）</label>
+          <input id="fCount" type="number" min="1" max="100" value="1">
+        </div>
+        <div id="fDurationWrap">
+          <label>有效天数</label>
+          <input id="fDuration" type="number" min="1" max="3650" value="30">
+        </div>
+        <div id="fQuotaWrap" style="display:none">
+          <label>总次数</label>
+          <input id="fQuota" type="number" min="1" max="1000000" value="1000">
+        </div>
+        <div>
+          <label>可绑定设备数</label>
+          <input id="fMaxDevices" type="number" min="1" max="10" value="1">
+        </div>
+        <div>
+          <label>批次备注</label>
+          <input id="fBatch" type="text" placeholder="留空则用当天日期">
+        </div>
+        <div class="field" style="grid-column:1/-1">
+          <label>备注（买家/渠道，最多 200 字）</label>
+          <input id="fNote" type="text" placeholder="选填">
+        </div>
+      </div>
+      <div class="row">
+        <button id="btnIssue">生成卡密</button>
+        <span id="issueToast" class="toast"></span>
+      </div>
+      <div id="issuedBox" style="display:none;margin-top:14px">
+        <div class="row" style="justify-content:space-between;margin-bottom:8px">
+          <b style="font-size:13px">新卡密（只显示这一次，关页面就没了，先复制或下载）</b>
+          <div class="row">
+            <button id="btnCopy" class="secondary small">复制全部</button>
+            <button id="btnDownload" class="secondary small">下载 txt</button>
+          </div>
+        </div>
+        <div id="issuedKeys" class="keys"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>卡密列表</h2>
+      <div class="grid" style="margin-bottom:14px">
+        <div>
+          <label>状态</label>
+          <select id="qStatus">
+            <option value="">全部</option>
+            <option value="active">有效</option>
+            <option value="disabled">已作废</option>
+          </select>
+        </div>
+        <div>
+          <label>批次</label>
+          <input id="qBatch" type="text" placeholder="精确匹配，留空=全部">
+        </div>
+        <div>
+          <label>条数（1~500）</label>
+          <input id="qLimit" type="number" min="1" max="500" value="100">
+        </div>
+        <div class="row" style="align-self:flex-end">
+          <button id="btnQuery" class="small">查询</button>
+        </div>
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>卡密</th><th>批次</th><th>类型</th><th>剩余</th><th>设备</th>
+              <th>状态</th><th>激活时间</th><th>到期时间</th><th>备注</th><th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="cardRows">
+            <tr><td colspan="10" class="empty">还没有查询</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+// 管理密钥只进 sessionStorage：关掉标签页就没了，避免长期留在浏览器里
+const KEY_STORAGE = 'jobpilot.adminKey';
+let adminKey = sessionStorage.getItem(KEY_STORAGE) || '';
+
+function toast(el, text, ok) {
+  el.textContent = text;
+  el.className = 'toast ' + (ok ? 'ok' : 'err');
+}
+
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, (ch) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[ch]));
+}
+
+/** 带管理密钥的请求。401 时清掉密钥退回登录态，不让用户对着一个失效 key 反复点 */
+async function admin(path, options = {}) {
+  const res = await fetch(path, {
+    ...options,
+    headers: { ...(options.headers || {}), Authorization: 'Bearer ' + adminKey }
+  });
+  if (res.status === 401) {
+    setConnected(false);
+    throw new Error('管理密钥错误或已失效');
+  }
+  return res.json();
+}
+
+function setConnected(on) {
+  $('panel').style.display = on ? '' : 'none';
+  $('connState').className = 'state ' + (on ? 'ok' : 'off');
+  $('connState').textContent = on ? '已连接' : '未连接';
+  if (on) loadStats();
+}
+
+async function connect() {
+  const key = $('adminKey').value.trim();
+  if (!key) return toast($('keyToast'), '请先粘贴管理密钥', false);
+  adminKey = key;
+  try {
+    await admin('/admin/stats');
+    sessionStorage.setItem(KEY_STORAGE, key);
+    setConnected(true);
+    toast($('keyToast'), '已连接', true);
+    loadCards();
+  } catch (e) {
+    toast($('keyToast'), e.message, false);
+  } finally {
+    $('adminKey').value = '';
+  }
+}
+
+function disconnect() {
+  adminKey = '';
+  sessionStorage.removeItem(KEY_STORAGE);
+  setConnected(false);
+  toast($('keyToast'), '已清除本标签页里的密钥', true);
+}
+
+// ---------------------------------------------------------------- 统计
+
+async function loadStats() {
+  let json;
+  try {
+    json = await admin('/admin/stats');
+  } catch (e) {
+    return;
+  }
+  if (!json.success) return;
+  const d = json.data;
+  const byStatus = {};
+  const byType = {};
+  for (const r of d.by_status || []) byStatus[r.status] = r.n;
+  for (const r of d.by_type || []) byType[r.type] = r.n;
+  const total = Object.values(byStatus).reduce((a, b) => a + b, 0);
+
+  const tiles = [
+    ['卡密总数', total],
+    ['有效', byStatus.active || 0],
+    ['已作废', byStatus.disabled || 0],
+    ['时长卡', byType.time || 0],
+    ['次数卡', byType.quota || 0],
+    ['试用卡', byType.trial || 0],
+    ['24 小时内心跳设备', d.verified_last_24h || 0]
+  ];
+  $('stats').innerHTML = tiles.map(([k, v]) =>
+    `<div class="stat"><div class="k">${escapeHtml(k)}</div><div class="v">${v}</div></div>`
+  ).join('');
+}
+
+// ---------------------------------------------------------------- 发卡
+
+function syncIssueFields() {
+  const type = $('fType').value;
+  $('fDurationWrap').style.display = type === 'quota' ? 'none' : '';
+  $('fQuotaWrap').style.display = type === 'quota' ? '' : 'none';
+  $('fDuration').value = type === 'trial' ? 1 : 30;
+}
+
+let issuedKeys = [];
+
+async function issue() {
+  const type = $('fType').value;
+  const body = {
+    type,
+    count: parseInt($('fCount').value, 10) || 1,
+    max_devices: parseInt($('fMaxDevices').value, 10) || 1
+  };
+  if (type === 'quota') body.quota_total = parseInt($('fQuota').value, 10) || 1000;
+  else body.duration_days = parseInt($('fDuration').value, 10) || 30;
+  if ($('fBatch').value.trim()) body.batch = $('fBatch').value.trim();
+  if ($('fNote').value.trim()) body.note = $('fNote').value.trim();
+
+  $('btnIssue').disabled = true;
+  try {
+    const json = await admin('/admin/cards', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    if (!json.success) {
+      toast($('issueToast'), (json.error && json.error.message) || '发卡失败', false);
+      return;
+    }
+    issuedKeys = json.data.keys || [];
+    $('issuedKeys').textContent = issuedKeys.join('\n');
+    $('issuedBox').style.display = '';
+    toast($('issueToast'), `已生成 ${issuedKeys.length} 张（批次 ${json.data.batch}）`, true);
+    loadCards();
+    loadStats();
+  } catch (e) {
+    toast($('issueToast'), e.message, false);
+  } finally {
+    $('btnIssue').disabled = false;
+  }
+}
+
+function downloadIssued() {
+  const blob = new Blob([issuedKeys.join('\n') + '\n'], { type: 'text/plain;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'jobpilot-cards-' + new Date().toISOString().slice(0, 10) + '.txt';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+async function copyIssued() {
+  try {
+    await navigator.clipboard.writeText(issuedKeys.join('\n'));
+    toast($('issueToast'), '已复制到剪贴板', true);
+  } catch (e) {
+    toast($('issueToast'), '复制失败，请手动全选复制', false);
+  }
+}
+
+// ---------------------------------------------------------------- 列表
+
+const TYPE_TEXT = { time: '时长卡', quota: '次数卡', trial: '试用卡' };
+
+function remainingText(c) {
+  if (c.type === 'quota') {
+    const left = Math.max(0, (c.quota_total ?? 0) - (c.quota_used ?? 0));
+    return `${left} / ${c.quota_total ?? 0} 次`;
+  }
+  if (!c.expires_at) return '-';
+  const ms = new Date(c.expires_at).getTime() - Date.now();
+  const days = Math.max(0, Math.ceil(ms / 86400000));
+  return days > 0 ? days + ' 天' : '已到期';
+}
+
+function fmt(iso) {
+  return iso ? String(iso).replace('T', ' ').slice(0, 16) : '-';
+}
+
+async function loadCards() {
+  const params = new URLSearchParams();
+  if ($('qStatus').value) params.set('status', $('qStatus').value);
+  if ($('qBatch').value.trim()) params.set('batch', $('qBatch').value.trim());
+  params.set('limit', $('qLimit').value || '100');
+
+  let json;
+  try {
+    json = await admin('/admin/cards?' + params.toString());
+  } catch (e) {
+    $('cardRows').innerHTML = `<tr><td colspan="10" class="empty">${escapeHtml(e.message)}</td></tr>`;
+    return;
+  }
+  if (!json.success) return;
+  const cards = json.data.cards || [];
+  if (!cards.length) {
+    $('cardRows').innerHTML = '<tr><td colspan="10" class="empty">没有符合条件的卡密</td></tr>';
+    return;
+  }
+  $('cardRows').innerHTML = cards.map((c) => {
+    const statusTag = c.status === 'active'
+      ? '<span class="tag ok">有效</span>'
+      : '<span class="tag bad">已作废</span>';
+    const bound = `${c.bound_devices ?? 0} / ${c.max_devices ?? 1}`;
+    const action = c.status === 'active'
+      ? '<button class="danger small" data-disable="1">作废</button>'
+      : '<span style="color:#8a8f99">—</span>';
+    return `<tr>
+      <td class="wrap">${escapeHtml(c.card_key_masked)}</td>
+      <td class="wrap">${escapeHtml(c.batch)}</td>
+      <td>${TYPE_TEXT[c.type] || escapeHtml(c.type)}</td>
+      <td>${escapeHtml(remainingText(c))}</td>
+      <td>${escapeHtml(bound)}</td>
+      <td>${statusTag}</td>
+      <td>${escapeHtml(fmt(c.activated_at))}</td>
+      <td>${escapeHtml(fmt(c.expires_at))}</td>
+      <td class="wrap">${escapeHtml(c.note)}</td>
+      <td>${action}</td>
+    </tr>`;
+  }).join('');
+}
+
+// 列表里卡号是打码的，作废要走完整卡号：让用户粘贴一次完整卡密。
+// 用事件委托而不是行内 onclick：卡密备注是用户自己填的，拼进属性迟早出事。
+async function disableCard(masked) {
+  const full = prompt('列表里的卡号是打码的。请粘贴要作废的完整卡密（' + masked + '）：');
+  if (!full) return;
+  const key = full.trim().toUpperCase();
+  if (!confirm('作废后该卡立即失效，已激活的设备下次心跳就会被拦下。确定作废 ' + key + ' ？')) return;
+  try {
+    const json = await admin('/admin/cards/' + encodeURIComponent(key) + '/disable', { method: 'POST' });
+    if (json.success) {
+      toast($('keyToast'), '已作废', true);
+      loadCards();
+      loadStats();
+    } else {
+      toast($('keyToast'), (json.error && json.error.message) || '作废失败', false);
+    }
+  } catch (e) {
+    toast($('keyToast'), e.message, false);
+  }
+}
+
+$('cardRows').addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-disable]');
+  if (!btn) return;
+  const masked = btn.closest('tr').children[0].textContent;
+  disableCard(masked);
+});
+
+$('btnConnect').onclick = connect;
+$('btnDisconnect').onclick = disconnect;
+$('adminKey').addEventListener('keydown', (e) => { if (e.key === 'Enter') connect(); });
+$('btnIssue').onclick = issue;
+$('btnCopy').onclick = copyIssued;
+$('btnDownload').onclick = downloadIssued;
+$('btnQuery').onclick = loadCards;
+$('btnRefresh').onclick = () => { loadStats(); loadCards(); };
+$('fType').onchange = syncIssueFields;
+
+// 上次连过就直接进面板，不用再粘一遍 key
+if (adminKey) {
+  setConnected(true);
+  loadCards();
+} else {
+  $('adminKey').focus();
+}
+</script>
+</body>
+</html>

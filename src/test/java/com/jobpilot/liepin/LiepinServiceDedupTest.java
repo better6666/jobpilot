@@ -3,6 +3,9 @@ package com.jobpilot.liepin;
 import com.jobpilot.browser.BrowserManager;
 import com.jobpilot.delivery.Delivery;
 import com.jobpilot.delivery.DeliveryMapper;
+import com.jobpilot.ai.AiProperties;
+import com.jobpilot.ai.AiService;
+import com.jobpilot.ai.GreetingService;
 import com.jobpilot.delivery.DeliveryOutcome;
 import com.jobpilot.delivery.DeliveryStatus;
 import com.jobpilot.delivery.RunCoordinator;
@@ -19,6 +22,8 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 /**
@@ -42,7 +47,13 @@ class LiepinServiceDedupTest {
     private DeliveryMapper deliveryMapper;
 
     @Mock
+    private com.jobpilot.system.ConfigService configService;
+
+    @Mock
     private BrowserManager browserManager;
+
+    private final com.fasterxml.jackson.databind.ObjectMapper objectMapper =
+            new com.fasterxml.jackson.databind.ObjectMapper();
 
     private LiepinService service;
 
@@ -52,9 +63,13 @@ class LiepinServiceDedupTest {
         config.setSayHi("您好");
         config.setDryRun(true);
         when(properties.get()).thenReturn(config);
+        // mock 的 getJson 默认返回 null（不是 defaultValue），AI 配置得显式给一份关闭态的
+        doReturn(new com.jobpilot.ai.AiConfig()).when(configService)
+                .getJson(anyString(), eq(com.jobpilot.ai.AiConfig.class), any(com.jobpilot.ai.AiConfig.class));
         service = new LiepinService(properties, driver, deliveryMapper, browserManager,
                 new LiepinOptions(new com.fasterxml.jackson.databind.ObjectMapper()),
-                new RunCoordinator());
+                new RunCoordinator(),
+                new GreetingService(new AiProperties(configService), new AiService(objectMapper), deliveryMapper));
     }
 
     private LiepinJobCard card() {
@@ -79,7 +94,7 @@ class LiepinServiceDedupTest {
 
         service.processCardForTest(card(), "陈列设计", properties.get(), null);
 
-        verify(driver, never()).deliver(any(), any(), any(), any(), any());
+        verify(driver, never()).deliver(any(), any(), any(), any(), any(), any());
         verify(deliveryMapper, never()).insert(any(Delivery.class));
         assertEquals(1, service.status().getSkipped());
     }
@@ -87,12 +102,12 @@ class LiepinServiceDedupTest {
     @Test
     void 预演过的岗位真实投递时不被挡住() {
         when(deliveryMapper.selectOne(any())).thenReturn(existing("预演"));
-        when(driver.deliver(any(), any(), any(), any(), any()))
+        when(driver.deliver(any(), any(), any(), any(), any(), any()))
                 .thenReturn(DeliveryOutcome.delivered("您好"));
 
         service.processCardForTest(card(), "陈列设计", properties.get(), null);
 
-        verify(driver).deliver(any(), any(), any(), any(), any());
+        verify(driver).deliver(any(), any(), any(), any(), any(), any());
         verify(deliveryMapper).updateById(any(Delivery.class));
         verify(deliveryMapper, never()).insert(any(Delivery.class));
         assertEquals(1, service.status().getDelivered());
@@ -102,7 +117,7 @@ class LiepinServiceDedupTest {
     @Test
     void 新岗位投递成功后insert并落到liepin平台() {
         when(deliveryMapper.selectOne(any())).thenReturn(null);
-        when(driver.deliver(any(), any(), any(), any(), any()))
+        when(driver.deliver(any(), any(), any(), any(), any(), any()))
                 .thenReturn(DeliveryOutcome.delivered("您好"));
 
         service.processCardForTest(card(), "陈列设计", properties.get(), null);
@@ -121,7 +136,7 @@ class LiepinServiceDedupTest {
     @Test
     void 投递失败允许重试并记录原因() {
         when(deliveryMapper.selectOne(any())).thenReturn(existing("投递失败"));
-        when(driver.deliver(any(), any(), any(), any(), any()))
+        when(driver.deliver(any(), any(), any(), any(), any(), any()))
                 .thenReturn(DeliveryOutcome.failed("未找到沟通按钮"));
 
         service.processCardForTest(card(), "陈列设计", properties.get(), null);
@@ -145,13 +160,13 @@ class LiepinServiceDedupTest {
         verify(deliveryMapper).insert(captor.capture());
         assertEquals("已过滤", captor.getValue().getDeliveryStatus());
         assertEquals(1, captor.getValue().getScore());
-        verify(driver, never()).deliver(any(), any(), any(), any(), any());
+        verify(driver, never()).deliver(any(), any(), any(), any(), any(), any());
     }
 
     @Test
     void 触发每日上限时停任务并记失败() {
         when(deliveryMapper.selectOne(any())).thenReturn(null);
-        when(driver.deliver(any(), any(), any(), any(), any()))
+        when(driver.deliver(any(), any(), any(), any(), any(), any()))
                 .thenReturn(new DeliveryOutcome(DeliveryStatus.LIMIT, "今日沟通已达上限", null));
 
         service.processCardForTest(card(), "陈列设计", properties.get(), null);

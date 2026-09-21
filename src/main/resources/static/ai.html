@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JobPilot · AI 话术</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: #f5f6f8; color: #1f2329; min-height: 100vh; padding: 24px;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; }
+  .top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; gap: 12px; flex-wrap: wrap; }
+  h1 { font-size: 20px; }
+  .top a { font-size: 13px; color: #3370ff; text-decoration: none; }
+  .card {
+    background: #fff; border-radius: 12px; padding: 24px; margin-bottom: 16px;
+    box-shadow: 0 2px 12px rgba(0,0,0,.06);
+  }
+  h2 { font-size: 15px; margin-bottom: 14px; }
+  label { display: block; font-size: 12px; color: #8a8f99; margin-bottom: 4px; }
+  input[type=text], input[type=password], input[type=number], textarea {
+    width: 100%; padding: 8px 10px; border: 1px solid #d5d8de; border-radius: 8px;
+    font-size: 13px; outline: none; background: #fff; font-family: inherit;
+  }
+  input:focus, textarea:focus { border-color: #3370ff; }
+  textarea { resize: vertical; }
+  .field { margin-bottom: 16px; }
+  .hint { font-size: 12px; color: #8a8f99; margin-top: 6px; line-height: 1.7; }
+  .hint code { background: #f0f1f3; border-radius: 4px; padding: 1px 5px; font-size: 11px; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  button {
+    padding: 9px 18px; border: none; border-radius: 8px; font-size: 14px;
+    cursor: pointer; background: #3370ff; color: #fff;
+  }
+  button.secondary { background: #f0f1f3; color: #4e5560; }
+  button.small { padding: 7px 12px; font-size: 13px; }
+  button:disabled { opacity: .6; cursor: default; }
+  .state { display: inline-block; padding: 4px 12px; border-radius: 999px;
+           font-size: 13px; font-weight: 600; }
+  .state.ok { background: #e8f5e9; color: #2e7d32; }
+  .state.off { background: #f0f1f3; color: #8a8f99; }
+  .state.warn { background: #fff3e0; color: #e65100; }
+  .state.bad { background: #ffebee; color: #c62828; }
+  .switch { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #1f2329;
+            background: #fff8e6; border: 1px solid #ffe1a6; border-radius: 8px; padding: 10px 12px; }
+  .switch input { width: 16px; height: 16px; }
+  .toast { font-size: 13px; margin-top: 10px; min-height: 18px; }
+  .toast.err { color: #c62828; }
+  .toast.ok { color: #2e7d32; }
+  .reply {
+    background: #f7f8fa; border-radius: 8px; padding: 12px 14px; margin-top: 12px;
+    font-size: 13px; color: #4e5560; line-height: 1.8; white-space: pre-wrap;
+  }
+  .reply b { color: #1f2329; }
+  .note {
+    background: #fff; border-radius: 12px; padding: 20px; margin-bottom: 16px;
+    box-shadow: 0 2px 12px rgba(0,0,0,.06); font-size: 13px; color: #4e5560; line-height: 1.9;
+  }
+  .note b { color: #1f2329; }
+  .note li { margin-left: 18px; }
+  .models { margin-top: 8px; display: flex; gap: 6px; flex-wrap: wrap; }
+  .models span {
+    background: #f0f1f3; border-radius: 999px; padding: 3px 10px; font-size: 12px; color: #4e5560;
+    cursor: pointer;
+  }
+  .models span:hover { background: #e3f0ff; color: #1565c0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <h1>JobPilot · AI 话术</h1>
+    <div class="row">
+      <a href="/index.html">首页</a>
+      <a href="/license.html" target="_blank">卡密管理 →</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="row" style="justify-content:space-between">
+      <div class="row">
+        <span id="aiState" class="state off">读取中…</span>
+        <span id="aiStateMsg" style="font-size:13px;color:#8a8f99"></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>接口配置</h2>
+
+    <div class="switch" style="margin-bottom:16px">
+      <input type="checkbox" id="enabled">
+      <label for="enabled" style="margin:0;color:#1f2329;font-size:13px">
+        <b>启用 AI 话术</b>：按岗位 JD 现写打招呼语。关着就用各平台配置里的固定话术。
+      </label>
+    </div>
+
+    <div class="field">
+      <label for="baseUrl">接口地址（OpenAI 兼容）</label>
+      <input id="baseUrl" type="text" placeholder="https://api.openai.com" autocomplete="off">
+      <div class="hint">
+        官方和中转站填法都一样，不用纠结格式：<code>https://api.openai.com</code> 会自动补
+        <code>/v1</code>；中转站给了 <code>/v1</code> 或自定义前缀就原样用；
+        把完整端点 <code>.../v1/chat/completions</code> 整段粘进来也会自动砍掉多余部分。
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="apiKey">API Key</label>
+      <div class="row">
+        <input id="apiKey" type="password" placeholder="sk-..." autocomplete="new-password"
+               style="flex:1;min-width:260px">
+        <button id="btnClearKey" class="secondary small" type="button">清除 Key</button>
+      </div>
+      <div class="hint" id="keyHint">Key 只存在本机配置里，读取时一律打码，不会回显明文。</div>
+    </div>
+
+    <div class="field">
+      <label for="model">模型名</label>
+      <div class="row">
+        <input id="model" type="text" list="modelList" placeholder="gpt-4o-mini / deepseek-chat"
+               autocomplete="off" style="flex:1;min-width:260px">
+        <button id="btnModels" class="secondary small" type="button">拉取模型</button>
+      </div>
+      <datalist id="modelList"></datalist>
+      <div class="hint">填接口支持的模型名。点"拉取模型"会读 <code>/models</code> 列表，点上面的名字直接填入。</div>
+      <div id="modelChips" class="models"></div>
+    </div>
+
+    <div class="field">
+      <label for="persona">求职者背景（AI 人设）</label>
+      <textarea id="persona" rows="5"
+                placeholder="例：XX 专业本科，两年活动运营实习经历，独立做过三场线下沙龙，会用 PS 和剪映，意向城市杭州。"></textarea>
+      <div class="hint">
+        生成话术的核心素材，写得越具体，话术越不像群发。没填这一项就不会走 AI——没有人设生成出来的
+        是空话，不如发固定话术。
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="temperature">温度（0~2，越大越跳脱）</label>
+      <input id="temperature" type="number" min="0" max="2" step="0.1" value="0.9"
+             style="max-width:140px">
+      <div class="hint">默认 0.9。想稳一点、少点花样就调到 0.6~0.7。</div>
+    </div>
+
+    <div class="row">
+      <button id="btnSave">保存配置</button>
+      <button id="btnTest" class="secondary">测试连接</button>
+      <span id="toast" class="toast"></span>
+    </div>
+    <div id="testReply" class="reply" style="display:none"></div>
+  </div>
+
+  <div class="note">
+    <b>话术是怎么生成的</b>
+    <ul>
+      <li><b>按岗位写</b>：提示词里带岗位名、公司、薪资、经验学历要求和 JD 片段，AI 要提到具体内容，不给套话。</li>
+      <li><b>风格轮换</b>：每次随机挑一种语气（简洁/热情/专业/从经历切入/认同业务），连发十条不像群发。</li>
+      <li><b>带去重</b>：和最近 30 条已发话术比对（忽略标点空白），撞了让 AI 换说法重来一次，还撞才退回固定话术。</li>
+      <li><b>失败不卡流程</b>：接口超时、限流、key 失效都自动退回固定话术，投递继续跑，原因记在运行日志里。</li>
+      <li><b>用在哪</b>：Boss 直聘用它写打招呼语；猎聘用它写 IM 里那句追问。51job 和智联是直接投简历，用不到话术。</li>
+    </ul>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+// Key 的处理和保存按钮强相关：
+//   keyEdited = false  → 用户没动过输入框，保存时不带 apiKey 字段（保留原值）
+//   keyEdited = true   → 带上输入框里的值，空串表示清除
+let keyEdited = false;
+
+function toast(text, ok) {
+  $('toast').textContent = text;
+  $('toast').className = 'toast ' + (ok ? 'ok' : 'err');
+}
+
+async function api(path, options) {
+  const res = await fetch(path, options);
+  return res.json();
+}
+
+/** 页面上的状态说明和后端 describe() 保持一致，用户看到的原因和日志里的一致 */
+function describeState(c) {
+  if (!c.enabled) return ['off', 'AI 话术未启用，各平台使用固定话术'];
+  if (!c.persona || !c.persona.trim()) return ['warn', '已启用但没填求职者背景，将使用固定话术'];
+  if (!c.baseUrl || !c.apiKeySet || !c.model) return ['warn', '已启用但接口地址/Key/模型没配全，将使用固定话术'];
+  return ['ok', 'AI 话术已启用（' + c.model + '），生成失败会自动退回固定话术'];
+}
+
+async function load() {
+  let json;
+  try {
+    json = await api('/api/ai/config');
+  } catch (e) {
+    $('aiState').className = 'state bad';
+    $('aiState').textContent = '读取失败';
+    return;
+  }
+  if (!json.success) {
+    toast(json.message || '读取配置失败', false);
+    return;
+  }
+  const c = json.data;
+  $('enabled').checked = !!c.enabled;
+  $('baseUrl').value = c.baseUrl || '';
+  $('model').value = c.model || '';
+  $('persona').value = c.persona || '';
+  $('temperature').value = (c.temperature == null ? 0.9 : c.temperature);
+  $('apiKey').value = '';
+  keyEdited = false;
+  $('apiKey').placeholder = c.apiKeySet ? '已保存：' + c.apiKeyMasked + '（不修改就留空）' : 'sk-...';
+
+  const [cls, text] = describeState(c);
+  $('aiState').className = 'state ' + cls;
+  $('aiState').textContent = c.enabled ? '已启用' : '未启用';
+  $('aiStateMsg').textContent = text;
+  $('keyHint').textContent = c.apiKeySet
+    ? '当前已保存 Key：' + c.apiKeyMasked + '。保存时留空 = 不修改，点"清除 Key" = 删掉。'
+    : '还没有保存 Key。Key 只存在本机配置里，读取时一律打码，不会回显明文。';
+}
+
+/** 保存时按 keyEdited 决定带不带 apiKey，别把已配好的 key 冲掉 */
+async function save() {
+  const body = {
+    enabled: $('enabled').checked,
+    baseUrl: $('baseUrl').value.trim(),
+    model: $('model').value.trim(),
+    persona: $('persona').value,
+    temperature: parseFloat($('temperature').value)
+  };
+  if (!(body.temperature >= 0)) body.temperature = 0.9;
+  if (keyEdited) body.apiKey = $('apiKey').value.trim();
+
+  $('btnSave').disabled = true;
+  try {
+    const json = await api('/api/ai/config', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    if (json.success) {
+      toast('已保存', true);
+      await load();
+    } else {
+      toast(json.message || '保存失败', false);
+    }
+  } catch (e) {
+    toast('请求失败：' + e.message, false);
+  } finally {
+    $('btnSave').disabled = false;
+  }
+}
+
+async function testConnection() {
+  const body = { baseUrl: $('baseUrl').value.trim(), model: $('model').value.trim() };
+  if (keyEdited) body.apiKey = $('apiKey').value.trim();
+
+  $('btnTest').disabled = true;
+  $('testReply').style.display = 'none';
+  try {
+    const json = await api('/api/ai/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    const d = json.data || {};
+    const box = $('testReply');
+    box.style.display = 'block';
+    if (d.ok) {
+      box.innerHTML = '<b>连通成功</b>（' + escapeHtml(d.baseUrl || '') + ' / ' + escapeHtml(d.model || '') + '）\n'
+        + '模型回复：' + escapeHtml(d.reply || '');
+    } else {
+      box.innerHTML = '<b>连通失败</b>（' + escapeHtml(d.baseUrl || '') + '）\n' + escapeHtml(d.error || '未知原因');
+    }
+  } catch (e) {
+    toast('请求失败：' + e.message, false);
+  } finally {
+    $('btnTest').disabled = false;
+  }
+}
+
+async function fetchModels() {
+  const params = new URLSearchParams();
+  if ($('baseUrl').value.trim()) params.set('baseUrl', $('baseUrl').value.trim());
+  if (keyEdited && $('apiKey').value.trim()) params.set('apiKey', $('apiKey').value.trim());
+
+  $('btnModels').disabled = true;
+  try {
+    const json = await api('/api/ai/models?' + params.toString());
+    const d = json.data || {};
+    if (!d.ok) {
+      toast(d.error || '拉取失败', false);
+      return;
+    }
+    const list = $('modelList');
+    list.innerHTML = '';
+    const chips = $('modelChips');
+    chips.innerHTML = '';
+    for (const m of (d.models || [])) {
+      const opt = document.createElement('option');
+      opt.value = m;
+      list.appendChild(opt);
+      const chip = document.createElement('span');
+      chip.textContent = m;
+      chip.title = '点击填入';
+      chip.onclick = () => { $('model').value = m; toast('已填入 ' + m, true); };
+      chips.appendChild(chip);
+    }
+    toast('拉到 ' + (d.models || []).length + ' 个模型', true);
+  } catch (e) {
+    toast('请求失败：' + e.message, false);
+  } finally {
+    $('btnModels').disabled = false;
+  }
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (ch) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[ch]));
+}
+
+$('apiKey').addEventListener('input', () => { keyEdited = true; });
+$('btnClearKey').onclick = () => {
+  $('apiKey').value = '';
+  keyEdited = true;
+  $('apiKey').placeholder = '保存后即清除已存的 Key';
+  toast('已标记清除 Key，点"保存配置"生效', true);
+};
+$('btnSave').onclick = save;
+$('btnTest').onclick = testConnection;
+$('btnModels').onclick = fetchModels;
+$('enabled').addEventListener('change', () => {
+  // 只切换视觉提示，是否真启用以保存后的配置为准
+  $('aiStateMsg').textContent = $('enabled').checked
+    ? '记得点"保存配置"后生效'
+    : '记得点"保存配置"后生效';
+});
+load();
+</script>
+</body>
+</html>

@@ -3,6 +3,9 @@ package com.jobpilot.zhilian;
 import com.jobpilot.browser.BrowserManager;
 import com.jobpilot.delivery.Delivery;
 import com.jobpilot.delivery.DeliveryMapper;
+import com.jobpilot.ai.AiProperties;
+import com.jobpilot.ai.AiService;
+import com.jobpilot.ai.GreetingService;
 import com.jobpilot.delivery.DeliveryOutcome;
 import com.jobpilot.delivery.DeliveryStatus;
 import com.jobpilot.delivery.RunCoordinator;
@@ -17,6 +20,8 @@ import org.mockito.quality.Strictness;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 /**
@@ -37,7 +42,13 @@ class ZhilianServiceDedupTest {
     private DeliveryMapper deliveryMapper;
 
     @Mock
+    private com.jobpilot.system.ConfigService configService;
+
+    @Mock
     private BrowserManager browserManager;
+
+    private final com.fasterxml.jackson.databind.ObjectMapper objectMapper =
+            new com.fasterxml.jackson.databind.ObjectMapper();
 
     private ZhilianService service;
 
@@ -46,9 +57,13 @@ class ZhilianServiceDedupTest {
         ZhilianProperties.ZhilianConfig config = new ZhilianProperties.ZhilianConfig();
         config.setDryRun(false);
         when(properties.get()).thenReturn(config);
+        // mock 的 getJson 默认返回 null（不是 defaultValue），AI 配置得显式给一份关闭态的
+        doReturn(new com.jobpilot.ai.AiConfig()).when(configService)
+                .getJson(anyString(), eq(com.jobpilot.ai.AiConfig.class), any(com.jobpilot.ai.AiConfig.class));
         service = new ZhilianService(properties, driver, deliveryMapper, browserManager,
                 new ZhilianOptions(new com.fasterxml.jackson.databind.ObjectMapper()),
-                new RunCoordinator());
+                new RunCoordinator(),
+                new GreetingService(new AiProperties(configService), new AiService(objectMapper), deliveryMapper));
     }
 
     private ZhilianJobCard card() {

@@ -14,6 +14,7 @@
   .top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
   h1 { font-size: 22px; }
   .top a { font-size: 13px; color: #3370ff; text-decoration: none; }
+  .top .row { gap: 14px; }
   .sub { font-size: 13px; color: #8a8f99; margin-bottom: 20px; line-height: 1.7; }
   .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
   .pcard {
@@ -38,7 +39,10 @@
 <div class="wrap">
   <div class="top">
     <h1>JobPilot · 简历自动投递</h1>
-    <a href="/license.html" target="_blank">卡密管理 →</a>
+    <div class="row">
+      <a href="/ai.html">AI 话术 →</a>
+      <a href="/license.html" target="_blank">卡密管理 →</a>
+    </div>
   </div>
   <div class="sub">选一个平台开始。四个平台共用一套打分规则和投递记录，配置互不影响。</div>
 
@@ -63,6 +67,11 @@
       <p>微信扫码登录。没有可拦的接口，字段从页面逐条读，跑得比别的平台慢。</p>
       <span class="go">进入 →</span>
     </a>
+    <a class="pcard" href="/ai.html">
+      <h2>AI 话术</h2>
+      <p>接任意 OpenAI 兼容接口（官方或中转站），按岗位 JD 生成打招呼语，失败自动退回固定话术。</p>
+      <span class="go">去配置 →</span>
+    </a>
   </div>
 
   <div class="note">
@@ -71,7 +80,8 @@
       <li><b>先开预演模式</b>：走完整流程但不真投，记录显示"预演"。确认筛选符合预期再关。</li>
       <li><b>一次只跑一个平台</b>：四个平台共用同一个 Chrome 窗口，同时启动会被全局运行锁拦下。</li>
       <li><b>投递时窗口不要最小化</b>：页面在后台时部分站点会暂停渲染，导致点击落空。</li>
-      <li><b>智联只采得到职位名、经验、薪资</b>：学历/HR/行业/规模/JD 这几组打分规则在智联上不会命中。</li>
+      <li><b>智联采得到学历/行业/规模/JD</b>：这些都从详情面板读，但 HR 标识和 HR 活跃度采不到，所以"过滤不活跃 HR"在智联上不生效。</li>
+      <li><b>想让话术不像群发</b>：去"AI 话术"页接一个 OpenAI 兼容接口（官方或中转站都行），填好求职者背景即可。</li>
     </ul>
   </div>
 </div>

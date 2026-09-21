@@ -377,9 +377,13 @@ public class LiepinDriver {
      * <p>
      * 成功判据是聊天窗头部出现——平台在点击时就已经把默认招呼语发给 HR 了，
      * 所以追问发不出去、聊天窗关不掉，都算投递成功。
+     * <p>
+     * {@code greeting} 是调用方（编排层）已经定好的一句话：AI 开着时是按 JD
+     * 生成的，关了就是配置里的固定话术。这里不再自己读配置，避免同一句
+     * 话在采集和投递之间被改来改去。
      */
     public DeliveryOutcome deliver(LiepinJobCard card, Page listPage, LiepinProperties.LiepinConfig config,
-                                   ProgressListener listener, BooleanSupplier stop) {
+                                   String greeting, ProgressListener listener, BooleanSupplier stop) {
         String target = (card.getBrandName() != null ? card.getBrandName() : "?")
                 + " | " + (card.getJobName() != null ? card.getJobName() : "?");
         int index = currentCardIndex;
@@ -388,7 +392,7 @@ public class LiepinDriver {
         }
         if (config.isDryRun()) {
             listener.onProgress("预演：跳过真实投递 | " + target);
-            return DeliveryOutcome.preview(config.getSayHi());
+            return DeliveryOutcome.preview(greeting);
         }
         if (stop.getAsBoolean()) {
             return DeliveryOutcome.failed("已停止");
@@ -415,12 +419,12 @@ public class LiepinDriver {
                 // 聊天窗没出来也按成功算：点击本身已经触发平台发送默认招呼语
                 log.debug("聊天窗未确认出现 | {}", target);
             }
-            if (config.getSayHi() != null && !config.getSayHi().isBlank()) {
-                sendFollowUp(listPage, config.getSayHi());
+            if (greeting != null && !greeting.isBlank()) {
+                sendFollowUp(listPage, greeting);
             }
             closeChatWindow(listPage);
             listener.onProgress("已打招呼 | " + target);
-            return DeliveryOutcome.delivered(config.getSayHi());
+            return DeliveryOutcome.delivered(greeting);
         } catch (Exception e) {
             log.warn("投递过程异常 | {}: {}", target, e.getMessage());
             return DeliveryOutcome.failed(e.getMessage());

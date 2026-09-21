@@ -3,6 +3,9 @@ package com.jobpilot.boss;
 import com.jobpilot.browser.BrowserManager;
 import com.jobpilot.delivery.Delivery;
 import com.jobpilot.delivery.DeliveryMapper;
+import com.jobpilot.ai.AiProperties;
+import com.jobpilot.ai.AiService;
+import com.jobpilot.ai.GreetingService;
 import com.jobpilot.delivery.DeliveryOutcome;
 import com.jobpilot.delivery.DeliveryStatus;
 import com.jobpilot.delivery.RunCoordinator;
@@ -18,6 +21,8 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 /**
@@ -41,7 +46,13 @@ class BossServiceDedupTest {
     private DeliveryMapper deliveryMapper;
 
     @Mock
+    private com.jobpilot.system.ConfigService configService;
+
+    @Mock
     private BrowserManager browserManager;
+
+    private final com.fasterxml.jackson.databind.ObjectMapper objectMapper =
+            new com.fasterxml.jackson.databind.ObjectMapper();
 
     private BossService service;
 
@@ -51,9 +62,13 @@ class BossServiceDedupTest {
         config.setSayHi("您好");
         config.setDryRun(true);
         when(properties.get()).thenReturn(config);
+        // mock 的 getJson 默认返回 null（不是 defaultValue），AI 配置得显式给一份关闭态的
+        doReturn(new com.jobpilot.ai.AiConfig()).when(configService)
+                .getJson(anyString(), eq(com.jobpilot.ai.AiConfig.class), any(com.jobpilot.ai.AiConfig.class));
         service = new BossService(properties, driver, deliveryMapper, browserManager,
                 new BossOptions(new com.fasterxml.jackson.databind.ObjectMapper()),
-                new RunCoordinator());
+                new RunCoordinator(),
+                new GreetingService(new AiProperties(configService), new AiService(objectMapper), deliveryMapper));
     }
 
     private BossJobCard card() {

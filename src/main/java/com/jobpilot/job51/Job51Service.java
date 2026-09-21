@@ -1,5 +1,6 @@
 package com.jobpilot.job51;
 
+import com.jobpilot.ai.GreetingService;
 import com.jobpilot.browser.BrowserManager;
 import com.jobpilot.delivery.CardConsumer;
 import com.jobpilot.delivery.DeliveryMapper;
@@ -36,8 +37,9 @@ public class Job51Service extends DeliveryService<Job51JobCard> {
     private final Job51Options options;
 
     public Job51Service(Job51Properties properties, Job51Driver driver, DeliveryMapper mapper,
-                        BrowserManager browserManager, Job51Options options, RunCoordinator coordinator) {
-        super(mapper, browserManager, coordinator);
+                        BrowserManager browserManager, Job51Options options, RunCoordinator coordinator,
+                        GreetingService greetingService) {
+        super(mapper, browserManager, coordinator, greetingService);
         this.properties = properties;
         this.driver = driver;
         this.options = options;

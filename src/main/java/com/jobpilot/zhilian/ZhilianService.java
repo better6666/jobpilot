@@ -1,5 +1,6 @@
 package com.jobpilot.zhilian;
 
+import com.jobpilot.ai.GreetingService;
 import com.jobpilot.browser.BrowserManager;
 import com.jobpilot.delivery.CardConsumer;
 import com.jobpilot.delivery.DeliveryMapper;
@@ -36,8 +37,9 @@ public class ZhilianService extends DeliveryService<ZhilianJobCard> {
     private final ZhilianOptions options;
 
     public ZhilianService(ZhilianProperties properties, ZhilianDriver driver, DeliveryMapper mapper,
-                          BrowserManager browserManager, ZhilianOptions options, RunCoordinator coordinator) {
-        super(mapper, browserManager, coordinator);
+                          BrowserManager browserManager, ZhilianOptions options, RunCoordinator coordinator,
+                          GreetingService greetingService) {
+        super(mapper, browserManager, coordinator, greetingService);
         this.properties = properties;
         this.driver = driver;
         this.options = options;

@@ -1,5 +1,6 @@
 package com.jobpilot.liepin;
 
+import com.jobpilot.ai.GreetingService;
 import com.jobpilot.browser.BrowserManager;
 import com.jobpilot.delivery.CardConsumer;
 import com.jobpilot.delivery.DeliveryMapper;
@@ -37,8 +38,9 @@ public class LiepinService extends DeliveryService<LiepinJobCard> {
     private final LiepinOptions options;
 
     public LiepinService(LiepinProperties properties, LiepinDriver driver, DeliveryMapper mapper,
-                         BrowserManager browserManager, LiepinOptions options, RunCoordinator coordinator) {
-        super(mapper, browserManager, coordinator);
+                         BrowserManager browserManager, LiepinOptions options, RunCoordinator coordinator,
+                         GreetingService greetingService) {
+        super(mapper, browserManager, coordinator, greetingService);
         this.properties = properties;
         this.driver = driver;
         this.options = options;
@@ -109,11 +111,19 @@ public class LiepinService extends DeliveryService<LiepinJobCard> {
         return FilterResult.pass(result.getScore());
     }
 
+    /**
+     * 猎聘的招呼分两句：平台点击时自动发的那句是它自己的模板，管不了；
+     * 我们能控的是聊天窗里补的追问，所以这里生成的是追问句。
+     */
     @Override
     protected DeliveryOutcome deliver(LiepinJobCard card, Page listPage, PlatformConfig config,
                                       ProgressListener listener, BooleanSupplier stop) {
         LiepinProperties.LiepinConfig liepinConfig = (LiepinProperties.LiepinConfig) config;
-        return driver.deliver(card, listPage, liepinConfig, listener, stop);
+        GreetingService.Greeting greeting = followUpFor(card, config);
+        if (greeting.note() != null) {
+            appendLog("话术兜底 | " + brief(card) + " | " + greeting.note());
+        }
+        return driver.deliver(card, listPage, liepinConfig, greeting.text(), listener, stop);
     }
 
     // ------------------------------------------------------------------
