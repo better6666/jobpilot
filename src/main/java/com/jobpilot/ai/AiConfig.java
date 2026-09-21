@@ -20,6 +20,17 @@ public class AiConfig {
     /** 总开关。关了就永远用各平台配置里的固定话术 */
     private boolean enabled = false;
 
+    /**
+     * 话术从哪来：{@code platform} = 用平台自备的中转（客户什么都不用填），
+     * {@code custom} = 用客户自己填的接口。
+     *
+     * <p>默认 null 而不是 "platform"：null 表示"这份配置是加 mode 字段之前存的"，
+     * 由 {@link AiProperties#get()} 按有没有填过自己的 key 决定迁移到哪个模式。
+     * 填过 key 的老用户保持 custom，没填过的落到 platform——升级不会
+     * 悄悄把别人配好的接口换成平台的。
+     */
+    private String mode;
+
     /** 接口地址，如 https://api.openai.com/v1 或某个中转站地址 */
     private String baseUrl = "";
 

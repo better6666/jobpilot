@@ -47,9 +47,16 @@ class AiServiceTest {
     private record Reply(int status, String body) {
     }
 
-    /** 按 (path, body) 决定回什么；默认回一句正常的话术 */
+    /**
+     * 按 (path, body) 决定回什么；默认回一句正常的话术。
+     *
+     * /api/ 开头的是平台代理，回的是服务端那层壳（success + data.text）；
+     * 其余是中转，回的是 OpenAI 原样（choices[0].message.content）。
+     */
     private BiFunction<String, String, Reply> responder =
-            (path, body) -> new Reply(200, "{\"choices\":[{\"message\":{\"content\":\"您好\"}}]}");
+            (path, body) -> path.startsWith("/api/")
+                    ? new Reply(200, "{\"success\":true,\"data\":{\"text\":\"您好\"}}")
+                    : new Reply(200, "{\"choices\":[{\"message\":{\"content\":\"您好\"}}]}");
 
     @BeforeEach
     void setUp() throws IOException {
@@ -386,5 +393,94 @@ class AiServiceTest {
         assertFalse(AiService.ModelResult.ok(List.of()).isOk());
         assertFalse(AiService.ModelResult.fail("x").isOk());
         assertEquals(List.of(), AiService.ModelResult.fail("x").models());
+    }
+
+    // ------------------------------------------------------------------
+    // 平台代理（token + device_id，key 留在服务端）
+    // ------------------------------------------------------------------
+
+    private static final String PLATFORM_PATH = "/api/ai/chat";
+
+    @Test
+    void 平台代理请求打在服务端的ai路径上并带上凭证() throws Exception {
+        AiService.AiResult r = aiService.chatPlatform(baseUrl(), "tok-123", "dev-456",
+                "系统提示", "用户提示", 0.7);
+
+        assertTrue(r.isOk(), r.error());
+        assertEquals(1, hitsOf(PLATFORM_PATH), "应该只打服务端，不打中转");
+        assertEquals(0, hitsOf(CHAT_PATH), "平台模式绝不能直连中转——那会把 key 暴露给客户端");
+        // 平台代理这一跳不带 Authorization：token 在 body 里，服务端不认 Bearer
+        assertEquals("", authHeaders.get(0));
+
+        JsonNode sent = objectMapper.readTree(bodies.get(0));
+        assertEquals("tok-123", sent.path("token").asText());
+        assertEquals("dev-456", sent.path("device_id").asText());
+        assertEquals("系统提示", sent.path("system").asText());
+        assertEquals("用户提示", sent.path("user").asText());
+        assertEquals(0.7, sent.path("temperature").asDouble(), 1e-9);
+    }
+
+    @Test
+    void 平台代理从data里取话术文本() throws Exception {
+        responder = (path, body) -> new Reply(200,
+                "{\"success\":true,\"data\":{\"text\":\"您好，看到贵司在招人\",\"model\":\"step-5-preview\"}}");
+
+        AiService.AiResult r = aiService.chatPlatform(baseUrl(), "t", "d", "s", "u", 0.7);
+
+        assertEquals("您好，看到贵司在招人", r.text());
+    }
+
+    @Test
+    void 平台代理返回success为false时算失败() {
+        responder = (path, body) -> new Reply(200,
+                "{\"success\":false,\"error\":{\"code\":\"AI_NOT_CONFIGURED\",\"message\":\"平台未配置 AI 中转\"}}");
+
+        AiService.AiResult r = aiService.chatPlatform(baseUrl(), "t", "d", "s", "u", 0.7);
+
+        assertFalse(r.isOk());
+        // 服务端给的 message 是给人看的，要透传，别自己编一句
+        assertTrue(r.error().contains("平台未配置 AI 中转"), r.error());
+    }
+
+    @Test
+    void 平台代理401说激活信息失效() {
+        responder = (path, body) -> new Reply(401,
+                "{\"success\":false,\"error\":{\"code\":\"TOKEN_INVALID\",\"message\":\"激活信息无效，请重新激活\"}}");
+
+        AiService.AiResult r = aiService.chatPlatform(baseUrl(), "t", "d", "s", "u", 0.7);
+
+        assertFalse(r.isOk());
+        assertTrue(r.error().contains("重新激活"), r.error());
+        assertEquals(1, hitsOf(PLATFORM_PATH), "4xx 不该重试");
+    }
+
+    @Test
+    void 平台代理429会重试() {
+        responder = (path, body) -> new Reply(429,
+                "{\"success\":false,\"error\":{\"code\":\"RATE_LIMITED\",\"message\":\"请求过于频繁\"}}");
+
+        AiService.AiResult r = aiService.chatPlatform(baseUrl(), "t", "d", "s", "u", 0.7);
+
+        assertFalse(r.isOk());
+        assertTrue(r.error().contains("过于频繁"), r.error());
+        assertEquals(3, hitsOf(PLATFORM_PATH), "429 要按 3 次尝试打满");
+    }
+
+    @Test
+    void 平台代理地址没配时直接失败不发请求() {
+        AiService.AiResult r = aiService.chatPlatform("  ", "t", "d", "s", "u", 0.7);
+
+        assertFalse(r.isOk());
+        assertTrue(r.error().contains("服务端地址没配"), r.error());
+        assertEquals(0, hitsOf(PLATFORM_PATH));
+    }
+
+    @Test
+    void 平台代理卡密没激活时直接失败不发请求() {
+        AiService.AiResult r = aiService.chatPlatform(baseUrl(), "  ", "d", "s", "u", 0.7);
+
+        assertFalse(r.isOk());
+        assertTrue(r.error().contains("卡密未激活"), r.error());
+        assertEquals(0, hitsOf(PLATFORM_PATH));
     }
 }

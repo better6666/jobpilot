@@ -3,6 +3,8 @@ package com.jobpilot.ai;
 import com.jobpilot.delivery.Delivery;
 import com.jobpilot.delivery.DeliveryMapper;
 import com.jobpilot.delivery.JobCard;
+import com.jobpilot.license.LicenseProperties;
+import com.jobpilot.license.LicenseService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -12,12 +14,15 @@ import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -37,6 +42,10 @@ class GreetingServiceTest {
     private AiService aiService;
     @Mock
     private DeliveryMapper deliveryMapper;
+    @Mock
+    private LicenseService licenseService;
+
+    private final LicenseProperties licenseProperties = new LicenseProperties();
 
     private GreetingService service;
     private AiConfig cfg;
@@ -45,7 +54,9 @@ class GreetingServiceTest {
     void setUp() {
         cfg = new AiConfig();
         doReturn(cfg).when(configService).getJson(anyString(), eq(AiConfig.class), any(AiConfig.class));
-        service = new GreetingService(new AiProperties(configService), aiService, deliveryMapper);
+        licenseProperties.setApiBase("https://license.example.com");
+        service = new GreetingService(new AiProperties(configService), aiService, deliveryMapper,
+                licenseService, licenseProperties);
     }
 
     private void fullyConfigured() {
@@ -55,6 +66,19 @@ class GreetingServiceTest {
         cfg.setModel("deepseek-chat");
         cfg.setPersona("服装陈列设计专业，做过橱窗陈列实习");
         cfg.setTemperature(0.7);
+    }
+
+    /**
+     * 平台模式：客户只填人设。接口/key/模型整个不用管，
+     * 由卡密服务端代理——这也是买卡客户拿不到平台 key 的原因。
+     */
+    private void platformConfigured() {
+        cfg.setEnabled(true);
+        cfg.setMode(AiProperties.MODE_PLATFORM);
+        cfg.setPersona("服装陈列设计专业，做过橱窗陈列实习");
+        cfg.setTemperature(0.7);
+        when(licenseService.proxyCredentials())
+                .thenReturn(Map.of("token", "tok-123", "device_id", "dev-456"));
     }
 
     private void recentGreetings(String... greetings) {
@@ -490,6 +514,94 @@ class GreetingServiceTest {
     }
 
     // ------------------------------------------------------------------
+    // 平台模式（接口/key 都在服务端，客户只填人设）
+    // ------------------------------------------------------------------
+
+    @Test
+    void 平台模式下不填接口也能生成() {
+        platformConfigured();
+        recentGreetings();
+        doReturn(AiService.AiResult.ok("您好，看到贵司在招陈列设计助理，我做过两季橱窗陈列")).when(aiService)
+                .chatPlatform(anyString(), anyString(), anyString(), anyString(), anyString(), eq(0.7));
+
+        GreetingService.Greeting g = service.compose(card(), "固定话术");
+
+        assertEquals("您好，看到贵司在招陈列设计助理，我做过两季橱窗陈列", g.text());
+        assertNull(g.note());
+    }
+
+    @Test
+    void 平台模式走服务端代理并带上卡密凭证() {
+        platformConfigured();
+        recentGreetings();
+        doReturn(AiService.AiResult.ok("您好")).when(aiService)
+                .chatPlatform(anyString(), anyString(), anyString(), anyString(), anyString(), eq(0.7));
+
+        service.compose(card(), "固定话术");
+
+        verify(aiService).chatPlatform(eq("https://license.example.com"), eq("tok-123"), eq("dev-456"),
+                anyString(), anyString(), eq(0.7));
+        // 平台模式下绝不能去直连某个接口——那等于要客户自己承担 key
+        org.mockito.Mockito.verify(aiService, org.mockito.Mockito.never())
+                .chat(anyString(), anyString(), anyString(), anyString(), anyString(), anyDouble());
+    }
+
+    @Test
+    void 平台模式下卡密没激活就退回固定话术并说明原因() {
+        cfg.setEnabled(true);
+        cfg.setMode(AiProperties.MODE_PLATFORM);
+        cfg.setPersona("服装陈列设计专业");
+        // 没激活：拿不到 token
+        when(licenseService.proxyCredentials()).thenReturn(null);
+
+        GreetingService.Greeting g = service.compose(card(), "固定话术");
+
+        assertEquals("固定话术", g.text());
+        assertTrue(g.note().contains("卡密未激活"), g.note());
+    }
+
+    @Test
+    void 平台模式接口报错时退回固定话术并带上原因() {
+        platformConfigured();
+        recentGreetings();
+        doReturn(AiService.AiResult.fail("平台没配 AI 中转")).when(aiService)
+                .chatPlatform(anyString(), anyString(), anyString(), anyString(), anyString(), eq(0.7));
+
+        GreetingService.Greeting g = service.compose(card(), "固定话术");
+
+        assertEquals("固定话术", g.text());
+        assertTrue(g.note().contains("平台没配 AI 中转"), g.note());
+    }
+
+    @Test
+    void 平台模式下不填接口不要素拦客户() {
+        // 只有人设，接口三要素全空——这是平台模式的正常形态，不该被"没配全"拦下
+        platformConfigured();
+        recentGreetings();
+        doReturn(AiService.AiResult.ok("您好")).when(aiService)
+                .chatPlatform(anyString(), anyString(), anyString(), anyString(), anyString(), eq(0.7));
+
+        GreetingService.Greeting g = service.compose(card(), "固定话术");
+
+        assertEquals("您好", g.text());
+        assertNull(g.note());
+    }
+
+    @Test
+    void 平台模式下追问也走服务端代理() {
+        platformConfigured();
+        recentGreetings();
+        doReturn(AiService.AiResult.ok("方便看下我的简历吗")).when(aiService)
+                .chatPlatform(anyString(), anyString(), anyString(), anyString(), anyString(), eq(0.7));
+
+        GreetingService.Greeting g = service.composeFollowUp(card(), "固定追问");
+
+        assertEquals("方便看下我的简历吗", g.text());
+        verify(aiService).chatPlatform(eq("https://license.example.com"), eq("tok-123"), eq("dev-456"),
+                anyString(), anyString(), eq(0.7));
+    }
+
+    // ------------------------------------------------------------------
     // 状态描述
     // ------------------------------------------------------------------
 
@@ -500,12 +612,19 @@ class GreetingServiceTest {
         cfg.setEnabled(true);
         assertTrue(service.describe().contains("没填求职者背景"));
 
+        // 平台模式：只填人设就绪，接口三要素整个不用管
+        cfg.setMode(AiProperties.MODE_PLATFORM);
         cfg.setPersona("服装陈列设计专业");
+        assertEquals("AI 话术已启用（平台提供），生成失败会自动退回固定话术", service.describe());
+
+        // 自有接口模式：三要素没齐才说没配全
+        cfg.setMode(AiProperties.MODE_CUSTOM);
         assertTrue(service.describe().contains("没配全"));
 
         cfg.setBaseUrl("https://relay.example.com/v1");
         cfg.setApiKey("sk-x");
         cfg.setModel("deepseek-chat");
-        assertEquals("AI 话术已启用（deepseek-chat），生成失败会自动退回固定话术", service.describe());
+        assertEquals("AI 话术已启用（自有接口 deepseek-chat），生成失败会自动退回固定话术",
+                service.describe());
     }
 }

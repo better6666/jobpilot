@@ -8,6 +8,7 @@ import {
   addDays,
   daysLeft
 } from './lib/cards'
+import { normalizeRelayBaseUrl, maskKey } from './lib/relay'
 
 export interface Env {
   DB: D1Database
@@ -63,6 +64,23 @@ interface CreateCardsBody {
   batch?: string
   note?: string
 }
+interface AiChatBody extends AuthBody {
+  system?: string
+  user?: string
+  temperature?: number
+}
+interface AiRelay {
+  base_url: string
+  api_key: string
+  model: string
+}
+interface AiSettingsBody {
+  ai?: {
+    base_url?: string | null
+    api_key?: string | null
+    model?: string | null
+  }
+}
 
 // ---------------------------------------------------------------- 基础工具
 
@@ -107,6 +125,108 @@ async function authenticate(db: D1Database, token: string, deviceId: string): Pr
     return fail(403, 'CARD_DISABLED', '卡密已被作废')
   }
   return { card }
+}
+
+/** 时效/次数校验：过期或用完的卡不能继续用平台额度。通过返回 null */
+function checkCardUsable(card: Card): Response | null {
+  const now = nowIso()
+  if ((card.type === 'time' || card.type === 'trial') && (!card.expires_at || card.expires_at <= now)) {
+    return fail(403, 'CARD_EXPIRED', '卡密已到期')
+  }
+  if (card.type === 'quota' && card.quota_used >= (card.quota_total ?? 0)) {
+    return fail(403, 'QUOTA_EXHAUSTED', '卡密次数已用完')
+  }
+  return null
+}
+
+// ---------------------------------------------------------------- AI 中转
+
+const SETTINGS_AI_KEY = 'ai_relay'
+
+/**
+ * 平台自备的 OpenAI 兼容中转。三项缺任意一项都算"没配"——
+ * 客户端看到没配就提示用户改用"我自己的接口"，不会把空地址传出去。
+ */
+async function getAiRelay(db: D1Database): Promise<AiRelay | null> {
+  const row = await db.prepare('SELECT value FROM settings WHERE key = ?').bind(SETTINGS_AI_KEY).first<{ value: string }>()
+  if (!row) return null
+  try {
+    const v = JSON.parse(row.value) as Partial<AiRelay>
+    const baseUrl = normalizeRelayBaseUrl(v.base_url)
+    if (!baseUrl || !v.api_key?.trim() || !v.model?.trim()) return null
+    return { base_url: baseUrl, api_key: v.api_key.trim(), model: v.model.trim() }
+  } catch {
+    return null
+  }
+}
+
+async function saveAiRelay(db: D1Database, relay: AiRelay): Promise<void> {
+  await db.prepare(
+    `INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
+  ).bind(SETTINGS_AI_KEY, JSON.stringify(relay), nowIso()).run()
+}
+
+/** 服务端代理调中转。返回文本或错误文案，绝不抛异常、绝不带 key */
+async function callRelay(
+  relay: AiRelay,
+  system: string,
+  user: string,
+  temperature: number
+): Promise<{ text: string } | { error: string }> {
+  const payload = {
+    model: relay.model,
+    stream: false,
+    temperature,
+    messages: [
+      { role: 'system', content: system },
+      { role: 'user', content: user }
+    ]
+  }
+  let response: Response
+  try {
+    response = await fetch(relay.base_url + '/chat/completions', {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer ' + relay.api_key,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(45000)
+    })
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return { error: '连接中转失败或超时: ' + msg }
+  }
+  const body = await response.text()
+  if (response.status < 200 || response.status >= 300) {
+    let detail = ''
+    try {
+      const parsed = JSON.parse(body) as { error?: { message?: string }; message?: string }
+      detail = parsed.error?.message ?? parsed.message ?? ''
+    } catch {
+      detail = body.length > 200 ? body.slice(0, 200) : body
+    }
+    const reason =
+      response.status === 401 || response.status === 403
+        ? '中转拒绝了（key 无效或没有该模型权限）'
+        : response.status === 404
+          ? '中转地址或模型不存在'
+          : response.status === 429
+            ? '中转限流'
+            : response.status >= 500
+              ? '中转服务端错误'
+              : '中转返回 ' + response.status
+    return { error: detail ? reason + '：' + detail : reason }
+  }
+  try {
+    const parsed = JSON.parse(body) as { choices?: { message?: { content?: string } }[] }
+    const content = parsed.choices?.[0]?.message?.content
+    if (!content || !content.trim()) return { error: '中转返回 200 但没有内容（choices 为空）' }
+    return { text: content }
+  } catch {
+    return { error: '中转响应不是合法 JSON' }
+  }
 }
 
 // ---------------------------------------------------------------- 应用
@@ -222,14 +342,10 @@ app.post('/verify', async (c) => {
   if (auth instanceof Response) return auth
   const { card } = auth
 
-  const now = nowIso()
-  if ((card.type === 'time' || card.type === 'trial') && (!card.expires_at || card.expires_at <= now)) {
-    return fail(403, 'CARD_EXPIRED', '卡密已到期')
-  }
-  if (card.type === 'quota' && card.quota_used >= (card.quota_total ?? 0)) {
-    return fail(403, 'QUOTA_EXHAUSTED', '卡密次数已用完')
-  }
+  const expired = checkCardUsable(card)
+  if (expired) return expired
 
+  const now = nowIso()
   await c.env.DB.prepare('UPDATE activations SET last_verify = ? WHERE token = ?').bind(now, token).run()
   return ok({
     type: card.type,
@@ -307,6 +423,62 @@ app.post('/unbind', async (c) => {
     .bind(card.card_key, deviceId).run()
 
   return ok({ unbound: true, unbind_count: card.unbind_count + 1, unbind_limit: 3 })
+})
+
+// ---------------------------------------------------------------- AI 中转（客户端）
+
+/**
+ * 平台中转有没有配。不需要鉴权：只回答"配了没"和"用的什么模型"，
+ * 不含 key 也不含地址——客户端要靠这个决定页面上显示哪种模式。
+ */
+app.get('/api/ai/info', async (c) => {
+  const relay = await getAiRelay(c.env.DB)
+  return ok({ configured: !!relay, model: relay?.model ?? null })
+})
+
+/**
+ * 平台中转代理。客户端只带 token + device_id + 提示词，中转的地址和 key
+ * 全程留在服务端——买卡的人从安装目录里翻不出这把 key。
+ *
+ * 失败一律走 fail()：调用方（GreetingService）会退回固定话术，不让投递中断。
+ */
+app.post('/api/ai/chat', async (c) => {
+  const body = await c.req.json<AiChatBody>().catch(() => null)
+  const token = body?.token?.trim() ?? ''
+  const deviceId = body?.device_id?.trim() ?? ''
+  if (!token || !deviceId) {
+    return fail(400, 'BAD_REQUEST', '缺少 token 或 device_id')
+  }
+
+  const auth = await authenticate(c.env.DB, token, deviceId)
+  if (auth instanceof Response) return auth
+  const { card } = auth
+
+  const expired = checkCardUsable(card)
+  if (expired) return expired
+
+  // 按卡限流：一张卡每分钟最多 120 次，够跑批又不至于被一个客户端打爆中转额度
+  if (!(await rateLimit(c.env.RATE_LIMIT, `rl:ai:card:${card.card_key}`, 120, 60))) {
+    return fail(429, 'RATE_LIMITED', '请求过于频繁，请稍后再试')
+  }
+
+  const relay = await getAiRelay(c.env.DB)
+  if (!relay) {
+    return fail(503, 'AI_NOT_CONFIGURED', '平台未配置 AI 中转，请在客户端改用"我自己的接口"')
+  }
+
+  const user = body?.user ?? ''
+  if (!user.trim()) {
+    return fail(400, 'BAD_REQUEST', '缺少 user 提示词')
+  }
+  const rawTemp = Number(body?.temperature)
+  const temperature = Number.isFinite(rawTemp) ? Math.min(2, Math.max(0, rawTemp)) : 0.9
+
+  const result = await callRelay(relay, body?.system ?? '', user, temperature)
+  if ('error' in result) {
+    return fail(502, 'RELAY_FAILED', result.error)
+  }
+  return ok({ text: result.text, model: relay.model })
 })
 
 // ---------------------------------------------------------------- 管理接口
@@ -422,6 +594,74 @@ app.get('/admin/stats', async (c) => {
     by_type: byType.results ?? [],
     verified_last_24h: recent?.n ?? 0
   })
+})
+
+/** 平台配置（AI 中转）。key 一律打码，和客户端一个规矩 */
+app.get('/admin/settings', async (c) => {
+  const relay = await getAiRelay(c.env.DB)
+  if (!relay) {
+    return ok({
+      ai: {
+        configured: false,
+        base_url: '',
+        model: '',
+        api_key_set: false,
+        api_key_masked: null
+      }
+    })
+  }
+  return ok({
+    ai: {
+      configured: true,
+      base_url: relay.base_url,
+      model: relay.model,
+      api_key_set: true,
+      api_key_masked: maskKey(relay.api_key)
+    }
+  })
+})
+
+/**
+ * 保存平台配置。语义和客户端的 /api/ai/config 一致：
+ * api_key 传 null/不传 = 保留原值，空串 = 清除，其他 = 替换。
+ * 地址在这里就归一，存进去的永远是能直接拼 /chat/completions 的形状。
+ */
+app.put('/admin/settings', async (c) => {
+  const body = await c.req.json<AiSettingsBody>().catch(() => null)
+  if (!body?.ai) {
+    return fail(400, 'BAD_REQUEST', '缺少 ai 段')
+  }
+  const existing = await getAiRelay(c.env.DB)
+  const baseUrl = normalizeRelayBaseUrl(body.ai.base_url ?? existing?.base_url ?? '')
+  const model = (body.ai.model ?? existing?.model ?? '').trim()
+  let apiKey = existing?.api_key ?? ''
+  if (body.ai.api_key != null) {
+    apiKey = body.ai.api_key.trim()
+  }
+  await saveAiRelay(c.env.DB, { base_url: baseUrl, api_key: apiKey, model })
+  return ok({ saved: true, configured: !!(baseUrl && apiKey && model), base_url: baseUrl })
+})
+
+/** 测平台中转通不通。可以带临时覆盖值，改完先测再存 */
+app.post('/admin/ai/test', async (c) => {
+  const body = await c.req.json<{ base_url?: string; api_key?: string; model?: string }>().catch(() => null)
+  const existing = await getAiRelay(c.env.DB)
+  const baseUrl = normalizeRelayBaseUrl(body?.base_url ?? existing?.base_url ?? '')
+  const apiKey = (body?.api_key ?? existing?.api_key ?? '').trim()
+  const model = (body?.model ?? existing?.model ?? '').trim()
+  if (!baseUrl || !apiKey || !model) {
+    return ok({ ok: false, error: '地址 / Key / 模型没配全，先填好再测' })
+  }
+  const result = await callRelay(
+    { base_url: baseUrl, api_key: apiKey, model },
+    '你是连通性测试助手。',
+    '请用一句中文回答：你能正常工作吗？',
+    0.3
+  )
+  if ('error' in result) {
+    return ok({ ok: false, error: result.error, base_url: baseUrl })
+  }
+  return ok({ ok: true, reply: result.text, base_url: baseUrl, model })
 })
 
 export default app

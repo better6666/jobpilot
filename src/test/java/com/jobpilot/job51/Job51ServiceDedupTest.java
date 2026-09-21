@@ -6,6 +6,8 @@ import com.jobpilot.delivery.DeliveryMapper;
 import com.jobpilot.ai.AiProperties;
 import com.jobpilot.ai.AiService;
 import com.jobpilot.ai.GreetingService;
+import com.jobpilot.license.LicenseProperties;
+import com.jobpilot.license.LicenseService;
 import com.jobpilot.delivery.DeliveryOutcome;
 import com.jobpilot.delivery.DeliveryStatus;
 import com.jobpilot.delivery.RunCoordinator;
@@ -66,7 +68,8 @@ class Job51ServiceDedupTest {
         service = new Job51Service(properties, driver, deliveryMapper, browserManager,
                 new Job51Options(new com.fasterxml.jackson.databind.ObjectMapper()),
                 new RunCoordinator(),
-                new GreetingService(new AiProperties(configService), new AiService(objectMapper), deliveryMapper));
+                new GreetingService(new AiProperties(configService), new AiService(objectMapper), deliveryMapper,
+                        mock(LicenseService.class), new LicenseProperties()));
     }
 
     private Job51JobCard card() {

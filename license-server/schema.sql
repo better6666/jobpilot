@@ -32,3 +32,11 @@ CREATE TABLE IF NOT EXISTS activations (
 );
 CREATE INDEX IF NOT EXISTS idx_activations_device ON activations(device_id);
 CREATE INDEX IF NOT EXISTS idx_activations_token  ON activations(token);
+
+-- 平台自己的配置，目前只有 AI 中转这一段。value 是整段 JSON，
+-- 以后加配置项不用再改表结构。
+CREATE TABLE IF NOT EXISTS settings (
+  key        TEXT PRIMARY KEY,
+  value      TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);

@@ -69,6 +69,11 @@
   .empty { color: #8a8f99; font-size: 13px; padding: 18px 0; text-align: center; }
   .keybar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   .keybar input { flex: 1; min-width: 260px; }
+  .reply {
+    background: #f7f8fa; border-radius: 8px; padding: 12px 14px; margin-top: 12px;
+    font-size: 13px; color: #4e5560; line-height: 1.8; white-space: pre-wrap;
+  }
+  .reply b { color: #1f2329; }
 </style>
 </head>
 <body>
@@ -157,6 +162,44 @@
     </div>
 
     <div class="card">
+      <h2>平台 AI 中转配置</h2>
+      <div class="hint" style="margin-bottom:14px">
+        在这里填一次，客户在应用的「AI 话术」页选<b>平台提供</b>就能直接用，不用自己找接口、自己充 Key。
+        Key 只存在服务端的 settings 表里，任何接口都不会把它下发到客户端——客户那边看到的永远是打码值。
+      </div>
+      <div class="field">
+        <label for="aiBaseUrl">中转地址（OpenAI 兼容）</label>
+        <input id="aiBaseUrl" type="text" placeholder="https://api.openai.com" autocomplete="off">
+        <div class="hint">
+          填法和客户端一样：<code>https://api.openai.com</code> 会自动补 <code>/v1</code>；
+          中转站给了自定义前缀就原样用；粘完整端点 <code>.../v1/chat/completions</code> 会自动砍掉多余部分。
+          保存时就地归一，存进去的永远是能直接拼 <code>/chat/completions</code> 的形状。
+        </div>
+      </div>
+      <div class="field">
+        <label for="aiApiKey">API Key</label>
+        <div class="row">
+          <input id="aiApiKey" type="password" placeholder="sk-..." autocomplete="new-password"
+                 style="flex:1;min-width:260px">
+          <button id="btnAiClearKey" class="secondary small" type="button">清除 Key</button>
+        </div>
+        <div class="hint" id="aiKeyHint"></div>
+      </div>
+      <div class="field">
+        <label for="aiModel">模型名</label>
+        <input id="aiModel" type="text" placeholder="deepseek-chat / gpt-4o-mini" autocomplete="off">
+        <div class="hint">三项填全才算配好；缺任何一项，客户那边会看到"平台没开 AI 中转"并引导去用自己的接口。</div>
+      </div>
+      <div class="row">
+        <button id="btnAiSave">保存</button>
+        <button id="btnAiTest" class="secondary">测试连通</button>
+        <span id="aiStateTag" class="tag off">读取中…</span>
+        <span id="aiToast" class="toast"></span>
+      </div>
+      <div id="aiTestReply" class="reply" style="display:none"></div>
+    </div>
+
+    <div class="card">
       <h2>卡密列表</h2>
       <div class="grid" style="margin-bottom:14px">
         <div>
@@ -231,7 +274,7 @@ function setConnected(on) {
   $('panel').style.display = on ? '' : 'none';
   $('connState').className = 'state ' + (on ? 'ok' : 'off');
   $('connState').textContent = on ? '已连接' : '未连接';
-  if (on) loadStats();
+  if (on) { loadStats(); loadAiSettings(); }
 }
 
 async function connect() {
@@ -442,6 +485,102 @@ $('cardRows').addEventListener('click', (e) => {
   const masked = btn.closest('tr').children[0].textContent;
   disableCard(masked);
 });
+
+// ---------------------------------------------------------------- 平台 AI 中转
+
+// Key 的处理和保存按钮强相关，语义与服务端 PUT /admin/settings 对齐：
+//   aiKeyEdited = false → 请求里不带 api_key（保留原值）
+//   aiKeyEdited = true  → 带上输入框里的值，空串表示清除
+let aiKeyEdited = false;
+
+async function loadAiSettings() {
+  let json;
+  try {
+    json = await admin('/admin/settings');
+  } catch (e) {
+    return;
+  }
+  if (!json.success) return;
+  const ai = json.data.ai || {};
+  $('aiBaseUrl').value = ai.base_url || '';
+  $('aiModel').value = ai.model || '';
+  $('aiApiKey').value = '';
+  aiKeyEdited = false;
+  const masked = ai.api_key_masked || '****';
+  $('aiApiKey').placeholder = ai.api_key_set ? '已保存：' + masked + '（不修改就留空）' : 'sk-...';
+  $('aiKeyHint').textContent = ai.api_key_set
+    ? '当前已保存 Key：' + masked + '。保存时留空 = 不修改，点"清除 Key" = 删掉。'
+    : '还没有保存 Key。读取时一律打码，不会回显明文。';
+  $('aiStateTag').className = 'tag ' + (ai.configured ? 'ok' : 'off');
+  $('aiStateTag').textContent = ai.configured ? '已配置，客户可用' : '未配全，客户还用不了';
+}
+
+async function saveAiSettings() {
+  const body = { ai: { base_url: $('aiBaseUrl').value.trim(), model: $('aiModel').value.trim() } };
+  if (aiKeyEdited) body.ai.api_key = $('aiApiKey').value.trim();
+
+  $('btnAiSave').disabled = true;
+  try {
+    const json = await admin('/admin/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    if (json.success) {
+      toast($('aiToast'), json.data.configured ? '已保存，中转已可用' : '已保存，但地址/Key/模型还没配全', !!json.data.configured);
+      await loadAiSettings();
+    } else {
+      toast($('aiToast'), (json.error && json.error.message) || '保存失败', false);
+    }
+  } catch (e) {
+    toast($('aiToast'), e.message, false);
+  } finally {
+    $('btnAiSave').disabled = false;
+  }
+}
+
+/** 测中转通不通。可以带临时覆盖值，改完先测再存 */
+async function testAiSettings() {
+  const body = {};
+  if ($('aiBaseUrl').value.trim()) body.base_url = $('aiBaseUrl').value.trim();
+  if ($('aiModel').value.trim()) body.model = $('aiModel').value.trim();
+  if (aiKeyEdited && $('aiApiKey').value.trim()) body.api_key = $('aiApiKey').value.trim();
+
+  $('btnAiTest').disabled = true;
+  $('aiTestReply').style.display = 'none';
+  try {
+    const json = await admin('/admin/ai/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    const d = json.data || {};
+    const box = $('aiTestReply');
+    box.style.display = 'block';
+    if (d.ok) {
+      box.innerHTML = '<b>连通成功</b>（' + escapeHtml(d.base_url || '') + ' / ' + escapeHtml(d.model || '') + '）\n'
+        + '模型回复：' + escapeHtml(d.reply || '');
+      toast($('aiToast'), '中转可用', true);
+    } else {
+      box.innerHTML = '<b>连通失败</b>\n' + escapeHtml(d.error || '未知原因');
+      toast($('aiToast'), d.error || '连通失败', false);
+    }
+  } catch (e) {
+    toast($('aiToast'), e.message, false);
+  } finally {
+    $('btnAiTest').disabled = false;
+  }
+}
+
+$('btnAiSave').onclick = saveAiSettings;
+$('btnAiTest').onclick = testAiSettings;
+$('aiApiKey').addEventListener('input', () => { aiKeyEdited = true; });
+$('btnAiClearKey').onclick = () => {
+  $('aiApiKey').value = '';
+  aiKeyEdited = true;
+  $('aiApiKey').placeholder = '保存后即清除已存的 Key';
+  toast($('aiToast'), '已标记清除 Key，点"保存"生效', true);
+};
 
 $('btnConnect').onclick = connect;
 $('btnDisconnect').onclick = disconnect;

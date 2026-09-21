@@ -276,7 +276,7 @@ npx wrangler deploy
 
 ### P4 话术与 AI 润色 ✅ 已完成（2026-09-21 装机版实机验证通过）
 
-按岗位 JD 生成个性化打招呼语，接**任意 OpenAI 兼容接口**——官方（`api.openai.com`）和中转站都行，地址由用户在管理页自己填，代码里不预置任何 key 或默认端点。
+按岗位 JD 生成个性化打招呼语，接**任意 OpenAI 兼容接口**——官方（`api.openai.com`）和中转站都行，地址由用户在管理页自己填，代码里不预置任何 key 或默认端点。（想开箱即用可以配「平台提供」，见 P6）
 
 - `com.jobpilot.ai`：`AiConfig`（配置模型）/ `AiProperties`（存 config 表，key 只写不打码读）/ `AiService`（HTTP 客户端 + 地址归一 + 输出清洗 + 重试）/ `GreetingService`（拼提示词、去重、兜底）/ `AiController`（`/api/ai/*`）
 - 地址归一：`https://api.openai.com` 自动补 `/v1`；中转站自定义前缀（`/v1`、`/api/v3` 之类）原样保留；粘了整个 `.../chat/completions` 端点只砍掉结尾那截；协议头大小写不敏感
@@ -317,6 +317,20 @@ npx wrangler deploy
 
 Windows 侧两个预期问题：app-image 未签名会触发 SmartScreen"Windows 已保护你的电脑"（要么买代码签名证书，要么给图文指引教用户点"更多信息→仍要运行"）；Java + 浏览器自动化程序容易被杀毒软件误报。
 
+### P6 平台 AI 中转 ✅ 已完成
+
+卡密卖出去之后，客户要自己去找中转站、注册、充值、拿 key 才能用 AI 话术——这一步能拦掉一大半人。所以现在**平台自己接一个中转站**：客户装上软件，在"AI 话术"页选「平台提供」，填个求职者背景就能用，别的什么都不用配。想用自己的 key 也随时能切回「我自己的接口」，两边配置互不覆盖。
+
+安全上只有一条红线：**平台的 key 绝不下发到客户端**。任何持卡人都能把 key 从安装目录里挖出来刷额度，所以话术生成走的是**服务端代理**——客户端只把卡密 token、设备号、提示词发给 Cloudflare Worker，key 和模型名由 Worker 存在 D1 的 `settings` 表里，由 Worker 去请求中转站，只把生成的文字传回来。
+
+- `license-server/src/lib/relay.ts`：读 settings 里的中转配置、地址归一（和 Java 侧 `AiService` 同一套规则）、请求中转站、按状态码映射错误
+- `POST /api/ai/info`：客户端问"平台有没有开中转"，返回模型名或不可用原因；拿不到配置回 503
+- `POST /api/ai/chat`：客户端发 `{token, device_id, user, temperature}`，服务端验卡（卡被作废回 403）+ 限流（每卡 120 次/分，超了回 429）后调中转；中转没配回 503，中转本身报错回 502，客户端拿到失败一律退回固定话术
+- `GET/PUT /admin/settings` + `POST /admin/ai/test`：管理平台 `manage.html` 新增「平台 AI 中转配置」卡片，填地址/Key/模型，Key 只写不读（保存时留空 = 不动，点"清除 Key" = 删掉），能就地测一句真实生成
+- 客户端 `AiController`：`mode` 字段（`platform`/`custom`），旧配置（`mode` 为 null）按"客户自己填过地址和 key"判成 custom；`platformInfo` 负责把"没配中转""连不上服务端"翻成客户看得懂的话，`ai.html` 按模式显隐接口字段并实时重算状态徽章
+
+**本地已验证**（全链路实跑通过）：`wrangler dev --local` + `db:init` 建出 settings 表，`manage.html` 配上地址/Key/模型并测连通成功（Key 在列表里显示为打码形式），再起一个全新安装实例用真卡密激活：`/api/ai/config` 返回 `mode:"platform"`、`platformAvailable:true`、模型名正确，而地址/Key/模型三个字段全是空的——客户确实零配置。同一个实例 `/api/ai/test` 走平台代理拿到了中转返回的话术，页面"测试连接"显示"平台中转 / 模型名"。服务端各分支都单独打过：卡密缺失 400、卡密不对 401、卡被作废 403、没配中转 503。想自己复现这套联调，`license-server/README.md` 的"平台 AI 中转"一节写了怎么用一个假中转站在本地跑。
+
 ## 七、目录结构
 
 ```
@@ -333,7 +347,7 @@ jobpilot/
 │   ├── liepin/                   # 猎聘平台适配器（同上五件套）
 │   ├── job51/                    # 51job 平台适配器（同上五件套）
 │   ├── zhilian/                  # 智联招聘平台适配器（同上五件套）
-│   ├── ai/                       # AI 话术：配置模型 / OpenAI 兼容客户端 / 话术生成与去重兜底
+│   ├── ai/                       # AI 话术：配置模型 / OpenAI 兼容客户端 / 平台中转代理 / 话术生成与去重兜底
 │   └── license/                  # 卡密：校验、门禁、控制器、激活页数据
 ├── src/test/java/com/jobpilot/
 │   ├── license/                  # 门禁 / 状态机 / 客户端健壮性 / 控制器单测
@@ -355,17 +369,15 @@ jobpilot/
 │       ├── license.html          # 用户激活页
 │       ├── index.html            # 平台入口页（选平台进通用投递页）
 │       ├── delivery.html         # 通用投递管理页（配置/启动/日志/记录，?platform= 区分）
-│       ├── ai.html               # AI 话术配置页（接口开关/地址/key/模型/人设/测试连接）
+│       ├── ai.html               # AI 话术配置页（开关/接口来源/地址/key/模型/人设/测试连接）
 │       └── boss.html             # Boss 专用页（保留兼容旧入口）
-└── license-server/               # CF Worker 卡密服务端（独立部署）
-    ├── src/index.ts              # API：activate/verify/report/unbind + admin
+└── license-server/               # CF Worker 卡密服务端 + 平台 AI 中转（独立部署）
+    ├── src/index.ts              # API：activate/verify/report/unbind + admin + /api/ai/*
     ├── src/lib/cards.ts          # 卡密生成等纯逻辑
-    └── public/
-        ├── index.html            # 激活页（Worker 静态资源，用户在 CF 域名上打开）
-        └── manage.html           # 卡密管理平台（发卡/列表/作废/统计，key 只进 sessionStorage）
-└── license-server/               # CF Worker 卡密服务端（独立部署）
-    ├── src/index.ts              # API：activate/verify/report/unbind + admin
-    ├── src/lib/cards.ts          # 卡密生成等纯逻辑
-    ├── schema.sql                # D1 表结构
-    └── test/cards.test.ts        # 单测
+    ├── src/lib/relay.ts          # 平台 AI 中转：读 settings、地址归一、请求中转站
+    ├── schema.sql                # D1 表结构（cards/devices/settings，IF NOT EXISTS 可重跑）
+    ├── public/
+    │   ├── index.html            # 激活页（Worker 静态资源，用户在 CF 域名上打开）
+    │   └── manage.html           # 卡密管理平台（发卡/列表/作废/统计/AI 中转配置，key 只进 sessionStorage）
+    └── test/                     # vitest 单测（cards + relay）
 ```

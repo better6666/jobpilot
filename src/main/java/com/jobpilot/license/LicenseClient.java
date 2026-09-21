@@ -56,6 +56,51 @@ public class LicenseClient {
     }
 
     /**
+     * GET 一个只读端点。和 {@link #post} 一样，网络不可达返回 null——
+     * 调用方要能区分"服务端说没有"和"服务端没答上"，前者照常显示，
+     *后者按不可用处理。
+     */
+    public JsonNode get(String apiBase, String path) {
+        String base = apiBase == null ? "" : apiBase.trim();
+        if (base.isBlank()) {
+            return null;
+        }
+        URI uri;
+        try {
+            uri = URI.create(base.replaceAll("/+$", "") + path);
+        } catch (IllegalArgumentException e) {
+            log.warn("license.api-base 不是合法地址: {}", base);
+            return null;
+        }
+        String scheme = uri.getScheme();
+        if (scheme == null || (!scheme.equalsIgnoreCase("http") && !scheme.equalsIgnoreCase("https"))) {
+            log.warn("license.api-base 不是合法的 http(s) 地址: {}", base);
+            return null;
+        }
+        try {
+            HttpRequest request = HttpRequest.newBuilder(uri)
+                    .timeout(Duration.ofSeconds(10))
+                    .GET()
+                    .build();
+            HttpResponse<String> response = HTTP.send(request, HttpResponse.BodyHandlers.ofString());
+            String bodyText = response.body();
+            if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                log.warn("卡密服务端 GET {} 返回 {}", path, response.statusCode());
+                return null;
+            }
+            return (bodyText == null || bodyText.isBlank())
+                    ? objectMapper.createObjectNode()
+                    : objectMapper.readTree(bodyText);
+        } catch (IOException | InterruptedException | IllegalArgumentException e) {
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
+            log.warn("卡密服务端 GET 失败 | {} | {}", path, e.toString());
+            return null;
+        }
+    }
+
+    /**
      * @return 响应体 JSON；网络不可达（未配置地址 / 地址非法 / 连不上）返回 null，
      *         由调用方按宽限逻辑处理
      * @throws LicenseServerException 服务端返回了明确的业务错误

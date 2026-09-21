@@ -66,6 +66,17 @@
     cursor: pointer;
   }
   .models span:hover { background: #e3f0ff; color: #1565c0; }
+  .modes { display: flex; flex-direction: column; gap: 8px; }
+  .mode {
+    display: flex; gap: 8px; align-items: flex-start; margin: 0; cursor: pointer;
+    font-size: 13px; color: #1f2329; line-height: 1.7;
+    background: #f7f8fa; border: 1px solid #e6e8eb; border-radius: 8px; padding: 10px 12px;
+  }
+  .mode input { width: 16px; height: 16px; margin-top: 3px; flex-shrink: 0; }
+  .mode.on { border-color: #3370ff; background: #f0f6ff; }
+  .platform-ok, .platform-bad { border-radius: 8px; padding: 10px 12px; font-size: 13px; line-height: 1.7; }
+  .platform-ok { background: #e8f5e9; color: #2e7d32; }
+  .platform-bad { background: #fff3e0; color: #e65100; }
 </style>
 </head>
 <body>
@@ -98,35 +109,55 @@
     </div>
 
     <div class="field">
-      <label for="baseUrl">接口地址（OpenAI 兼容）</label>
-      <input id="baseUrl" type="text" placeholder="https://api.openai.com" autocomplete="off">
-      <div class="hint">
-        官方和中转站填法都一样，不用纠结格式：<code>https://api.openai.com</code> 会自动补
-        <code>/v1</code>；中转站给了 <code>/v1</code> 或自定义前缀就原样用；
-        把完整端点 <code>.../v1/chat/completions</code> 整段粘进来也会自动砍掉多余部分。
+      <label>话术从哪来</label>
+      <div class="modes">
+        <label class="mode" for="modePlatform">
+          <input type="radio" name="aiMode" id="modePlatform" value="platform">
+          <span><b>平台提供（推荐）</b>：用平台自备的 AI 中转，填好下面的求职者背景就能用，
+            不用自己找接口地址、不用自己充 Key。</span>
+        </label>
+        <label class="mode" for="modeCustom">
+          <input type="radio" name="aiMode" id="modeCustom" value="custom">
+          <span><b>我自己的接口</b>：自己填中转站地址、Key 和模型名。适合手里已有 Key，
+            或者想用平台中转之外模型的人。</span>
+        </label>
       </div>
     </div>
 
-    <div class="field">
-      <label for="apiKey">API Key</label>
-      <div class="row">
-        <input id="apiKey" type="password" placeholder="sk-..." autocomplete="new-password"
-               style="flex:1;min-width:260px">
-        <button id="btnClearKey" class="secondary small" type="button">清除 Key</button>
-      </div>
-      <div class="hint" id="keyHint">Key 只存在本机配置里，读取时一律打码，不会回显明文。</div>
-    </div>
+    <div class="field" id="platformBox" style="display:none"></div>
 
-    <div class="field">
-      <label for="model">模型名</label>
-      <div class="row">
-        <input id="model" type="text" list="modelList" placeholder="gpt-4o-mini / deepseek-chat"
-               autocomplete="off" style="flex:1;min-width:260px">
-        <button id="btnModels" class="secondary small" type="button">拉取模型</button>
+    <div id="customFields">
+      <div class="field">
+        <label for="baseUrl">接口地址（OpenAI 兼容）</label>
+        <input id="baseUrl" type="text" placeholder="https://api.openai.com" autocomplete="off">
+        <div class="hint">
+          官方和中转站填法都一样，不用纠结格式：<code>https://api.openai.com</code> 会自动补
+          <code>/v1</code>；中转站给了 <code>/v1</code> 或自定义前缀就原样用；
+          把完整端点 <code>.../v1/chat/completions</code> 整段粘进来也会自动砍掉多余部分。
+        </div>
       </div>
-      <datalist id="modelList"></datalist>
-      <div class="hint">填接口支持的模型名。点"拉取模型"会读 <code>/models</code> 列表，点上面的名字直接填入。</div>
-      <div id="modelChips" class="models"></div>
+
+      <div class="field">
+        <label for="apiKey">API Key</label>
+        <div class="row">
+          <input id="apiKey" type="password" placeholder="sk-..." autocomplete="new-password"
+                 style="flex:1;min-width:260px">
+          <button id="btnClearKey" class="secondary small" type="button">清除 Key</button>
+        </div>
+        <div class="hint" id="keyHint">Key 只存在本机配置里，读取时一律打码，不会回显明文。</div>
+      </div>
+
+      <div class="field">
+        <label for="model">模型名</label>
+        <div class="row">
+          <input id="model" type="text" list="modelList" placeholder="gpt-4o-mini / deepseek-chat"
+                 autocomplete="off" style="flex:1;min-width:260px">
+          <button id="btnModels" class="secondary small" type="button">拉取模型</button>
+        </div>
+        <datalist id="modelList"></datalist>
+        <div class="hint">填接口支持的模型名。点"拉取模型"会读 <code>/models</code> 列表，点上面的名字直接填入。</div>
+        <div id="modelChips" class="models"></div>
+      </div>
     </div>
 
     <div class="field">
@@ -160,6 +191,7 @@
       <li><b>按岗位写</b>：提示词里带岗位名、公司、薪资、经验学历要求和 JD 片段，AI 要提到具体内容，不给套话。</li>
       <li><b>风格轮换</b>：每次随机挑一种语气（简洁/热情/专业/从经历切入/认同业务），连发十条不像群发。</li>
       <li><b>带去重</b>：和最近 30 条已发话术比对（忽略标点空白），撞了让 AI 换说法重来一次，还撞才退回固定话术。</li>
+      <li><b>两种接口来源</b>：「平台提供」用平台自备的中转，填好人设就能用；「我自己的接口」用你自己的中转站 Key。两种都能随时切换，互不影响。</li>
       <li><b>失败不卡流程</b>：接口超时、限流、key 失效都自动退回固定话术，投递继续跑，原因记在运行日志里。</li>
       <li><b>用在哪</b>：Boss 直聘用它写打招呼语；猎聘用它写 IM 里那句追问。51job 和智联是直接投简历，用不到话术。</li>
     </ul>
@@ -173,6 +205,8 @@ const $ = (id) => document.getElementById(id);
 //   keyEdited = false  → 用户没动过输入框，保存时不带 apiKey 字段（保留原值）
 //   keyEdited = true   → 带上输入框里的值，空串表示清除
 let keyEdited = false;
+// 最近一次从服务端读到的配置，切模式时重算状态徽章要用
+let loadedConfig = null;
 
 function toast(text, ok) {
   $('toast').textContent = text;
@@ -184,10 +218,56 @@ async function api(path, options) {
   return res.json();
 }
 
-/** 页面上的状态说明和后端 describe() 保持一致，用户看到的原因和日志里的一致 */
+/** 当前选中的模式：没选过就当平台提供 */
+function currentMode() {
+  return $('modeCustom').checked ? 'custom' : 'platform';
+}
+
+/** 按模式显隐字段。平台模式不填接口三件套，但输入框的值留着不清——
+ *  保存时原样回传，免得用户切去平台再切回来，自己配好的地址和 Key 没了。 */
+function applyMode() {
+  const platform = currentMode() === 'platform';
+  $('customFields').style.display = platform ? 'none' : '';
+  $('platformBox').style.display = platform ? '' : 'none';
+  $('modePlatform').closest('.mode').classList.toggle('on', platform);
+  $('modeCustom').closest('.mode').classList.toggle('on', !platform);
+  refreshState();
+}
+
+/** 按当前选中的模式重算状态徽章。切模式时必须重算：不然用户选了"平台提供"，
+ *  徽章还挂着自有接口的模型名，等于告诉客户一个已经不准的状态。 */
+function refreshState() {
+  if (!loadedConfig) return;
+  const c = Object.assign({}, loadedConfig, { mode: currentMode() });
+  const [cls, text] = describeState(c);
+  $('aiState').className = 'state ' + cls;
+  $('aiStateMsg').textContent = text + (c.mode === loadedConfig.mode ? '' : '（记得点"保存配置"后生效）');
+}
+
+/** 平台模式的状态框：中转开没开、用的什么模型，都是问卡密服务端问来的 */
+function renderPlatform(c) {
+  if (c.platformAvailable) {
+    $('platformBox').innerHTML = '<div class="platform-ok">平台中转已开启'
+      + (c.platformModel ? '（模型 ' + escapeHtml(c.platformModel) + '）' : '')
+      + '。不用填接口地址和 Key，填好下面的求职者背景、打开上面的开关就能用。</div>';
+  } else {
+    $('platformBox').innerHTML = '<div class="platform-bad">'
+      + escapeHtml(c.platformMessage || '平台没开 AI 中转')
+      + '。这种情况可以改用「我自己的接口」。</div>';
+  }
+}
+
+/** 页面上的状态说明尽量和后端 describe() 保持一致；平台中转可用性只有页面上
+ *  能顺手问到（后端那次判断要走网络），所以多提醒一句。 */
 function describeState(c) {
+  const mode = c.mode === 'custom' ? 'custom' : 'platform';
   if (!c.enabled) return ['off', 'AI 话术未启用，各平台使用固定话术'];
   if (!c.persona || !c.persona.trim()) return ['warn', '已启用但没填求职者背景，将使用固定话术'];
+  if (mode === 'platform') {
+    if (!c.platformAvailable) return ['warn', c.platformMessage || '平台没开 AI 中转，可改用「我自己的接口」'];
+    return ['ok', 'AI 话术已启用（平台提供' + (c.platformModel ? ' ' + c.platformModel : '')
+      + '），生成失败会自动退回固定话术'];
+  }
   if (!c.baseUrl || !c.apiKeySet || !c.model) return ['warn', '已启用但接口地址/Key/模型没配全，将使用固定话术'];
   return ['ok', 'AI 话术已启用（' + c.model + '），生成失败会自动退回固定话术'];
 }
@@ -206,6 +286,7 @@ async function load() {
     return;
   }
   const c = json.data;
+  loadedConfig = c;
   $('enabled').checked = !!c.enabled;
   $('baseUrl').value = c.baseUrl || '';
   $('model').value = c.model || '';
@@ -215,10 +296,13 @@ async function load() {
   keyEdited = false;
   $('apiKey').placeholder = c.apiKeySet ? '已保存：' + c.apiKeyMasked + '（不修改就留空）' : 'sk-...';
 
-  const [cls, text] = describeState(c);
-  $('aiState').className = 'state ' + cls;
+  $('modeCustom').checked = c.mode === 'custom';
+  $('modePlatform').checked = !$('modeCustom').checked;
+  renderPlatform(c);
+  applyMode();
+
   $('aiState').textContent = c.enabled ? '已启用' : '未启用';
-  $('aiStateMsg').textContent = text;
+  refreshState();
   $('keyHint').textContent = c.apiKeySet
     ? '当前已保存 Key：' + c.apiKeyMasked + '。保存时留空 = 不修改，点"清除 Key" = 删掉。'
     : '还没有保存 Key。Key 只存在本机配置里，读取时一律打码，不会回显明文。';
@@ -228,6 +312,7 @@ async function load() {
 async function save() {
   const body = {
     enabled: $('enabled').checked,
+    mode: currentMode(),
     baseUrl: $('baseUrl').value.trim(),
     model: $('model').value.trim(),
     persona: $('persona').value,
@@ -257,8 +342,12 @@ async function save() {
 }
 
 async function testConnection() {
-  const body = { baseUrl: $('baseUrl').value.trim(), model: $('model').value.trim() };
-  if (keyEdited) body.apiKey = $('apiKey').value.trim();
+  const body = { mode: currentMode() };
+  if (currentMode() === 'custom') {
+    body.baseUrl = $('baseUrl').value.trim();
+    body.model = $('model').value.trim();
+    if (keyEdited) body.apiKey = $('apiKey').value.trim();
+  }
 
   $('btnTest').disabled = true;
   $('testReply').style.display = 'none';
@@ -272,10 +361,15 @@ async function testConnection() {
     const box = $('testReply');
     box.style.display = 'block';
     if (d.ok) {
-      box.innerHTML = '<b>连通成功</b>（' + escapeHtml(d.baseUrl || '') + ' / ' + escapeHtml(d.model || '') + '）\n'
+      const who = d.mode === 'custom'
+        ? escapeHtml(d.baseUrl || '') + ' / ' + escapeHtml(d.model || '')
+        : '平台中转 / ' + escapeHtml(d.model || '');
+      box.innerHTML = '<b>连通成功</b>（' + who + '）\n'
         + '模型回复：' + escapeHtml(d.reply || '');
     } else {
-      box.innerHTML = '<b>连通失败</b>（' + escapeHtml(d.baseUrl || '') + '）\n' + escapeHtml(d.error || '未知原因');
+      box.innerHTML = '<b>连通失败</b>（'
+        + escapeHtml(d.mode === 'custom' ? (d.baseUrl || '') : '平台中转')
+        + '）\n' + escapeHtml(d.error || '未知原因');
     }
   } catch (e) {
     toast('请求失败：' + e.message, false);
@@ -326,6 +420,8 @@ function escapeHtml(s) {
 }
 
 $('apiKey').addEventListener('input', () => { keyEdited = true; });
+$('modePlatform').addEventListener('change', applyMode);
+$('modeCustom').addEventListener('change', applyMode);
 $('btnClearKey').onclick = () => {
   $('apiKey').value = '';
   keyEdited = true;
@@ -337,9 +433,7 @@ $('btnTest').onclick = testConnection;
 $('btnModels').onclick = fetchModels;
 $('enabled').addEventListener('change', () => {
   // 只切换视觉提示，是否真启用以保存后的配置为准
-  $('aiStateMsg').textContent = $('enabled').checked
-    ? '记得点"保存配置"后生效'
-    : '记得点"保存配置"后生效';
+  $('aiStateMsg').textContent = '记得点"保存配置"后生效';
 });
 load();
 </script>

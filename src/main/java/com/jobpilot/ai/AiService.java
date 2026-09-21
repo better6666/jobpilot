@@ -217,6 +217,109 @@ public class AiService {
         return AiResult.fail(lastError);
     }
 
+    /**
+     * 走平台中转：把提示词发给卡密服务端，由服务端拿自己存的 key 去调中转。
+     *
+     * <p>客户端全程拿不到那把 key——买卡的人从安装目录里翻不出来，也就没法
+     * 把平台的额度搬去自用。这是"平台提供话术"和"把 key 发给客户端自己调"
+     * 的本质区别，后者等于把 key 白送。
+     *
+     * <p>失败语义和 {@link #chat} 一致：返回 {@link AiResult#fail} 不抛异常，
+     * 4xx 不重试（429 除外），调用方退回固定话术。
+     */
+    public AiResult chatPlatform(String apiBase, String token, String deviceId,
+                                 String systemPrompt, String userPrompt, double temperature) {
+        String base = apiBase == null ? "" : apiBase.trim().replaceAll("/+$", "");
+        if (base.isEmpty()) {
+            return AiResult.fail("卡密服务端地址没配");
+        }
+        if (isBlank(token) || isBlank(deviceId)) {
+            return AiResult.fail("卡密未激活，用不了平台话术");
+        }
+
+        String body;
+        try {
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("token", token);
+            payload.put("device_id", deviceId);
+            payload.put("system", systemPrompt == null ? "" : systemPrompt);
+            payload.put("user", userPrompt == null ? "" : userPrompt);
+            payload.put("temperature", temperature);
+            body = objectMapper.writeValueAsString(payload);
+        } catch (Exception e) {
+            return AiResult.fail("请求体构造失败: " + e.getMessage());
+        }
+
+        String lastError = "未知错误";
+        for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+            HttpRequest request;
+            try {
+                request = HttpRequest.newBuilder()
+                        .uri(URI.create(base + "/api/ai/chat"))
+                        .timeout(Duration.ofMillis(READ_TIMEOUT_MS))
+                        .header("Content-Type", "application/json")
+                        .POST(HttpRequest.BodyPublishers.ofString(body))
+                        .build();
+            } catch (IllegalArgumentException e) {
+                return AiResult.fail("卡密服务端地址不合法: " + e.getMessage());
+            }
+            try {
+                HttpResponse<String> response = httpClient.send(request,
+                        HttpResponse.BodyHandlers.ofString());
+                int code = response.statusCode();
+                if (code >= 200 && code < 300) {
+                    JsonNode root;
+                    try {
+                        root = objectMapper.readTree(response.body());
+                    } catch (Exception e) {
+                        return AiResult.fail("平台响应不是合法 JSON");
+                    }
+                    // 服务端可能 200 但业务失败（平台没配中转、卡密过期），
+                    // 这时候 success=false 且带 message，要透传不能当成空内容
+                    if (!root.path("success").asBoolean(false)) {
+                        String detail = errorMessageFrom(root);
+                        return AiResult.fail(detail.isBlank() ? "平台返回异常" : detail);
+                    }
+                    String text = root.path("data").path("text").asText(null);
+                    if (text == null || text.isBlank()) {
+                        return AiResult.fail("平台返回 200 但没有话术内容");
+                    }
+                    return AiResult.ok(text);
+                }
+                lastError = describePlatformError(code, response.body());
+                if (code >= 400 && code < 500 && code != 429) {
+                    return AiResult.fail(lastError);
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return AiResult.fail("调用被中断");
+            } catch (Exception e) {
+                lastError = "连接卡密服务端失败或超时: " + e.getClass().getSimpleName();
+            }
+            if (attempt < MAX_ATTEMPTS) {
+                sleep(BACKOFF_MS[Math.min(attempt - 1, BACKOFF_MS.length - 1)]);
+            }
+        }
+        return AiResult.fail(lastError);
+    }
+
+    /**
+     * 平台代理的错误翻成人话。服务端给的 message 已经是给人看的，优先带上；
+     * 状态码只用于在服务端没说话时补一句原因。
+     */
+    private String describePlatformError(int code, String body) {
+        String detail = errorMessageFrom(body);
+        String reason = switch (code) {
+            case 401 -> "卡密激活信息失效，请重新激活";
+            case 403 -> "卡密不可用（已到期或次数用完）";
+            case 404 -> "卡密服务端没有这个接口（服务端版本可能太旧）";
+            case 429 -> "请求过于频繁，稍后再试";
+            case 503 -> "平台没配 AI 中转";
+            default -> code >= 500 ? "平台服务异常" : "平台返回 " + code;
+        };
+        return detail.isBlank() ? reason : reason + "：" + detail;
+    }
+
     /** 拉取模型列表（管理页"拉取模型"按钮） */
     public ModelResult models(String baseUrl, String apiKey) {
         String base = normalizeBaseUrl(baseUrl);
@@ -287,23 +390,7 @@ public class AiService {
 
     /** 把 HTTP 错误翻成人话。只取接口返回的 message，不带请求头（那里有 key） */
     private String describeHttpError(int code, String body) {
-        String detail = "";
-        try {
-            if (body != null && !body.isBlank()) {
-                JsonNode root = objectMapper.readTree(body);
-                JsonNode msg = root.path("error").path("message");
-                if (msg.isTextual()) {
-                    detail = msg.asText();
-                } else if (root.path("message").isTextual()) {
-                    detail = root.path("message").asText();
-                }
-                if (detail.isBlank()) {
-                    detail = body.length() > 200 ? body.substring(0, 200) : body;
-                }
-            }
-        } catch (Exception ignore) {
-            // 响应不是 JSON（网关的 HTML 错误页），用状态码就够了
-        }
+        String detail = errorMessageFrom(body);
         String reason = switch (code) {
             case 401, 403 -> "接口拒绝了（key 无效或没有该模型权限）";
             case 404 -> "接口地址或模型不存在";
@@ -311,6 +398,35 @@ public class AiService {
             default -> code >= 500 ? "接口服务端错误" : "接口返回 " + code;
         };
         return detail.isBlank() ? reason : reason + "：" + detail;
+    }
+
+    /**
+     * 从错误响应里取 message。取不到就退回响应前 200 字——网关的 HTML 错误页
+     * 也能看出个大概。只读 body，绝不碰请求头（那里有 key）。
+     */
+    private String errorMessageFrom(String body) {
+        try {
+            if (body == null || body.isBlank()) {
+                return "";
+            }
+            String msg = errorMessageFrom(objectMapper.readTree(body));
+            return msg.isBlank() ? (body.length() > 200 ? body.substring(0, 200) : body) : msg;
+        } catch (Exception ignore) {
+            // 响应不是 JSON（网关的 HTML 错误页），用状态码就够了
+            return "";
+        }
+    }
+
+    /** 从已解析的 JSON 里取 message；没有就空串 */
+    private String errorMessageFrom(JsonNode root) {
+        JsonNode msg = root.path("error").path("message");
+        if (msg.isTextual()) {
+            return msg.asText();
+        }
+        if (root.path("message").isTextual()) {
+            return root.path("message").asText();
+        }
+        return "";
     }
 
     /**

@@ -12,6 +12,8 @@
 | POST | `/verify` | 心跳：`{token, device_id}` → 返回剩余天数/次数 |
 | POST | `/report` | 上报投递次数（仅次数卡扣减）：`{token, device_id, n}` |
 | POST | `/unbind` | 自助解绑：终身 3 次、每次冷却 7 天 |
+| GET | `/api/ai/info` | 平台 AI 中转配了没、用的什么模型（客户端拿它决定显示什么） |
+| POST | `/api/ai/chat` | 平台中转代理：`{token, device_id, system, user, temperature}` → `{text, model}` |
 
 管理端（`Authorization: Bearer <ADMIN_KEY>`）：
 
@@ -21,6 +23,9 @@
 | GET | `/admin/cards?status=&batch=&limit=` | 卡密列表（卡号打码） |
 | POST | `/admin/cards/:key/disable` | 作废卡密 |
 | GET | `/admin/stats` | 运营统计 |
+| GET | `/admin/settings` | 读平台配置（AI 中转的 key 只回打码值） |
+| PUT | `/admin/settings` | 存平台配置：`{ai:{base_url, api_key, model}}`，api_key 不传=保留、空串=清除 |
+| POST | `/admin/ai/test` | 测中转通不通，可带临时覆盖值改完先测再存 |
 
 其他：
 
@@ -65,6 +70,22 @@ curl -s -X POST http://localhost:8787/verify \
   -d '{"token":"<activate返回的token>","device_id":"test-device-1"}'
 ```
 
+## 平台 AI 中转
+
+中转的地址和 key 存在服务端 `settings` 表里（`key='ai'`，value 是整段 JSON），客户端
+`/api/ai/chat` 只带 token + device_id + 提示词——**key 全程不出服务端**。买卡的人从安装
+目录里翻不出这把 key，也就烧不掉平台的额度。客户端那边看到的一律是打码值。
+
+配一次就全员可用：在 `manage.html` 的「平台 AI 中转配置」面板填地址 / Key / 模型，
+客户在应用的「AI 话术」页选"平台提供"即可，什么都不用再填。三项缺任何一项，
+客户端会看到"平台没开 AI 中转"并被引导去填自己的接口。
+
+- 地址在保存时就地归一（补 `/v1`、砍掉粘多的 `/chat/completions`），存进去的永远是能直接拼端点的形状；归一逻辑在 `src/lib/relay.ts`，与 Java 侧 `AiService.normalizeBaseUrl` 逐条对齐、有单测
+- 按卡限流：一张卡每分钟最多 120 次，够跑批又不至于被一个客户端打爆中转额度
+- 失败语义：401 token 不对 / 403 卡不可用 / 429 太频繁 / 503 平台没配中转 / 502 中转本身报错
+- 本地联调可以用一个假中转站验整条链路（不起真 key）：起个监听 `/v1/chat/completions`
+  返回 `{"choices":[{"message":{"content":"..."}}]}` 的服务，地址填它即可
+
 ## 部署到 Cloudflare
 
 本项目已部署，两个入口：
@@ -96,6 +117,10 @@ npx wrangler d1 create jobpilot-license
 npx wrangler kv namespace create jobpilot-license-ratelimit
 
 # 3. 远端建表
+npx wrangler d1 execute jobpilot-license --remote --file schema.sql
+
+# 3b. 已部署过的库补新表（schema.sql 是 CREATE TABLE IF NOT EXISTS，重复执行安全；
+#     加了 settings 表之后必须先补这一步，否则 /admin/settings 会报 no such table）
 npx wrangler d1 execute jobpilot-license --remote --file schema.sql
 
 # 4. 设置 admin key（只输一次，之后不可见；本地 .dev.vars 里也放同一把方便联调）

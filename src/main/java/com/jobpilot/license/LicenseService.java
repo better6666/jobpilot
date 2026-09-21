@@ -168,6 +168,21 @@ public class LicenseService {
         return status().isAllowed();
     }
 
+    /**
+     * 平台 AI 中转的调用凭证（token + device_id）。
+     *
+     * <p>给 {@code AiService.chatPlatform} 用：平台模式下客户端只带这两个值
+     * 去请求服务端代理，中转的 key 全程留在服务端。没激活就返回 null，
+     * 调用方据此退回固定话术。
+     */
+    public Map<String, String> proxyCredentials() {
+        LicenseRecord record = load();
+        if (record == null || !notBlank(record.getToken()) || !notBlank(record.getDeviceId())) {
+            return null;
+        }
+        return Map.of("token", record.getToken(), "device_id", record.getDeviceId());
+    }
+
     // ---------------------------------------------------------------- internal
 
     private void doVerify(LicenseRecord record) {

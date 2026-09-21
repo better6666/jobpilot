@@ -7,7 +7,7 @@
     "dev": "wrangler dev --local",
     "deploy": "wrangler deploy",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types test/cards.test.ts",
+    "test": "node --experimental-strip-types test/cards.test.ts && node --experimental-strip-types test/relay.test.ts",
     "db:init": "wrangler d1 execute jobpilot-license --local --file schema.sql"
   },
   "dependencies": {

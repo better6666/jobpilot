@@ -21,6 +21,12 @@ public class AiProperties {
 
     public static final String CONFIG_KEY = "ai";
 
+    /** 用平台自备的中转，客户不用填接口 */
+    public static final String MODE_PLATFORM = "platform";
+
+    /** 用客户自己填的接口 */
+    public static final String MODE_CUSTOM = "custom";
+
     private final ConfigService configService;
 
     public AiProperties(ConfigService configService) {
@@ -28,7 +34,7 @@ public class AiProperties {
     }
 
     public AiConfig get() {
-        return configService.getJson(CONFIG_KEY, AiConfig.class, new AiConfig());
+        return normalizeMode(configService.getJson(CONFIG_KEY, AiConfig.class, new AiConfig()));
     }
 
     public void save(AiConfig incoming) {
@@ -40,10 +46,31 @@ public class AiProperties {
         if (incoming.getApiKey() == null) {
             incoming.setApiKey(current.getApiKey());
         }
+        normalizeMode(incoming);
         configService.setJson(CONFIG_KEY, incoming);
-        log.info("AI 配置已保存：enabled={} baseUrl={} model={} persona={}字",
-                incoming.isEnabled(), incoming.getBaseUrl(), incoming.getModel(),
+        log.info("AI 配置已保存：enabled={} mode={} baseUrl={} model={} persona={}字",
+                incoming.isEnabled(), incoming.getMode(), incoming.getBaseUrl(), incoming.getModel(),
                 incoming.getPersona() == null ? 0 : incoming.getPersona().length());
+    }
+
+    /**
+     * 把 mode 归一成 platform/custom。
+     *
+     * <p>只处理 null——{@link AiConfig#getMode()} 默认 null，表示这份配置是加
+     * mode 字段之前存的。这种情况按"有没有填过自己的 key"决定：填过的老用户
+     * 留在 custom（升级不该悄悄把人家的接口换成平台的），没填过的落到 platform。
+     *
+     * <p>只改内存不写库：读的时候归一就够了，下次保存自然带上正确值。
+     */
+    static AiConfig normalizeMode(AiConfig cfg) {
+        if (cfg == null) {
+            return null;
+        }
+        if (cfg.getMode() == null) {
+            cfg.setMode(cfg.getApiKey() != null && !cfg.getApiKey().isBlank()
+                    ? MODE_CUSTOM : MODE_PLATFORM);
+        }
+        return cfg;
     }
 
     /** 打码：只留头部和尾各几位，够用户认出是哪个 key，又不至于整个泄露 */

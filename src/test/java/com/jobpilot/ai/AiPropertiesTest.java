@@ -154,4 +154,58 @@ class AiPropertiesTest {
         assertEquals("****", AiProperties.maskApiKey("  sk-1  "));
         assertTrue(AiProperties.maskApiKey("  sk-abcdef1234567890  ").startsWith("sk-abcd"));
     }
+
+    // ------------------------------------------------------------------
+    // 模式迁移
+    // ------------------------------------------------------------------
+
+    @Test
+    void 老配置没填过key就迁到平台模式() {
+        AiConfig legacy = new AiConfig();
+        legacy.setEnabled(true);
+        legacy.setPersona("市场营销专业");
+        // mode 故意不设：模拟加 mode 字段之前存进库里的那份配置
+
+        AiProperties.normalizeMode(legacy);
+
+        assertEquals(AiProperties.MODE_PLATFORM, legacy.getMode());
+    }
+
+    @Test
+    void 老配置填过key就留在自有接口模式() {
+        AiConfig legacy = new AiConfig();
+        legacy.setEnabled(true);
+        legacy.setBaseUrl("https://relay.example.com/v1");
+        legacy.setApiKey("sk-relay-123456");
+        legacy.setModel("gpt-4o-mini");
+
+        AiProperties.normalizeMode(legacy);
+
+        // 升级不该悄悄把人家配好的接口换成平台的
+        assertEquals(AiProperties.MODE_CUSTOM, legacy.getMode());
+    }
+
+    @Test
+    void 已经选了模式的不会被改() {
+        AiConfig cfg = new AiConfig();
+        cfg.setApiKey("sk-relay-123456"); // 有 key，但用户显式选了平台模式
+        cfg.setMode(AiProperties.MODE_PLATFORM);
+
+        AiProperties.normalizeMode(cfg);
+
+        assertEquals(AiProperties.MODE_PLATFORM, cfg.getMode());
+    }
+
+    @Test
+    void 保存时也会把模式归一成非空() {
+        stored(new AiConfig());
+        AiConfig incoming = new AiConfig();
+        incoming.setApiKey("sk-relay-123456");
+
+        properties.save(incoming);
+
+        ArgumentCaptor<AiConfig> captor = ArgumentCaptor.forClass(AiConfig.class);
+        verify(configService).setJson(eq("ai"), captor.capture());
+        assertEquals(AiProperties.MODE_CUSTOM, captor.getValue().getMode());
+    }
 }

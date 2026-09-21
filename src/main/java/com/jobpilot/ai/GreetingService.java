@@ -4,10 +4,13 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.jobpilot.delivery.Delivery;
 import com.jobpilot.delivery.DeliveryMapper;
 import com.jobpilot.delivery.JobCard;
+import com.jobpilot.license.LicenseProperties;
+import com.jobpilot.license.LicenseService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 
 /**
@@ -29,6 +32,15 @@ import java.util.concurrent.ThreadLocalRandom;
  * <p>线程：{@link #compose} 在浏览器 dispatcher 线程上被同步调用，
  * 接口超时（最长 45 秒）会拖慢投递节奏，但不会阻塞别的平台——
  * 全局运行锁本来就只允许一个平台在跑。
+ *
+ * <p>两种模式（{@link AiConfig#getMode()}）：
+ * <ul>
+ *   <li><b>platform</b>：用平台自备的中转。客户只填人设，接口/key/模型
+ *       都不用管；请求由卡密服务端代理，key 不下发到客户端</li>
+ *   <li><b>custom</b>：客户自己填的接口，直连</li>
+ * </ul>
+ * 两条路共用同一套提示词、风格轮换、去重和兜底，只是 {@link #chat} 里
+ * 发的目标不同。
  */
 @Slf4j
 @Service
@@ -51,11 +63,16 @@ public class GreetingService {
     private final AiProperties properties;
     private final AiService aiService;
     private final DeliveryMapper deliveryMapper;
+    private final LicenseService licenseService;
+    private final LicenseProperties licenseProperties;
 
-    public GreetingService(AiProperties properties, AiService aiService, DeliveryMapper deliveryMapper) {
+    public GreetingService(AiProperties properties, AiService aiService, DeliveryMapper deliveryMapper,
+                           LicenseService licenseService, LicenseProperties licenseProperties) {
         this.properties = properties;
         this.aiService = aiService;
         this.deliveryMapper = deliveryMapper;
+        this.licenseService = licenseService;
+        this.licenseProperties = licenseProperties;
     }
 
     /** 话术结果：text 是要发的内容，note 是"为什么没走 AI"的原因（走了就没有） */
@@ -83,8 +100,8 @@ public class GreetingService {
         if (isBlank(cfg.getPersona())) {
             return Greeting.fallback(fallback, "AI 话术开着但没填求职者背景，用固定话术");
         }
-        if (isBlank(cfg.getBaseUrl()) || isBlank(cfg.getApiKey()) || isBlank(cfg.getModel())) {
-            return Greeting.fallback(fallback, "AI 接口地址/Key/模型没配全，用固定话术");
+        if (!isConfigured(cfg)) {
+            return Greeting.fallback(fallback, configGapReason(cfg));
         }
 
         List<String> recent = recentGreetings();
@@ -92,15 +109,13 @@ public class GreetingService {
         String userPrompt = userPrompt(card, style, null);
         String systemPrompt = systemPrompt(cfg);
 
-        AiService.AiResult result = aiService.chat(cfg.getBaseUrl(), cfg.getApiKey(), cfg.getModel(),
-                systemPrompt, userPrompt, cfg.getTemperature());
+        AiService.AiResult result = chat(cfg, systemPrompt, userPrompt);
         String text = result.isOk() ? AiService.cleanGreeting(result.text()) : null;
 
         // 撞了最近用过的：让模型换个说法再来一次，只重试一次
         if (text != null && isDuplicate(text, recent)) {
             log.debug("话术与最近的重复，换一种说法重试");
-            AiService.AiResult retry = aiService.chat(cfg.getBaseUrl(), cfg.getApiKey(), cfg.getModel(),
-                    systemPrompt, userPrompt(card, style, recent.get(0)), cfg.getTemperature());
+            AiService.AiResult retry = chat(cfg, systemPrompt, userPrompt(card, style, recent.get(0)));
             String retryText = retry.isOk() ? AiService.cleanGreeting(retry.text()) : null;
             if (retryText != null && !isDuplicate(retryText, recent)) {
                 return Greeting.ai(retryText);
@@ -117,16 +132,15 @@ public class GreetingService {
     /** 猎聘 IM 里补的那句追问：一句话的问题，不是招呼 */
     public Greeting composeFollowUp(JobCard card, String fallback) {
         AiConfig cfg = properties.get();
-        if (!cfg.isEnabled() || isBlank(cfg.getPersona())
-                || isBlank(cfg.getBaseUrl()) || isBlank(cfg.getApiKey()) || isBlank(cfg.getModel())) {
+        if (!cfg.isEnabled() || isBlank(cfg.getPersona()) || !isConfigured(cfg)) {
             return Greeting.fallback(fallback, null);
         }
         String userPrompt = "基于下面这个岗位，用中文写一句向 HR 的追问（只输出这一句，"
                 + "不超过 40 字，不要解释，不要标题）：\n"
                 + "岗位：" + safe(card.getJobName()) + "｜公司：" + safe(card.getBrandName()) + "\n"
                 + "我的背景：" + cfg.getPersona().trim();
-        AiService.AiResult result = aiService.chat(cfg.getBaseUrl(), cfg.getApiKey(), cfg.getModel(),
-                "你是求职助理，帮求职者写一句简短的求职追问。", userPrompt, cfg.getTemperature());
+        AiService.AiResult result = chat(cfg,
+                "你是求职助理，帮求职者写一句简短的求职追问。", userPrompt);
         String text = result.isOk() ? AiService.cleanGreeting(result.text()) : null;
         if (text == null) {
             return Greeting.fallback(fallback, null);
@@ -135,6 +149,42 @@ public class GreetingService {
             text = text.substring(0, 60);
         }
         return Greeting.ai(text);
+    }
+
+    /**
+     * 按模式选一条路发请求。平台模式由卡密服务端代理，key 不下发；
+     * 自定义模式直连客户填的接口。
+     */
+    private AiService.AiResult chat(AiConfig cfg, String systemPrompt, String userPrompt) {
+        if (AiProperties.MODE_CUSTOM.equals(cfg.getMode())) {
+            return aiService.chat(cfg.getBaseUrl(), cfg.getApiKey(), cfg.getModel(),
+                    systemPrompt, userPrompt, cfg.getTemperature());
+        }
+        Map<String, String> credentials = licenseService.proxyCredentials();
+        if (credentials == null) {
+            return AiService.AiResult.fail("卡密未激活，用不了平台话术");
+        }
+        return aiService.chatPlatform(licenseProperties.getApiBase(),
+                credentials.get("token"), credentials.get("device_id"),
+                systemPrompt, userPrompt, cfg.getTemperature());
+    }
+
+    /**
+     * 该有的都齐了吗。平台模式只要求人设——接口、key、模型都是平台的，
+     * 客户不用填，也就不该拿"没配全"去拦他。
+     */
+    private static boolean isConfigured(AiConfig cfg) {
+        if (AiProperties.MODE_CUSTOM.equals(cfg.getMode())) {
+            return !isBlank(cfg.getBaseUrl()) && !isBlank(cfg.getApiKey()) && !isBlank(cfg.getModel());
+        }
+        return true;
+    }
+
+    private static String configGapReason(AiConfig cfg) {
+        if (AiProperties.MODE_CUSTOM.equals(cfg.getMode())) {
+            return "AI 接口地址/Key/模型没配全，用固定话术";
+        }
+        return "平台没开 AI 中转，请在 AI 话术页改用「我自己的接口」，用固定话术";
     }
 
     /**
@@ -150,10 +200,13 @@ public class GreetingService {
         if (isBlank(cfg.getPersona())) {
             return "AI 话术已启用但没填求职者背景，本次将使用固定话术";
         }
-        if (isBlank(cfg.getBaseUrl()) || isBlank(cfg.getApiKey()) || isBlank(cfg.getModel())) {
+        if (!isConfigured(cfg)) {
             return "AI 话术已启用但接口地址/Key/模型没配全，本次将使用固定话术";
         }
-        return "AI 话术已启用（" + cfg.getModel() + "），生成失败会自动退回固定话术";
+        if (AiProperties.MODE_CUSTOM.equals(cfg.getMode())) {
+            return "AI 话术已启用（自有接口 " + cfg.getModel() + "），生成失败会自动退回固定话术";
+        }
+        return "AI 话术已启用（平台提供），生成失败会自动退回固定话术";
     }
 
     // ------------------------------------------------------------------
