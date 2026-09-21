@@ -234,14 +234,27 @@ function applyMode() {
   refreshState();
 }
 
-/** 按当前选中的模式重算状态徽章。切模式时必须重算：不然用户选了"平台提供"，
- *  徽章还挂着自有接口的模型名，等于告诉客户一个已经不准的状态。 */
+/** 按当前表单重算状态徽章。切模式、拨开关、改人设都必须重算：不然用户选了"平台提供"，
+ *  徽章还挂着自有接口的模型名，或者开关明明开着徽章还是灰的"未启用"，
+ *  等于告诉客户一个已经不准的状态。 */
 function refreshState() {
   if (!loadedConfig) return;
-  const c = Object.assign({}, loadedConfig, { mode: currentMode() });
+  const c = Object.assign({}, loadedConfig, {
+    mode: currentMode(),
+    enabled: $('enabled').checked,
+    persona: $('persona').value
+  });
   const [cls, text] = describeState(c);
   $('aiState').className = 'state ' + cls;
-  $('aiStateMsg').textContent = text + (c.mode === loadedConfig.mode ? '' : '（记得点"保存配置"后生效）');
+  $('aiState').textContent = c.enabled ? '已启用' : '未启用';
+  $('aiStateMsg').textContent = text + (isDirty(c) ? '（记得点"保存配置"后生效）' : '');
+}
+
+/** 表单和已保存配置是否已有出入，有出入就提醒保存 */
+function isDirty(c) {
+  return c.enabled !== !!loadedConfig.enabled
+    || c.mode !== loadedConfig.mode
+    || (c.persona || '') !== (loadedConfig.persona || '');
 }
 
 /** 平台模式的状态框：中转开没开、用的什么模型，都是问卡密服务端问来的 */
@@ -300,8 +313,6 @@ async function load() {
   $('modePlatform').checked = !$('modeCustom').checked;
   renderPlatform(c);
   applyMode();
-
-  $('aiState').textContent = c.enabled ? '已启用' : '未启用';
   refreshState();
   $('keyHint').textContent = c.apiKeySet
     ? '当前已保存 Key：' + c.apiKeyMasked + '。保存时留空 = 不修改，点"清除 Key" = 删掉。'
@@ -431,10 +442,8 @@ $('btnClearKey').onclick = () => {
 $('btnSave').onclick = save;
 $('btnTest').onclick = testConnection;
 $('btnModels').onclick = fetchModels;
-$('enabled').addEventListener('change', () => {
-  // 只切换视觉提示，是否真启用以保存后的配置为准
-  $('aiStateMsg').textContent = '记得点"保存配置"后生效';
-});
+$('enabled').addEventListener('change', refreshState);
+$('persona').addEventListener('input', refreshState);
 load();
 </script>
 </body>
