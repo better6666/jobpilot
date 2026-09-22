@@ -21,7 +21,7 @@ import java.nio.charset.StandardCharsets;
  * 用 Filter 而不是拦截器：Filter 在 DispatcherServlet 之前执行，
  * 即使目标端点还没实现也能挡住，返回 402 而不是 404，语义更准。
  *
- * 只拦四个平台 api 目录下的 start 投递入口；配置读取、卡密激活、健康检查一律放行，
+ * 只拦各平台 api 目录下的 start 投递入口；配置读取、卡密激活、健康检查一律放行，
  * 保证卡密失效时用户仍能打开激活页看到剩余天数、换卡、解绑。
  */
 @Component

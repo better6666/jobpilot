@@ -39,8 +39,10 @@ public class BossService extends DeliveryService<BossJobCard> {
 
     public BossService(BossProperties properties, BossDriver driver, DeliveryMapper mapper,
                        BrowserManager browserManager, BossOptions options, RunCoordinator coordinator,
-                       GreetingService greetingService, LicenseService licenseService) {
-        super(mapper, browserManager, coordinator, greetingService, licenseService);
+                       GreetingService greetingService, LicenseService licenseService,
+                          com.jobpilot.license.EntitlementService entitlementService) {
+        super(mapper, browserManager, coordinator, greetingService, licenseService,
+                entitlementService);
         this.properties = properties;
         this.driver = driver;
         this.options = options;

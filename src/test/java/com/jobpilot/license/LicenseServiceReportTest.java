@@ -14,6 +14,7 @@ import org.mockito.quality.Strictness;
 
 import java.util.Map;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -107,7 +108,11 @@ class LicenseServiceReportTest {
 
         ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
         verify(licenseClient, timeout(2000)).post(eq(API_BASE), eq("/report"), captor.capture());
-        assertEquals(Map.of("token", "tok-quota", "device_id", "dev-1", "n", 1), captor.getValue());
+        // device_id 同样是实时指纹，不是库里那个 "dev-1"（见 LicenseServiceDeviceBindingTest）
+        assertThat(captor.getValue()).containsEntry("token", "tok-quota").containsEntry("n", 1);
+        assertThat(captor.getValue().get("device_id").toString())
+                .isNotEqualTo("dev-1")
+                .matches("[0-9a-f]{64}");
         // 上报结果要落到状态里，激活页的"剩余次数"才是真的
         assertEquals(99L, service.status().getQuotaRemaining());
     }

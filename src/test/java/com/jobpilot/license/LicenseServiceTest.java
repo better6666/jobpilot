@@ -16,6 +16,7 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Map;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -335,6 +336,12 @@ class LicenseServiceTest {
 
         ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
         verify(licenseClient).post(eq(API_BASE), eq("/verify"), captor.capture());
-        assertEquals(Map.of("token", "tok-old", "device_id", "dev-1"), captor.getValue());
+        // 只带这两个字段，但 device_id 必须是实时算的指纹、不是库里存的 "dev-1"——
+        // 发票里存的值就等于允许整目录拷见到别处用，见 LicenseServiceDeviceBindingTest
+        assertThat(captor.getValue()).containsOnlyKeys("token", "device_id");
+        assertThat(captor.getValue().get("token")).isEqualTo("tok-old");
+        assertThat(captor.getValue().get("device_id").toString())
+                .isNotEqualTo("dev-1")
+                .matches("[0-9a-f]{64}");
     }
 }

@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Get Jobs · 会员套餐</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;
+         background:#f5f6f8; color:#1f2329; }
+  .wrap { max-width:1080px; margin:0 auto; padding:28px 20px 60px; }
+  .top { display:flex; align-items:center; justify-content:space-between; margin-bottom:20px; }
+  h1 { font-size:22px; margin:0; }
+  .top a { color:#3370ff; text-decoration:none; font-size:13px; }
+  .sub { color:#6b7280; font-size:13px; margin-bottom:22px; line-height:1.7; }
+
+  .current { background:#fff; border:1px solid #e8e9ec; border-radius:12px; padding:16px 18px;
+             margin-bottom:24px; font-size:14px; }
+  .current b { color:#1f2329; }
+  .current .row { display:flex; gap:18px; flex-wrap:wrap; align-items:center; }
+  .current .pill { background:#eef4ff; color:#2456c9; border-radius:999px; padding:3px 12px; font-size:12px; }
+  .current .meter { flex:1; min-width:180px; }
+  .current .bar { height:6px; background:#eef0f3; border-radius:3px; overflow:hidden; margin-top:6px; }
+  .current .bar i { display:block; height:100%; background:#3370ff; border-radius:3px; }
+  .current small { color:#8a919c; }
+
+  .plans { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; align-items:start; }
+  @media (max-width:860px){ .plans{ grid-template-columns:1fr; } }
+  .plan { background:#fff; border:1px solid #e8e9ec; border-radius:14px; padding:22px 20px; position:relative; }
+  .plan.hot { border:2px solid #3370ff; box-shadow:0 6px 24px rgba(51,126,255,.12); }
+  .plan .badge { position:absolute; top:-11px; left:50%; transform:translateX(-50%);
+    background:#3370ff; color:#fff; font-size:12px; padding:3px 12px; border-radius:999px; white-space:nowrap; }
+  .plan h2 { font-size:17px; margin:0 0 4px; }
+  .plan .tag { font-size:13px; color:#6b7280; margin-bottom:14px; }
+  .price { display:flex; align-items:baseline; gap:4px; margin-bottom:4px; }
+  .price .cur { font-size:15px; color:#1f2329; }
+  .price .num { font-size:34px; font-weight:700; letter-spacing:-.5px; }
+  .price .per { font-size:13px; color:#8a919c; }
+  .days { font-size:12px; color:#8a919c; margin-bottom:10px; }
+  .durs { display:flex; gap:6px; margin-bottom:16px; flex-wrap:wrap; }
+  .dur { border:1px solid #e2e5ea; background:#fff; color:#6b7280; border-radius:7px;
+         padding:5px 9px; font-size:12px; cursor:pointer; }
+  .dur.on { border-color:#3370ff; color:#2456c9; background:#f2f7ff; font-weight:600; }
+  ul { list-style:none; padding:0; margin:0 0 18px; }
+  li { font-size:13px; color:#3d4450; padding:5px 0 5px 20px; position:relative; line-height:1.55; }
+  li:before { content:"✓"; position:absolute; left:0; color:#2e9e5b; font-weight:700; }
+  li.no { color:#aab0ba; }
+  li.no:before { content:"—"; color:#c9ced6; }
+  .cta { display:block; width:100%; padding:11px 0; border:none; border-radius:9px; font-size:14px;
+         cursor:pointer; background:#f0f2f5; color:#3d4450; }
+  .plan.hot .cta { background:#3370ff; color:#fff; }
+  .cta:hover { filter:brightness(.96); }
+  .cta:disabled { opacity:.55; cursor:default; }
+
+  .note { margin-top:26px; background:#fff; border:1px solid #e8e9ec; border-radius:12px; padding:16px 18px;
+          font-size:12.5px; color:#6b7280; line-height:1.8; }
+  .note b { color:#3d4450; }
+  .roadmap { margin-top:14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <h1>Get Jobs · 会员套餐</h1>
+    <a href="/index.html">← 返回首页</a>
+  </div>
+
+  <div class="sub">
+    Get Jobs 是 AI 求职助手：设置一次求职要求，它持续帮你找到值得投的岗位并替你完成投递。
+    三档套餐按「能用多少、能自动多少」区分，价格与额度以后台配置为准。
+  </div>
+
+  <div class="current" id="currentBox">
+    <div class="row">
+      <span>当前套餐</span><span class="pill" id="curPlan">读取中…</span>
+      <span id="curExpire"></span>
+      <span id="curQuota"></span>
+      <a href="/license.html" style="margin-left:auto;font-size:13px;color:#3370ff;text-decoration:none">激活 / 换卡 →</a>
+    </div>
+  </div>
+
+  <div class="plans" id="plans"></div>
+
+  <div class="note">
+    <b>关于额度</b><br>
+    每日投递额度是为了账号安全设计的硬上限，不是为了限制你——招聘平台对异常高频投递会风控，
+    慢一点反而回复率更高。额度用尽当天会自动停止，第二天恢复，不会中断你的投递历史。
+    <br><br>
+    <b>到期之后</b><br>
+    套餐到期只关闭付费功能，<b>不会删除</b>你的投递记录、筛选规则和统计数据。重新订阅后全部恢复。
+    <div class="roadmap" id="roadmap"></div>
+  </div>
+</div>
+
+<script src="/gate.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+let myPlan = null;
+let plans = [];
+
+function money(cents) {
+  return (cents / 100).toFixed(cents % 100 === 0 ? 0 : 1);
+}
+
+const FEATURE_LABELS = {
+  job_search: '搜索岗位',
+  basic_filter: '基础筛选（城市/薪资/学历/经验/关键词）',
+  advanced_filter: '高级筛选（行业/规模/黑白名单/跨平台去重）',
+  ai_match: 'AI 岗位匹配',
+  ai_explanation: 'AI 匹配理由解读',
+  auto_apply: '自动投递',
+  smart_apply: '智能投递策略',
+  multi_resume: '多简历版本',
+  ai_greeting: 'AI 个性化打招呼',
+  analytics: '投递数据统计',
+  natural_language_rule: '自然语言描述求职要求',
+  ab_test: '简历 A/B 测试',
+  ai_strategy: 'AI 求职策略建议',
+};
+const QUOTA_LABELS = {
+  max_daily_apply: '每日投递',
+  max_daily_ai_analysis: '每日 AI 分析',
+  max_resume_count: '简历份数',
+  max_job_profile_count: '求职方向数',
+};
+
+/** 只列当前真实存在的功能，不把没做的当卖点 */
+const SHOW_FEATURES = [
+  'job_search', 'basic_filter', 'advanced_filter',
+  'auto_apply', 'ai_greeting', 'analytics',
+];
+
+async function load() {
+  const [plansRes, entRes] = await Promise.all([
+    fetch('/api/license/plans').then(r => r.json()),
+    fetch('/api/license/entitlement').then(r => r.json()).catch(() => null),
+  ]);
+  plans = (plansRes.data && plansRes.data.plans) || [];
+  const ent = entRes && entRes.data;
+  myPlan = ent ? ent.plan : null;
+  renderCurrent(ent);
+  renderPlans(plansRes.data);
+}
+
+function renderCurrent(ent) {
+  if (!ent) { $('curPlan').textContent = '未激活'; $('curExpire').textContent = '激活后显示套餐与额度'; return; }
+  $('curPlan').textContent = (ent.plan_name || ent.plan) + (myPlan === ent.plan ? '' : '');
+  $('curExpire').textContent = ent.usable
+    ? ('有效期至 ' + (ent.expires_at || '').slice(0, 10) + '，剩余 ' + ent.remaining_days + ' 天')
+    : '当前卡密不可用，请先激活';
+  const apply = ent.quotas && ent.quotas.max_daily_apply;
+  const ai = ent.quotas && ent.quotas.max_daily_ai_analysis;
+  $('curQuota').innerHTML = apply
+    ? '每日额度：投递 ' + apply + ' 个 · AI 分析 ' + ai + ' 次'
+    : '每日额度：不限';
+}
+
+function renderPlans(payload) {
+  const highlight = payload && payload.highlight;
+  $('plans').innerHTML = plans.map(p => {
+    const durs = (p.durations && p.durations.length) ? p.durations
+      : [{ days: p.duration_days, price_cents: p.price_cents }];
+    // 有重点推荐档就默认那一档（进阶版 60 天）；否则默认第一档——
+    // 卡片上写的是"¥xx 起"，落到最贵的一档会和"起"字矛盾
+    const def = durs.find(d => d.days === p.highlight_days) || durs[0];
+    const isHot = p.plan === 'advanced' && def.days === p.highlight_days;
+    const feats = SHOW_FEATURES.filter(f => p.features && p.features[f]);
+    const missing = SHOW_FEATURES.filter(f => !(p.features && p.features[f]));
+    const q = p.quotas || {};
+    return `
+      <div class="plan${isHot ? ' hot' : ''}">
+        ${isHot ? '<div class="badge">🔥 最受欢迎 · 性价比最高</div>' : ''}
+        <h2>${esc(p.name)}</h2>
+        <div class="tag">${p.plan === 'trial' ? '先试后买' : p.plan === 'standard' ? '高效找工作' : 'AI 帮你判断什么岗位值得投'}</div>
+        <div class="price"><span class="cur">¥</span><span class="num" id="num-${p.plan}">${money(def.price_cents)}</span></div>
+        <div class="days" id="days-${p.plan}">${def.days} 天 · 每日投递 ${q.max_daily_apply ?? '-'} 个 · 每日 AI 分析 ${q.max_daily_ai_analysis ?? '-'} 次</div>
+        ${durs.length > 1 ? `<div class="durs">${durs.map(d =>
+            `<button class="dur${d.days === def.days ? ' on' : ''}" data-plan="${p.plan}"
+               data-days="${d.days}" data-price="${d.price_cents}">${d.days}天 ¥${money(d.price_cents)}</button>`).join('')}</div>` : ''}
+        <ul>
+          ${feats.map(f => `<li>${esc(FEATURE_LABELS[f] || f)}</li>`).join('')}
+          ${missing.map(f => `<li class="no">${esc(FEATURE_LABELS[f] || f)}</li>`).join('')}
+        </ul>
+        <button class="cta" data-plan="${p.plan}" ${myPlan === p.plan ? 'disabled' : ''}>
+          ${myPlan === p.plan ? '当前套餐' : p.plan === 'trial' ? '立即体验' : p.plan === 'standard' ? '选择标准版' : '升级进阶版'}
+        </button>
+      </div>`;
+  }).join('');
+
+  document.querySelectorAll('.dur').forEach(b => {
+    b.onclick = () => {
+      const card = b.closest('.plan');
+      card.querySelectorAll('.dur').forEach(x => x.classList.remove('on'));
+      b.classList.add('on');
+      const days = b.dataset.days, price = money(parseInt(b.dataset.price, 10));
+      document.getElementById('num-' + b.dataset.plan).textContent = price;
+      const ai = card.querySelector('.days');
+      ai.textContent = days + ' 天 · ' + ai.textContent.split('天 · ')[1];
+    };
+  });
+
+  document.querySelectorAll('.cta[data-plan]').forEach(b => {
+    b.onclick = () => {
+      // 本机没有支付渠道，引导到激活页填卡；不做假支付
+      location.href = '/license.html';
+    };
+  });
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+load().catch(e => {
+  $('plans').innerHTML = '<div class="plan">套餐读取失败：' + esc(e.message) + '</div>';
+});
+</script>
+</body>
+</html>

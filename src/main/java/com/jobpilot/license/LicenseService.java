@@ -14,6 +14,10 @@ import org.springframework.stereotype.Service;
 import java.net.InetAddress;
 import java.net.NetworkInterface;
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.TimeUnit;
+import java.util.Locale;
+import java.nio.file.Path;
+import java.nio.file.Files;
 import java.security.MessageDigest;
 import java.time.Duration;
 import java.time.Instant;
@@ -100,7 +104,9 @@ public class LicenseService {
         if (record == null) {
             record = new LicenseRecord();
         }
-        String deviceId = ensureDeviceId(record);
+        // 永远发实时算出来的指纹，不发库里的旧值——库里那份会被整体拷走到另一台机器，
+        // 发旧值就等于把"一卡一机"绕过了（实测：拷 Application Support 目录即可白嫖）
+        String deviceId = deviceFingerprint();
 
         JsonNode node = licenseClient.post(properties.getApiBase(), "/activate",
                 Map.of("card_key", key, "device_id", deviceId, "device_name", hostname()));
@@ -153,7 +159,7 @@ public class LicenseService {
             return snapshot();
         }
         JsonNode node = licenseClient.post(properties.getApiBase(), "/unbind",
-                Map.of("token", record.getToken(), "device_id", record.getDeviceId()));
+                Map.of("token", record.getToken(), "device_id", deviceFingerprint()));
         if (node == null) {
             throw new LicenseClient.LicenseUnavailableException("无法连接卡密服务端，请稍后再试");
         }
@@ -199,7 +205,7 @@ public class LicenseService {
         if (record == null || !notBlank(record.getToken()) || !notBlank(record.getDeviceId())) {
             return null;
         }
-        return Map.of("token", record.getToken(), "device_id", record.getDeviceId());
+        return Map.of("token", record.getToken(), "device_id", deviceFingerprint());
     }
 
     /**
@@ -232,6 +238,25 @@ public class LicenseService {
             // 已经在关机了，计数留着也没用
             log.debug("上报线程已关闭，丢弃 {} 次投递上报", n);
         }
+    }
+
+    /**
+     * 是否该把用户挡在激活页外——打开软件先看激活码就是靠这个。
+     *
+     * <p>只在"确实需要一张卡"时为真：{@link LicenseState#UNACTIVATED} /
+     * {@link LicenseState#EXPIRED} / {@link LicenseState#REVOKED}。
+     * <b>不含</b> {@code NETWORK_BLOCKED} 和 {@code GRACE}——那两种是服务端
+     * 暂时连不上（网络抖动、CF 抽风），把人锁在界面外比让他多看几秒旧数据
+     * 糟糕得多。fail-open 同理，直接放行。
+     */
+    public boolean needsActivation() {
+        if (!properties.isEnabled() || properties.isFailOpen()) {
+            return false;
+        }
+        LicenseState state = status().getState();
+        return state == LicenseState.UNACTIVATED
+                || state == LicenseState.EXPIRED
+                || state == LicenseState.REVOKED;
     }
 
     /** 跑批中每次投递前看一眼：卡是不是已经不能用了。自用模式和 fail-open 下一律 false。 */
@@ -273,7 +298,7 @@ public class LicenseService {
         }
         JsonNode node = licenseClient.post(properties.getApiBase(), "/report", Map.of(
                 "token", record.getToken(),
-                "device_id", record.getDeviceId(),
+                "device_id", deviceFingerprint(),
                 "n", n));
         if (node == null) {
             // 网络不可达：抛出去让 flushReports 把计数放回去
@@ -303,7 +328,7 @@ public class LicenseService {
 
     private void doVerify(LicenseRecord record) {
         JsonNode node = licenseClient.post(properties.getApiBase(), "/verify",
-                Map.of("token", record.getToken(), "device_id", record.getDeviceId()));
+                Map.of("token", record.getToken(), "device_id", deviceFingerprint()));
         if (node == null) {
             LicenseState state = networkState(record);
             publish(state, state == LicenseState.GRACE
@@ -328,6 +353,9 @@ public class LicenseService {
     private LicenseState mapServerCode(String code) {
         return switch (code) {
             case "CARD_EXPIRED", "QUOTA_EXHAUSTED" -> LicenseState.EXPIRED;
+            // 设备不符不是"卡坏了"，是这台机器没资格用。单给一个状态，
+            // 前端据此提示"重新激活"而不是"卡已失效"
+            case "DEVICE_MISMATCH" -> LicenseState.DEVICE_MISMATCH;
             default -> LicenseState.REVOKED;
         };
     }
@@ -388,16 +416,104 @@ public class LicenseService {
         configService.setJson(ConfigService.LICENSE_KEY, record);
     }
 
-    /** 设备指纹：hostname + MAC + 系统用户名 的哈希，首次生成后固定落库 */
-    private String ensureDeviceId(LicenseRecord record) {
-        if (notBlank(record.getDeviceId())) {
-            return record.getDeviceId();
+    /**
+     * 设备指纹：每次现算，不读库、不缓存、不写库。
+     *
+     * <p><b>为什么必须现算</b>：早先这值是首次激活时算一次然后落库，之后所有上行请求
+     * 都发库里的旧值。于是别人只要把 {@code ~/Library/Application Support/JobPilot}
+     * 整个目录拷到另一台 Mac，token 和设备号一起过去，服务端比对通过，"一卡一机"
+     * 完全失效。改成现算之后，换机器指纹就变，服务端立刻能发现。
+     *
+     * <p>代价：用户改了主机名/用户名/换网卡之后指纹会变，需要重新激活一次。
+     * 这个代价比一张卡被无限复制划算得多。
+     *
+     * <p>注意这仍然只是"机器特征"不是"硬件密钥"：知道算法的人可以改 hostname、
+     * 用户名、MAC 去凑同一个指纹。要彻底防住得用 macOS Keychain / Secure Enclave
+     * 那种不可导出的硬件绑定，成本高一个量级，见 README 的后续项。
+     */
+    private String deviceFingerprint() {
+        String hw = hardwareUuid();
+        // 有硬件 UUID 就只用它 + 系统用户名；拿不到才退回网卡/主机名那套。
+        // 退回方案刻意不用网卡 MAC 当主输入：macOS 会枚举到 llw0 这种虚拟
+        // 低延迟网卡，它的 MAC 是每个 Wi-Fi 随机生成的；"第一个启用的网卡"
+        // 也会随 Wi-Fi/有线/手机热点的切换而变。早先就是这么写的，
+        // 结果笔记本换个网络指纹就变，用户被自己锁死（实测踩过）。
+        String raw = hw != null
+                ? hw + "|" + System.getProperty("user.name")
+                : hostname() + "|" + macAddress() + "|" + System.getProperty("user.name");
+        return sha256(raw);
+    }
+
+    /** UUID 的字面形状，用来从各系统命令的输出里把它抠出来 */
+    private static final java.util.regex.Pattern UUID_PATTERN = java.util.regex.Pattern.compile(
+            "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}");
+
+    /**
+     * 操作系统提供的机器硬件 UUID。绑定到固件，不随网络、主机名、登录用户变化。
+     *
+     * <ul>
+     *   <li>macOS: {@code ioreg -rd1 -c IOPlatformExpertDevice} 的 IOPlatformUUID</li>
+     *   <li>Windows: 注册表 HKLM\SOFTWARE\Microsoft\Cryptography 的 MachineGuid</li>
+     *   <li>Linux: /etc/machine-id，退化到 /sys/class/dmi/id/product_uuid</li>
+     * </ul>
+     * 都取不到返回 null，调用方退回网卡 + 主机名那套。
+     */
+    private String hardwareUuid() {
+        String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
+        try {
+            String out = null;
+            if (os.contains("mac")) {
+                out = readCommand("ioreg", "-rd1", "-c", "IOPlatformExpertDevice");
+            } else if (os.contains("win")) {
+                out = readCommand("reg", "query",
+                        "HKLM\\SOFTWARE\\Microsoft\\Cryptography", "/v", "MachineGuid");
+            } else {
+                Path etc = Path.of("/etc/machine-id");
+                if (Files.isReadable(etc)) {
+                    out = Files.readString(etc);
+                } else {
+                    Path dmi = Path.of("/sys/class/dmi/id/product_uuid");
+                    if (Files.isReadable(dmi)) {
+                        out = Files.readString(dmi);
+                    }
+                }
+            }
+            if (out == null || out.isBlank()) {
+                return null;
+            }
+            java.util.regex.Matcher m = UUID_PATTERN.matcher(out);
+            return m.find() ? m.group() : null;
+        } catch (Exception e) {
+            log.debug("取硬件 UUID 失败，退回网卡指纹: {}", e.getMessage());
+            return null;
         }
-        String raw = hostname() + "|" + macAddress() + "|" + System.getProperty("user.name");
-        String id = sha256(raw);
-        record.setDeviceId(id);
-        save(record);
-        return id;
+    }
+
+    /** 跑一条命令拿 stdout；失败/超时返回 null */
+    private String readCommand(String... command) {
+        try {
+            Process p = new ProcessBuilder(command)
+                    .redirectErrorStream(true)
+                    .start();
+            String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            if (!p.waitFor(5, TimeUnit.SECONDS)) {
+                p.destroy();
+                return null;
+            }
+            return out;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** 单测接缝：看一眼当前指纹，用来验证它稳定且不再由网卡决定 */
+    String fingerprintForTest() {
+        return deviceFingerprint();
+    }
+
+    /** entitlement 服务要用：拿本地存的激活记录 */
+    LicenseRecord recordForTest() {
+        return load();
     }
 
     private String hostname() {

@@ -77,7 +77,27 @@
   .platform-ok, .platform-bad { border-radius: 8px; padding: 10px 12px; font-size: 13px; line-height: 1.7; }
   .platform-ok { background: #e8f5e9; color: #2e7d32; }
   .platform-bad { background: #fff3e0; color: #e65100; }
+
+    /* ---- 常驻卡密条 ---- */
+    .cardbar { display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+      background:#fff; border:1px solid #e8e9ec; border-radius:10px;
+      padding:8px 14px; margin-bottom:14px; font-size:13px; color:#4e5560; }
+    .cardbar .dot { width:8px; height:8px; border-radius:50%; background:#c4c9d1; flex:0 0 auto; }
+    .cardbar .dot.ok { background:#2e9e5b; }
+    .cardbar .dot.warn { background:#e8a33d; }
+    .cardbar .dot.bad { background:#d1483a; }
+    .cardbar .dot.off { background:#9aa3ae; }
+    .cardbar .ct b { color:#1f2329; font-weight:600; }
+    .cardbar .cd { color:#8a919c; }
+    .cardbar a { margin-left:auto; color:#3370ff; text-decoration:none; }
+    .cardbar .exit { margin-left:auto; padding:5px 12px; font-size:12px; border:1px solid #e0b4ae;
+      background:#fdf3f2; color:#b5433a; border-radius:6px; cursor:pointer; }
+    .cardbar .exit:hover { background:#fbe7e5; }
+    .cardbar .exit:disabled { opacity:.6; cursor:default; }
+    .cardbar a + .exit { margin-left:0; }
 </style>
+  <script src="/gate.js"></script>
+  <script src="/card-bar.js"></script>
 </head>
 <body>
 <div class="wrap">
@@ -85,7 +105,8 @@
     <h1>JobPilot · AI 话术</h1>
     <div class="row">
       <a href="/index.html">首页</a>
-      <a href="/license.html" target="_blank">卡密管理 →</a>
+      <a href="/license.html">卡密管理 →</a>
+      <a href="/plans.html">会员套餐 →</a>
     </div>
   </div>
 

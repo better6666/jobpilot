@@ -18,7 +18,7 @@ public class Delivery {
     @TableId(value = "id", type = IdType.AUTO)
     private Long id;
 
-    /** 平台标识：boss / liepin / job51 / zhilian */
+    /** 平台标识：boss / liepin / job51 / zhilian / shixiseng */
     private String platform;
     /** 触发本次投递的搜索关键词 */
     private String keyword;

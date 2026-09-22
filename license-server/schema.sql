@@ -14,7 +14,22 @@ CREATE TABLE IF NOT EXISTS cards (
   unbind_count   INTEGER NOT NULL DEFAULT 0,    -- 已用换绑次数（终身 3 次）
   last_unbind_at TEXT,
   created_at     TEXT NOT NULL,
-  note           TEXT NOT NULL DEFAULT ''
+  note           TEXT NOT NULL DEFAULT '',
+  plan           TEXT NOT NULL DEFAULT 'trial'   -- trial=体验版 | standard=标准版 | advanced=进阶版
+);
+
+-- 套餐配置：价格、天数、功能开关、配额全放这里，后台可改，代码不写死
+CREATE TABLE IF NOT EXISTS plans (
+  plan           TEXT PRIMARY KEY,               -- trial / standard / advanced
+  name           TEXT NOT NULL,
+  price_cents    INTEGER NOT NULL,               -- 价格（分），后台展示用
+  duration_days  INTEGER NOT NULL,
+  features       TEXT NOT NULL,                  -- JSON：功能开关
+  quotas         TEXT NOT NULL,                  -- JSON：配额
+  recommended    INTEGER NOT NULL DEFAULT 0,     -- 1=重点推荐
+  sort_order     INTEGER NOT NULL DEFAULT 0,
+  active         INTEGER NOT NULL DEFAULT 1,
+  updated_at     TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_cards_batch  ON cards(batch);
 CREATE INDEX IF NOT EXISTS idx_cards_status ON cards(status);

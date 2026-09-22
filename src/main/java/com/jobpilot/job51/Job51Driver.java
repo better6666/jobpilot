@@ -70,9 +70,12 @@ public class Job51Driver {
     private static final String LIST_CONTAINER = ".j_joblist, .j_result";
     /** 搜索接口。只拦 GET，POST 的是别的功能 */
     private static final String SEARCH_API = "/api/job/search-pc";
-    /** 投递按钮：限定列表容器 + 排除"一键投递"，两道都要 */
+    /** 投递按钮：限定列表容器 + 排除"一键投递"，两道都要。
+     *  容器必须用 :is() 包起来——写成 ".j_joblist, .j_result button..." 时逗号会把
+     *  选择器拆成两支，".j_joblist" 那一支匹配的是容器本身而不是按钮，
+     *  nth(index) 会整体错位 */
     private static final String APPLY_BUTTON =
-            LIST_CONTAINER + " button:has-text('投递'):not(:has-text('一键投递'))";
+            ":is(.j_joblist, .j_result) button:has-text('投递'):not(:has-text('一键投递'))";
     private static final String APPLY_BUTTON_FALLBACK =
             LIST_CONTAINER + " .btn:has-text('投递')";
 
@@ -603,6 +606,8 @@ public class Job51Driver {
                 return DeliveryOutcome.failed("触发访问验证（阿里 WAF），请稍后重试");
             }
             closeAnyModalOverlays(listPage);
+            // 点之前记下按钮总数：投递成功后那一行的"投递"按钮会消失，总数少一个
+            int buttonsBefore = applyButtonCount(listPage);
             clickWithForce(button);
 
             // 上限 toast 只闪一两秒，点击后立刻探
@@ -619,12 +624,9 @@ public class Job51Driver {
                 return DeliveryOutcome.limit("触发每日投递上限");
             }
             if (!success) {
-                // 没有成功弹窗也不算失败：51job 有时静默投递，按钮变"已投递"即可证
-                String after = safeText(button);
-                if (after != null && isAlreadyApplied(after)) {
-                    listener.onProgress("已投递 | " + target);
-                    return DeliveryOutcome.delivered(config.getSayHi());
-                }
+                success = waitForApplyConfirmed(listPage, index, buttonsBefore, stop);
+            }
+            if (!success) {
                 return DeliveryOutcome.failed("未确认投递结果");
             }
             listener.onProgress("已投递 | " + target);
@@ -633,6 +635,64 @@ public class Job51Driver {
             log.warn("投递过程异常 | {}: {}", target, e.getMessage());
             return DeliveryOutcome.failed(e.getMessage());
         }
+    }
+
+    /**
+     * 投递后等确认。51job 投递成功不给弹窗，给的是顶部一个"投递成功"提示条
+     * （自定义 toast，不是 el-dialog/van-popup，所以 {@link #handleResultDialog} 认不出来），
+     * 外加那一行的"投递"按钮消失。三个信号任中其一即算投过：
+     * <ol>
+     *   <li>页面上出现可见的"投递成功"文本</li>
+     *   <li>投递按钮总数比点击前少——那一行的按钮被撤了</li>
+     *   <li>原下标的按钮不再是"投递"</li>
+     * </ol>
+     * 必须轮询：提示条有出现延迟，按钮状态也要等接口回来才变，点完立刻看一眼全判失败。
+     */
+    private boolean waitForApplyConfirmed(Page page, int index, int buttonsBefore,
+                                          BooleanSupplier stop) {
+        for (int i = 0; i < 20 && !stop.getAsBoolean(); i++) {
+            try {
+                Locator hit = page.locator("text=投递成功").first();
+                if (hit.count() > 0 && hit.isVisible()) {
+                    log.debug("51job 投递成功提示已出现");
+                    return true;
+                }
+            } catch (Exception ignore) {
+                // 页面在刷新，下一轮再试
+            }
+            try {
+                if (applyButtonCount(page) < buttonsBefore) {
+                    log.debug("51job 投递按钮已消失（{} → {}）", buttonsBefore, applyButtonCount(page));
+                    return true;
+                }
+            } catch (Exception ignore) {
+            }
+            try {
+                String after = applyButtonTextAt(page, index);
+                if (after != null && !after.contains("投递")) {
+                    log.debug("51job 投递按钮文本已变为：{}", after);
+                    return true;
+                }
+            } catch (Exception ignore) {
+            }
+            sleep(400);
+        }
+        return false;
+    }
+
+    /** 按下标取投递按钮文本；按钮不在列表里返回 null */
+    private String applyButtonTextAt(Page page, int index) {
+        if (index < 0) {
+            return null;
+        }
+        Locator b = page.locator(APPLY_BUTTON).nth(index);
+        if (b.count() == 0) {
+            b = page.locator(APPLY_BUTTON_FALLBACK).nth(index);
+            if (b.count() == 0) {
+                return null;
+            }
+        }
+        return safeText(b);
     }
 
     /**

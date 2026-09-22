@@ -72,8 +72,8 @@ class Job51ServiceDedupTest {
                 new Job51Options(new com.fasterxml.jackson.databind.ObjectMapper()),
                 new RunCoordinator(),
                 new GreetingService(new AiProperties(configService), new AiService(objectMapper), deliveryMapper,
-                        licenseService, new LicenseProperties()),
-                licenseService);
+                        licenseService, new LicenseProperties(), null),
+                licenseService, null);
     }
 
     private Job51JobCard card() {

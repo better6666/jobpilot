@@ -40,8 +40,10 @@ public class LiepinService extends DeliveryService<LiepinJobCard> {
 
     public LiepinService(LiepinProperties properties, LiepinDriver driver, DeliveryMapper mapper,
                          BrowserManager browserManager, LiepinOptions options, RunCoordinator coordinator,
-                         GreetingService greetingService, LicenseService licenseService) {
-        super(mapper, browserManager, coordinator, greetingService, licenseService);
+                         GreetingService greetingService, LicenseService licenseService,
+                          com.jobpilot.license.EntitlementService entitlementService) {
+        super(mapper, browserManager, coordinator, greetingService, licenseService,
+                entitlementService);
         this.properties = properties;
         this.driver = driver;
         this.options = options;

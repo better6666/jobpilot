@@ -46,28 +46,33 @@ public abstract class DeliveryService<C extends JobCard> {
     private final RunCoordinator coordinator;
     private final GreetingService greetingService;
     private final LicenseService licenseService;
+    private final com.jobpilot.license.EntitlementService entitlementService;
 
     private volatile RunStatus status = RunStatus.idle();
     private volatile boolean stopRequested;
     /** 已经因为"卡密不能用"停过一次了，避免每张卡片都打一行日志 */
     private volatile boolean stoppedForLicense;
+    /** 已经因为"当日投递额度用完"停过一次 */
+    private volatile boolean stoppedForQuota;
     private Future<?> currentRun;
 
     protected DeliveryService(DeliveryMapper mapper, BrowserManager browserManager,
                               RunCoordinator coordinator, GreetingService greetingService,
-                              LicenseService licenseService) {
+                              LicenseService licenseService,
+                              com.jobpilot.license.EntitlementService entitlementService) {
         this.mapper = mapper;
         this.browserManager = browserManager;
         this.coordinator = coordinator;
         this.greetingService = greetingService;
         this.licenseService = licenseService;
+        this.entitlementService = entitlementService;
     }
 
     // ------------------------------------------------------------------
     // 子类必须提供
     // ------------------------------------------------------------------
 
-    /** 平台标识，落 deliveries.platform 列：boss / liepin / job51 / zhilian */
+    /** 平台标识，落 deliveries.platform 列：boss / liepin / job51 / zhilian / shixiseng */
     protected abstract String platform();
 
     /** 平台展示名，日志和管理页标题用 */
@@ -267,6 +272,22 @@ public abstract class DeliveryService<C extends JobCard> {
      * 包成 protected 是为了能单测：mock 掉 mapper 和适配器，不碰浏览器。
      */
     protected void processCard(C card, String keyword, PlatformConfig config, Page listPage) {
+        // 当日投递额度是硬闸：用完了必须停。不然体验版用户能靠反复点开始无限投，
+        // 档位差别就成了摆设。自用模式和配额<=0（后台配成不限）时直接放行。
+        if (remainingDailyApply() <= 0) {
+            stopRequested = true;
+            if (!stoppedForQuota) {
+                stoppedForQuota = true;
+                int quota = entitlementService == null ? 0
+                        : entitlementService.current().quota("max_daily_apply");
+                appendLog("今日投递额度已用完（" + quota + " 个）。升级套餐可以提高每日额度，"
+                        + "明天自动恢复。");
+                // 状态里带上，前端会员页/卡密条能据此提示升级
+                publishQuotaNotice();
+            }
+            return;
+        }
+
         // 次数卡在投递过程中用完（上报后服务端确认剩余为 0）就得停：
         // 继续发就是免费帮客户投，卖卡的那一方白亏
         if (licenseService.exhausted()) {
@@ -305,6 +326,9 @@ public abstract class DeliveryService<C extends JobCard> {
                 case DELIVERED -> {
                     record(card, keyword, "已投递", null, score, outcome.greeting(), existing);
                     status.setDelivered(status.getDelivered() + 1);
+                    if (entitlementService != null) {
+                        entitlementService.recordUse("apply");
+                    }
                     // 次数卡扣减。异步发、失败不打断投递，见 LicenseService.reportUsage
                     licenseService.reportUsage(1);
                 }
@@ -328,6 +352,17 @@ public abstract class DeliveryService<C extends JobCard> {
             log.warn("处理岗位异常 | {}: {}", target, e.getMessage());
             status.setFailed(status.getFailed() + 1);
         }
+    }
+
+    /** 今天还能投几个。测试缝没注入 entitlement 时视为不限，别把单测打崩 */
+    private int remainingDailyApply() {
+        return entitlementService == null ? Integer.MAX_VALUE
+                : entitlementService.remainingToday("apply", "max_daily_apply");
+    }
+
+    /** 额度用尽时把提示写进运行状态，前端据此引导升级而不是让用户干看 */
+    private void publishQuotaNotice() {
+        status.setMessage("今日投递额度已用完，升级套餐可提高每日额度");
     }
 
     /**

@@ -102,6 +102,7 @@ const STATE_TEXT = {
   GRACE: ['warn', '宽限期'],
   EXPIRED: ['bad', '已到期'],
   REVOKED: ['bad', '已失效'],
+  DEVICE_MISMATCH: ['bad', '设备不符'],
   NETWORK_BLOCKED: ['bad', '服务端不可达']
 };
 
@@ -157,8 +158,15 @@ async function activate() {
       body: JSON.stringify({ cardKey })
     });
     const json = await res.json();
-    if (json.success) { toast('激活成功', true); $('cardKey').value = ''; }
-    else toast(json.message || '激活失败', false);
+    if (json.success) {
+      toast('激活成功，正在进入…', true);
+      $('cardKey').value = '';
+      // 激活成功就进主界面。停一秒让用户看清"激活成功"——
+      // 不然屏幕一闪就换页，容易以为是点了没反应
+      setTimeout(() => { location.replace('/'); }, 1000);
+    } else {
+      toast(json.message || '激活失败', false);
+    }
     if (json.data) render(json.data);
   } catch (e) {
     toast('请求失败：' + e.message, false);

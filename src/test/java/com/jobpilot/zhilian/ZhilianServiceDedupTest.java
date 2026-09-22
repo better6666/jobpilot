@@ -69,8 +69,8 @@ class ZhilianServiceDedupTest {
                 new ZhilianOptions(new com.fasterxml.jackson.databind.ObjectMapper()),
                 new RunCoordinator(),
                 new GreetingService(new AiProperties(configService), new AiService(objectMapper), deliveryMapper,
-                        licenseService, new LicenseProperties()),
-                licenseService);
+                        licenseService, new LicenseProperties(), null),
+                licenseService, null);
     }
 
     private ZhilianJobCard card() {

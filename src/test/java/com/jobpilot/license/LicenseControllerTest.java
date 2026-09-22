@@ -39,7 +39,7 @@ class LicenseControllerTest {
 
     @BeforeEach
     void setUp() {
-        mockMvc = MockMvcBuilders.standaloneSetup(new LicenseController(licenseService)).build();
+        mockMvc = MockMvcBuilders.standaloneSetup(new LicenseController(licenseService, null, new LicenseProperties(), null, null)).build();
     }
 
     @Test

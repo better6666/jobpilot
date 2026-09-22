@@ -40,8 +40,10 @@ import java.util.function.BooleanSupplier;
  *       学历/HR/行业/规模/JD 一律采不到，只能留空</li>
  *   <li><b>投递要点两下</b>：点卡片出详情面板 → 点"立即投递" → 可能再出
  *       简历选择框 → 点"投递简历"确认。账号里没预设默认简历时第二步必弹</li>
- *   <li><b>点投递可能新开标签页</b>，必须注册 context.onPage 及时关掉，
- *       否则浏览器焦点被抢走，后续点击全废</li>
+ *   <li><b>点投递可能新开标签页</b>，必须注册 page.onPopup 及时关掉，
+ *       否则浏览器焦点被抢走，后续点击全废。注意只能挂页面级事件：
+ *       context.onPage 会连本类自己 newPage 建出来的列表页一起关，
+ *       第二个关键词就取不回页面对象直接崩</li>
  *   <li>遮罩层（modal/mask/backdrop/打招呼弹窗）会吃掉所有点击，
  *       <b>每张卡片点之前和每次投递之后都要 JS 暴力 remove</b></li>
  *   <li>上限判据是 {@code div.a-job-apply-workflow} 的文本含"达到上限"，
@@ -197,7 +199,7 @@ public class ZhilianDriver {
         Page page = browserManager.context().newPage();
         configureTimeouts(page);
         // 点投递可能新开标签页，先装好关门器再开始点
-        page.context().onPage(ZhilianDriver::closeQuietly);
+        installPopupCloser(page);
         try {
             navigate(page, searchUrl, listener);
             if (!waitForCards(page, listener)) {
@@ -724,6 +726,20 @@ public class ZhilianDriver {
             page.close();
         } catch (Exception ignore) {
         }
+    }
+
+    /**
+     * 装"点投递弹出新标签页就关掉"的关门器。
+     *
+     * 只能挂 page 上的 {@code onPopup}。挂 context 的 {@code onPage} 会收上下文里
+     * 所有新页面，包括 {@link #processKeyword} 自己 {@code newPage()} 建出来的列表页：
+     * 页面被当场关掉，{@code newPage()} 回头按 guid 取对象时已经没了，抛
+     * {@code PlaywrightException: Object doesn't exist: page@...}，
+     * 整个投递任务直接终止（实测第一词跑完、第二词还没开始就崩）。
+     * 抽成方法是为了让回归测试能直接验这一行，见 ZhilianPopupScopeTest。
+     */
+    static void installPopupCloser(Page page) {
+        page.onPopup(ZhilianDriver::closeQuietly);
     }
 
     public Path screenshot(Page page, String name) {

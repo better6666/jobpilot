@@ -1,3 +1,4 @@
+import { DEFAULT_PLANS, HIGHLIGHT, Plan, PlanRow, parseJson, toPublicPlan } from './plans'
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import {
@@ -25,6 +26,7 @@ interface Card {
   card_key: string
   batch: string
   type: string
+  plan?: Plan
   duration_days: number | null
   quota_total: number | null
   quota_used: number
@@ -63,6 +65,7 @@ interface ReportBody extends AuthBody {
 interface CreateCardsBody {
   count?: number
   type?: string
+  plan?: Plan
   duration_days?: number
   quota_total?: number
   max_devices?: number
@@ -119,17 +122,52 @@ async function rateLimit(kv: KVNamespace, key: string, limit: number, windowSec:
   return true
 }
 
-/** token + 设备校验，返回卡；失败直接返回 Response */
+/**
+ * token + 设备校验，返回卡；失败直接返回 Response。
+ *
+ * 两种失败必须分开报：
+ *   token 查不到      → TOKEN_INVALID，token 是伪造的或已被解绑清掉
+ *   token 对但设备不符 → DEVICE_MISMATCH，最常见的是把本机数据目录拷到了另一台机器
+ * 混成一句话"激活信息无效"的话，用户不知道该重新激活还是该找卖家，
+ * 也没法发现自己的卡正在别人机器上跑。
+ */
 async function authenticate(db: D1Database, token: string, deviceId: string): Promise<{ card: Card } | Response> {
   const activation = await db.prepare('SELECT * FROM activations WHERE token = ?').bind(token).first<Activation>()
-  if (!activation || activation.device_id !== deviceId) {
+  if (!activation) {
     return fail(401, 'TOKEN_INVALID', '激活信息无效，请重新激活')
+  }
+  if (activation.device_id !== deviceId) {
+    return fail(401, 'DEVICE_MISMATCH',
+      '当前设备与激活时不一致。若你换了电脑或改了主机名/用户名，请重新激活；'
+      + '若并未更换设备，请检查是否有人复制了本机的 JobPilot 数据目录')
   }
   const card = await db.prepare('SELECT * FROM cards WHERE card_key = ?').bind(activation.card_key).first<Card>()
   if (!card || card.status !== 'active') {
     return fail(403, 'CARD_DISABLED', '卡密已被作废')
   }
   return { card }
+}
+
+/** 距到期还有几天；null / 已过期返回 0 */
+function daysUntil(iso: string | null): number {
+  if (!iso) return 0
+  const ms = new Date(iso).getTime() - Date.now()
+  return ms <= 0 ? 0 : Math.ceil(ms / 86400000)
+}
+
+function normalizePlan(v: unknown): Plan {
+  return v === 'standard' || v === 'advanced' || v === 'trial' ? v : 'trial'
+}
+
+/** 读套餐配置；表空着就回退到代码里的兜底默认值，保证前台不至于全灰 */
+async function loadPlans(db: D1Database): Promise<PlanRow[]> {
+  try {
+    const rows = await db.prepare(
+      'SELECT * FROM plans WHERE active = 1 ORDER BY sort_order'
+    ).all<PlanRow>()
+    if (rows.results && rows.results.length > 0) return rows.results
+  } catch { /* plans 表还没建（老库）时走兜底 */ }
+  return DEFAULT_PLANS
 }
 
 /** 时效/次数校验：过期或用完的卡不能继续用平台额度。通过返回 null */
@@ -493,6 +531,56 @@ app.post('/unbind', async (c) => {
  * 平台中转有没有配。不需要鉴权：只回答"配了没"和"用的什么模型"，
  * 不含 key 也不含地址——客户端要靠这个决定页面上显示哪种模式。
  */
+/**
+ * 公开套餐列表：会员页用，不需要鉴权。
+ * 价格/天数/权益全来自 plans 表，后台改完这里立刻变，前端不存硬编码价格。
+ */
+app.get('/api/plans', async (c) => {
+  const rows = await loadPlans(c.env.DB)
+  return ok({
+    plans: rows.map(toPublicPlan),
+    highlight: HIGHLIGHT,
+  })
+})
+
+/**
+ * 当前设备的 entitlement：plan + 功能开关 + 配额 + 卡片状态。
+ *
+ * 客户端每次启动和每次心跳后拉这个，用它决定哪些功能可用、今天还能投几次。
+ * 服务端是唯一真相源——客户端缓存只用于断网时兜底。
+ */
+app.post('/api/license/entitlement', async (c) => {
+  const body = await c.req.json<AuthBody>().catch(() => null)
+  const token = body?.token?.trim() ?? ''
+  const deviceId = body?.device_id?.trim() ?? ''
+  if (!token || !deviceId) {
+    return fail(400, 'BAD_REQUEST', '缺少 token 或 device_id')
+  }
+
+  const auth = await authenticate(c.env.DB, token, deviceId)
+  if (auth instanceof Response) return auth
+  const { card } = auth
+
+  const rows = await loadPlans(c.env.DB)
+  const row = rows.find(r => r.plan === normalizePlan(card.plan)) ?? rows[0] ?? DEFAULT_PLANS[0]
+  const usable = checkCardUsable(card)
+
+  return ok({
+    plan: normalizePlan(card.plan),
+    plan_name: row.name,
+    card_type: card.type,
+    card_status: card.status,
+    usable: usable === null,
+    expires_at: card.expires_at,
+    remaining_days: daysUntil(card.expires_at),
+    quota_total: card.quota_total,
+    quota_remaining: card.quota_total == null ? null : card.quota_total - card.quota_used,
+    features: parseJson<Record<string, boolean>>(row.features, {}),
+    quotas: parseJson<Record<string, number>>(row.quotas, {}),
+    recommended: row.recommended === 1,
+  })
+})
+
 app.get('/api/ai/info', async (c) => {
   const relay = await getAiRelay(c.env.DB)
   return ok({ configured: !!relay, model: relay?.model ?? null })
@@ -565,13 +653,16 @@ app.post('/admin/cards', async (c) => {
   const batch = (body?.batch ?? nowIso().slice(0, 10)).slice(0, 40)
   const note = (body?.note ?? '').slice(0, 200)
   const maxDevices = clampInt(body?.max_devices, 1, 10, 1)
+  const plan = normalizePlan(body?.plan)
 
   let durationDays: number | null = null
   let quotaTotal: number | null = null
   if (type === 'quota') {
     quotaTotal = clampInt(body?.quota_total, 1, 1000000, 1000)
   } else {
-    durationDays = clampInt(body?.duration_days, 1, 3650, type === 'trial' ? 1 : 30)
+    // 套餐天数没显式给就按档位默认值来（3 天 / 30 天 / 30 天）
+    durationDays = clampInt(body?.duration_days, 1, 3650,
+      plan === 'trial' ? 3 : 30)
   }
 
   const keys: string[] = []
@@ -582,9 +673,9 @@ app.post('/admin/cards', async (c) => {
     stmts.push(
       c.env.DB.prepare(
         `INSERT INTO cards
-           (card_key, batch, type, duration_days, quota_total, quota_used, max_devices, status, unbind_count, created_at, note)
-         VALUES (?, ?, ?, ?, ?, 0, ?, 'active', 0, ?, ?)`
-      ).bind(key, batch, type, durationDays, quotaTotal, maxDevices, nowIso(), note)
+           (card_key, batch, type, duration_days, quota_total, quota_used, max_devices, status, unbind_count, created_at, note, plan)
+         VALUES (?, ?, ?, ?, ?, 0, ?, 'active', 0, ?, ?, ?)`
+      ).bind(key, batch, type, durationDays, quotaTotal, maxDevices, nowIso(), note, plan)
     )
   }
   // D1 单批语句数有限制，分片提交
@@ -592,7 +683,7 @@ app.post('/admin/cards', async (c) => {
     await c.env.DB.batch(stmts.slice(i, i + 50))
   }
 
-  return ok({ keys, count: keys.length, batch, type })
+  return ok({ keys, count: keys.length, batch, type, plan })
 })
 
 /** 卡密列表（卡号打码，只显示前 9 位） */

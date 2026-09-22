@@ -248,7 +248,7 @@ npx wrangler deploy
 3. **列表第一个卡片默认选中态**，直接点不触发详情接口，必须先点第二个再切回——且这与 `maxJobsPerKeyword` 无关，只跑 1 个岗位时同样要热身，否则必然超时
 4. **服务端任何拒绝都不能挡住启动**：缓存 token 失效、api-base 配错，一律降级成未激活态让用户换卡（历史上有两次这类崩溃）
 
-### P2 其余平台 ✅ 已完成（猎聘 / 51job / 智联招聘，2026-09-21 真机验证通过）
+### P2 其余平台 ✅ 已完成（猎聘 / 51job / 智联招聘，2026-09-22 四平台真实投递验证通过）
 
 三个平台都接到同一套共享内核上，没有复制四份编排：
 
@@ -258,13 +258,14 @@ npx wrangler deploy
 - 管理页通用投递页 + 平台入口，四平台共用一套 UI
 - 城市/薪资码表做成 classpath JSON（liepin 14 个、job51 26 个、zhilian 42 个），离线可用
 
-真机验证结论（macOS，真实 Chrome + 真实账号，全部预演模式，零真实发送）：
+真机验证结论（macOS，真实 Chrome + 真实账号）：
 
-| 平台 | 数据源 | 采集结果 |
-|---|---|---|
-| 猎聘 | 拦 `api-c.liepin.com/...pc-search-job` | 列表/分页/投递入口都对上 |
-| 51job | 拦 `/api/job/search-pc` | 3 个岗位字段完整、记 `预演` |
-| 智联 | 纯 DOM（点卡片读详情面板） | 5 个岗位字段完整、记 `预演` |
+| 平台 | 数据源 | 采集结果 | 真实投递 |
+|---|---|---|---|
+| Boss | 拦 `/wapi/zpgeek/job/detail.json` | 300 个岗位 | ✅ 14 个（2026-09-22 实投） |
+| 猎聘 | 拦 `api-c.liepin.com/...pc-search-job` | 列表/分页/投递入口都对上 | ✅ 5 个（2026-09-22 实投，双关键词） |
+| 51job | 拦 `/api/job/search-pc` | 3 个岗位字段完整 | ✅ 2 个（2026-09-22 实投，修掉确认逻辑后） |
+| 智联 | 纯 DOM（点卡片读详情面板） | 5 个岗位字段完整 | ✅ 4 个（2026-09-22 实投，双关键词） |
 
 真机验证逼出来的坑（改这段代码前先读，都已写进代码注释）：
 
@@ -273,6 +274,14 @@ npx wrangler deploy
 3. **智联的 jobId 只在详情面板里**，列表卡片扫遍 `data-*` 属性一个都没有，唯一锚点还是公司页。所以每张卡都必须点一次面板。而面板 DOM 是复用的，点下去旧内容还在，靠 `waitFor` 标题或固定 sleep 都会读到上一张甚至下一张的面板——jobId 错等于去重错、真实模式下就是投错职位。现在用「列表卡标题对上 + jobdetail 链接和上一张不同」双条件轮询确认，投递前再用 `jobUrl` 精确校验一次面板
 4. **智联的面板字段容器和老台账写的不一样**：地区/经验/学历/招聘人数在 `ul.job-detail-summary__tags > li` 里，不在 `header-main` 的 span 里；学历**采得到**（`学历不限`/`大专`/`本科`），老台账"采不到"的结论作废。公司 meta 有两段和三段两种形态（融资阶段 · 规模 · 行业），规模按"含人"认、行业取末段
 5. **51job 的 `jobAreaString` 地区串可能用间隔号分隔**（`苏州·苏州工业园区`），拆分时要和 `-` 一起按最先出现的分隔符切
+6. **关门器只能挂 `page.onPopup`，不能挂 `context.onPage`**。`context.onPage` 收的是上下文里所有新页面，包括 driver 自己 `newPage()` 建出来的列表页：页面被当场关掉，`newPage()` 回头按 guid 取对象时已经没了，抛 `PlaywrightException: Object doesn't exist: page@...`，整个任务直接终止。更糟的是这个注册**从不移除**——第一个关键词注册后会一直留在共享上下文上，智联跑过一次之后，另外三个平台的所有投递全部死在 `newPage()`。已抽成 `ZhilianDriver.installPopupCloser(Page)`，并用 `ZhilianPopupScopeTest` 拿真浏览器锁住（改回 `context.onPage` 立刻 FAILED）
+7. **51job 投递成功不给弹窗**。给的是顶部一个自定义"投递成功"提示条（不是 `el-dialog`/`van-popup`，那两套选择器一个都匹配不到），外加那一行的"投递"按钮消失。只认弹窗的结果是**每一次真实投递都判成"未确认投递结果"**——预演模式看不出来，因为预演根本不点。现在 `waitForApplyConfirmed` 轮询三个信号：出现可见的"投递成功"文本、投递按钮总数比点击前少、原下标按钮不再是"投递"
+8. **CSS 选择器里的逗号会拆分支**。`".j_joblist, .j_result button:has-text('投递')"` 实际是「`.j_joblist`」或「`.j_result button...`」两支，前者匹配的是容器本身而不是按钮，`nth(index)` 整体错位。必须用 `:is(.j_joblist, .j_result) button...` 把容器包起来
+9. **Spring Boot 默认把 `java.awt.headless` 设成 true，控制台窗口永远出不来**。`SpringApplication.headless` 字段出厂就是 `true`，`configureHeadlessProperty()` 会把它显式写进系统属性；而 `GraphicsEnvironment` 在构造时就读这个值并缓存，之后再改属性、再建 frame 都没用。症状是：macOS 上双击 .app，Dock 图标一直跳但什么都不出现——因为 JVM 是个没有窗口的后台进程，系统只能"激活"它，而没有窗口可激活。修法是在 `run()` 之前调 `app.setHeadless(false)`。这个坑藏得深：`GraphicsEnvironment.isHeadless()` 在命令行单跑是 false，打包进 .app 就变 true，只有把 `System.getProperty("java.awt.headless")` 打出来才看得见
+10. **实习僧的登录态没有任何可靠的静态 DOM 信号**。实测（同机登录/未登录各跑一遍）：首页底部登录条 `.footer-login--is-show` 两边都 count=0；详情页的两边都 count=1 且可见；nav 的"登录/注册"只在详情页未登录时出现、且元素不是 `<a>`（`a:has-text()` 选不中）。最后改成**行为判定**——点"投个简历"之后看 `.login-dialog-wrap--is-show`（"微信扫一扫，立即登录"）在不在，未登录必弹、登录后不弹，没有歧义。早期版本在 `ensureLogin` 里用静态 DOM 判过，结果是未登录也报"已检测到登录态"
+12. **设备指纹不能用"第一个启用的网卡 MAC"+ DNS 反查主机名**。macOS 会枚举到 `llw0` 这种低延迟虚拟网卡，它的 MAC 是每个 Wi-Fi 随机生成的；"第一个启用的网卡"也随 Wi-Fi/有线/手机热点切换而变；`InetAddress.getLocalHost().getHostName()` 返回的 `Mac.lan` 更是换个网络就变。实测踩过：笔记本换个 Wi-Fi 指纹就变，正常用户被自己锁死。现在主输入改成 OS 的硬件 UUID（macOS `IOPlatformUUID` / Windows `MachineGuid` / Linux `/etc/machine-id`），拿不到才退回网卡那套
+13. **设备指纹必须每次现算，不能落库后复用**。早先首次激活算一次就存进 SQLite，之后所有上行都发票里那个值——于是别人把 `~/Library/Application Support/JobPilot` 整个目录拷到另一台 Mac，token 和设备号一起过去，服务端比对通过，"一卡一机"完全失效。改成现算之后，光拷软件没用，还得让另一台机器算出同样的指纹。服务端也相应地把"token 查不到"（`TOKEN_INVALID`）和"token 对但设备不符"（`DEVICE_MISMATCH`）分成两种错误，前者是伪造 token，后者最可能是数据目录被复制或用户换了电脑
+11. **实习僧的登录 cookie 是会话级的，强杀浏览器会丢**。`SXS_XSESSION_ID` 没有过期时间（只存内存），Chrome 被强杀时来不及落盘，登录态整个消失。所以让用户登录必须用**应用自己拉起的那个 Chrome 窗口**，不能另开一个 Chrome 再手动关——否则登了也白登
 
 ### P3 前端与管理页 ✅ 已完成
 
@@ -337,6 +346,68 @@ Windows 侧两个预期问题：app-image 未签名会触发 SmartScreen"Windows
 - 客户端 `AiController`：`mode` 字段（`platform`/`custom`），旧配置（`mode` 为 null）按"客户自己填过地址和 key"判成 custom；`platformInfo` 负责把"没配中转""连不上服务端"翻成客户看得懂的话，`ai.html` 按模式显隐接口字段并实时重算状态徽章
 
 **本地已验证**（全链路实跑通过）：`wrangler dev --local` + `db:init` 建出 settings 表，`manage.html` 配上地址/Key/模型并测连通成功（Key 在列表里显示为打码形式），再起一个全新安装实例用真卡密激活：`/api/ai/config` 返回 `mode:"platform"`、`platformAvailable:true`、模型名正确，而地址/Key/模型三个字段全是空的——客户确实零配置。同一个实例 `/api/ai/test` 走平台代理拿到了中转返回的话术，页面"测试连接"显示"平台中转 / 模型名"。服务端各分支都单独打过：卡密缺失 400、卡密不对 401、卡被作废 403、没配中转 503。想自己复现这套联调，`license-server/README.md` 的"平台 AI 中转"一节写了怎么用一个假中转站在本地跑。
+
+### P7 第五个平台（实习僧）✅ 已完成（2026-09-22，采集链路真实验证通过）
+
+在前四个平台之外再接一个，目的是证明共享内核是真的能横向扩展——新平台只加了 `com.jobpilot.shixiseng` 下一个包，`delivery`/`browser`/`license`/`ai` 一行没动。
+
+- 实习僧面向实习/校招，**只有城市一个筛选项**，所以码表 `shixiseng-options.json` 里只有 city 一组
+- 列表是**服务端渲染**的，DOM 里直接带 20 条 `div.intern-item`，不用拦 XHR——五个平台里采集最省事的一个
+- **jobId 在 data 属性里**（`data-intern-id`），不像 51job 要挖 `sensorsdata` 埋点 JSON
+- 列表字段最少：岗位名/日薪/城市/每周几天/几个月/公司/行业。经验、学历、HR、规模一律采不到，JD 要点进详情页才有——所以 `jdRules` 是唯一能用的深度规则组
+- 投递入口在**详情页**（`.resume_apply`，文案"投个简历"），不在列表页，每个岗位都要开一次详情
+- 采集时**每个岗位多开一次详情页**补字段：学历、每周几天、实习月数、JD，并用详情页的薪资覆盖列表页那个被 icon-font 啃成 `-/天` 的值。不补的话 `degreeRules`/`jdRules` 永远不命中，打分只剩职位名一组。注意必须**新开页面**读，用列表页导航过去会把 `nth(i)` 的下标全废
+
+接入时实测出来的坑（都已写进代码注释）：
+
+1. **关键词参数名必须是 `keyword`**。`kw`/`searchWord`/`key` 全被忽略——传了也返回默认列表，看起来"有结果"其实没过滤，这种最危险
+2. **城市参数吃中文名且必须 URL 编码**。`city=苏州`（原始中文）一条都过滤不出来，`city=%E8%8B%8F%E5%B7%9E` 才生效。编码这步放在码表里做（code 存编码后的名字），拼地址时直接拼
+3. **翻页参数是 `page`**。`p`/`pageIndex` 都返回第一页
+4. **岗位名和日薪混着 icon-font 私用区字符**（`\uf57f`/`\ue477`/`\uf148` 之类，Unicode 私用区 U+E000–U+F8FF）。不剥掉打分规则全打飞、页面上也是一串方块，每个字段读完都要过 `ShixisengJobCard.cleanText`
+5. **`keyword=陈列` 在实习僧真的 0 条结果**（`设计` 20 条、`视觉` 7 条、`平面` 6 条）。实习僧没有全职岗，"陈列设计"这个关键词在那儿搜不到东西——出厂关键词给的是「陈列 / 视觉设计 / 平面设计」
+6. **未登录不是弹模态框，是一条常驻底部登录条**。实测匿名状态点"投个简历"**什么都不会发生**——连请求都不发，因为 `.footer-login--is-show`（fixed、z-index 9999、横幅"短信登录/密码登录/微博登录/QQ登录"）一直在，页面认为你没登录。所以判登录态只能用这个 class，**不能用 `text=短信登录` 或 `class*='login'`**：页头也有常驻的"登录/注册"链接，会把已登录误判成未登录，然后白等 5 分钟。驱动层现在是「投递前先查登录态 → 没登就提示用户在已打开的真窗口里登录 → 登录条消失后继续」
+7. **详情页字段的 class 和列表页不是一套**。学历在 `.job_msg .job_academic`、每周几天 `.job_week`、实习月数 `.job_time`、JD `.job_detail`、薪资 `.job_money`。日薪在列表页常被 icon-font 啃成 `-/天`，以详情页为准
+
+**已验证**（macOS，真实 Chrome，headless）：连真实站点 `keyword=视觉设计&city=苏州`，第 1 页 20 条全部正确解析出 jobId/岗位名/公司/城市/日薪/行业，翻到第 2 页 10 条且与第 1 页**零重叠**；详情页补字段真实生效（学历=不限、每周=2天／周、实习12个月、薪资从 `-/天` 修正为 `50-100/天`、JD 155 字）；未登录态识别正确。测试侧：`ShixisengItemParseTest`（6 条，列表页真实片段）、`ShixisengDetailParseTest`（5 条，详情页真实片段）、`ShixisengServiceDedupTest`（5 条，去重/落库/打分）、`ShixisengSearchUrlTest`（10 条）。336 个用例全绿。
+
+**未验证**：登录之后的投递动作。已确认匿名状态下点击不发请求（靠底部登录条判定），驱动层会在投递前提示用户在弹出的真窗口里登录、等登录条消失后继续。但**登录成功后点"投个简历"弹出什么、简历选择框长什么样，本机没有实习僧账号，验不了**——`handleResumeDialog`/`isApplySucceeded` 是按常见形态实现的，首次真投时需要盯着日志校准。
+
+**58同城 / 拉勾：接不了**。两者都有真人验证，用真 Chrome + 独立 profile 实测：58 跳 `callback.58.com/antibot/verifycode`（"请输入验证码 / 访问过于频繁"），拉揣整个返回"滑动验证页面"。这不是加个 cookie 或放慢节奏能绕过的，要过得有人工识别或打码服务，超出本项目的范围。
+
+## 六之补、下载站 getjobs.dpdns.org
+
+装给客户的软件得有个像样的下载入口。整站是一个 Cloudflare Worker（`getjobs-site/`），
+同域名下三条路径：
+
+| 路径 | 内容 |
+|---|---|
+| `/` | 下载页：产品定位、两个系统入口、四步上手、安装放行说明、SHA-256 校验 |
+| `/download/*` | 安装包，从 R2 桶 `getjobs-downloads` 流式转出 |
+| `/manage` + `/admin/*` | 卡密后台，**反向代理**到 license-server |
+
+为什么不把后台复制一份到这边：后台发的卡、改的套餐都落在同一个 D1 上，
+复制实现迟早两边不一致。代理只做转发，`ADMIN_KEY` 由浏览器以
+`Authorization` 头带上、原样透传，服务端仍是唯一鉴权点。
+
+**安装包为什么不放 Workers 静态资源**：dmg 113MB、Windows 包也上百 MB，
+会撞静态资源体积上限。放 R2 由 Worker 转一手，还能统一域名、不暴露 r2.dev 裸桶地址。
+
+**Range 断点续传的三个坑**（都实测踩过）：
+1. `await object.range({...}).body` 是运算符优先级陷阱——在 Promise 上取 `.body`
+   拿到 `undefined`，最后以 206 + 空 body 返回，workerd 直接 500
+2. R2 的 `object.range` 元数据不可靠：range 从 0 开始时它根本不标，
+   客户端会以为不支持分段；`{offset,length}` 对象形式在这套后端上直接抛
+3. R2 对越界区间是抛异常（HTTP 500），必须**自己先按 size 判合法性回 416**
+
+最终方案：先 `get` 一次拿 size（不读 body，成本可忽略）→ 自己解析并校验 Range →
+把原 Range 头交给 R2 切片 → 206 的头自己写。七种请求形态全验过：
+`0-63` / `1000-1063` / `100-` / `-100` 均 206 且内容与本地逐字节一致，
+越界与非法头回 416，无 Range 回 200 全量。
+
+**打包链路**（与 CI 同一套命令）：`jlink` 裁剪运行时 52MB → `jpackage app-image`
+134MB → 冒烟测试（health / 根路径 302 / node v24.19.0 解压 / cli.js 非占位）→
+转 dmg 113MB。Windows 侧只能走 CI（jpackage 出 exe 需要 Windows），
+用 `workflow_dispatch` 手动触发即可，不必推 tag。
 
 ## 七、目录结构
 

@@ -39,8 +39,10 @@ public class Job51Service extends DeliveryService<Job51JobCard> {
 
     public Job51Service(Job51Properties properties, Job51Driver driver, DeliveryMapper mapper,
                         BrowserManager browserManager, Job51Options options, RunCoordinator coordinator,
-                        GreetingService greetingService, LicenseService licenseService) {
-        super(mapper, browserManager, coordinator, greetingService, licenseService);
+                        GreetingService greetingService, LicenseService licenseService,
+                          com.jobpilot.license.EntitlementService entitlementService) {
+        super(mapper, browserManager, coordinator, greetingService, licenseService,
+                entitlementService);
         this.properties = properties;
         this.driver = driver;
         this.options = options;

@@ -75,8 +75,8 @@ class BossServiceDedupTest {
                 new BossOptions(new com.fasterxml.jackson.databind.ObjectMapper()),
                 new RunCoordinator(),
                 new GreetingService(new AiProperties(configService), new AiService(objectMapper), deliveryMapper,
-                        licenseService, new LicenseProperties()),
-                licenseService);
+                        licenseService, new LicenseProperties(), null),
+                licenseService, null);
     }
 
     private BossJobCard card() {

@@ -8,6 +8,7 @@ import org.springframework.stereotype.Component;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 
 /**
  * 建表器。必须赶在所有业务 Bean 之前执行：LicenseService 的 @PostConstruct 要读 config 表，
@@ -32,6 +33,7 @@ public class SchemaInitializer {
         } catch (Exception e) {
             log.warn("创建数据库目录失败: {}", dbDir, e);
         }
+        tightenPermissions();
         jdbcTemplate.execute("""
                 CREATE TABLE IF NOT EXISTS config (
                     config_key   TEXT PRIMARY KEY,
@@ -72,4 +74,26 @@ public class SchemaInitializer {
                 """);
         log.info("数据库结构就绪");
     }
+
+    /**
+     * 把数据库和日志收紧成"只有本人能读"。
+     *
+     * <p>SQLite 建库按 umask 来，默认是 644——多用户 Mac 上别的本地账户
+     * 直接就能读走全部投递记录和卡密。个人电脑单用户时没差别，但不该赌这个。
+     */
+    private void tightenPermissions() {
+        Path dataDir = SystemPaths.dataDir();
+        for (String name : new String[]{"jobpilot.db"}) {
+            Path f = dataDir.resolve(name);
+            try {
+                if (Files.exists(f)) {
+                    Files.setPosixFilePermissions(f,
+                            PosixFilePermissions.fromString("rw-------"));
+                }
+            } catch (Exception e) {
+                log.debug("收紧 {} 权限失败: {}", name, e.getMessage());
+            }
+        }
+    }
+
 }

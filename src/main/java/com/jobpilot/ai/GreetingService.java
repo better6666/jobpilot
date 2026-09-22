@@ -65,14 +65,17 @@ public class GreetingService {
     private final DeliveryMapper deliveryMapper;
     private final LicenseService licenseService;
     private final LicenseProperties licenseProperties;
+    private final com.jobpilot.license.EntitlementService entitlementService;
 
     public GreetingService(AiProperties properties, AiService aiService, DeliveryMapper deliveryMapper,
-                           LicenseService licenseService, LicenseProperties licenseProperties) {
+                           LicenseService licenseService, LicenseProperties licenseProperties,
+                           com.jobpilot.license.EntitlementService entitlementService) {
         this.properties = properties;
         this.aiService = aiService;
         this.deliveryMapper = deliveryMapper;
         this.licenseService = licenseService;
         this.licenseProperties = licenseProperties;
+        this.entitlementService = entitlementService;
     }
 
     /** 话术结果：text 是要发的内容，note 是"为什么没走 AI"的原因（走了就没有） */
@@ -156,17 +159,24 @@ public class GreetingService {
      * 自定义模式直连客户填的接口。
      */
     private AiService.AiResult chat(AiConfig cfg, String systemPrompt, String userPrompt) {
+        AiService.AiResult result;
         if (AiProperties.MODE_CUSTOM.equals(cfg.getMode())) {
-            return aiService.chat(cfg.getBaseUrl(), cfg.getApiKey(), cfg.getModel(),
+            result = aiService.chat(cfg.getBaseUrl(), cfg.getApiKey(), cfg.getModel(),
+                    systemPrompt, userPrompt, cfg.getTemperature());
+        } else {
+            Map<String, String> credentials = licenseService.proxyCredentials();
+            if (credentials == null) {
+                return AiService.AiResult.fail("卡密未激活，用不了平台话术");
+            }
+            result = aiService.chatPlatform(licenseProperties.getApiBase(),
+                    credentials.get("token"), credentials.get("device_id"),
                     systemPrompt, userPrompt, cfg.getTemperature());
         }
-        Map<String, String> credentials = licenseService.proxyCredentials();
-        if (credentials == null) {
-            return AiService.AiResult.fail("卡密未激活，用不了平台话术");
+        if (result.isOk()) {
+            // 配额按"真实发生的 AI 调用"计：失败重试不计数，用户只为拿到的话术付费
+            entitlementService.recordUse("ai_analysis");
         }
-        return aiService.chatPlatform(licenseProperties.getApiBase(),
-                credentials.get("token"), credentials.get("device_id"),
-                systemPrompt, userPrompt, cfg.getTemperature());
+        return result;
     }
 
     /**

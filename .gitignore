@@ -14,3 +14,8 @@ node_modules/
 cookies/
 browser-data/
 resume.jpg
+# 浏览器档案：五个平台的登录 cookie，泄了等于账号被盗
+# 运行期截图（driver 排错用，可能截到个人信息）
+screenshots/
+# 本地打包产物，CI 会重新出
+build/dist/

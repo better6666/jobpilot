@@ -56,7 +56,9 @@ class GreetingServiceTest {
         doReturn(cfg).when(configService).getJson(anyString(), eq(AiConfig.class), any(AiConfig.class));
         licenseProperties.setApiBase("https://license.example.com");
         service = new GreetingService(new AiProperties(configService), aiService, deliveryMapper,
-                licenseService, licenseProperties);
+                licenseService, licenseProperties,
+                new com.jobpilot.license.EntitlementService(licenseService, null, licenseProperties,
+                        new com.fasterxml.jackson.databind.ObjectMapper(), null));
     }
 
     private void fullyConfigured() {
