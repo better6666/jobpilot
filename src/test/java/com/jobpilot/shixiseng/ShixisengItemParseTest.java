@@ -5,6 +5,7 @@ import com.microsoft.playwright.BrowserType;
 import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.Playwright;
+import com.jobpilot.browser.ChromeProbe;
 import com.jobpilot.browser.PlaywrightDriverSupport;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
@@ -43,6 +44,7 @@ class ShixisengItemParseTest {
     static void locateDriver() {
         // 没有 driver（没跑过打包、也没在仓库根目录跑测试）就跳过：
         // 这条用例验的是 DOM 选择器，证不了比误报好
+        assumeTrue(ChromeProbe.available(), "本机没有 Chrome，跳过浏览器用例");
         assumeTrue(PlaywrightDriverSupport.ensureDriverDir() != null,
                 "本机没有可用的 patchright driver，跳过");
     }

@@ -1,5 +1,6 @@
 package com.jobpilot.shixiseng;
 
+import com.jobpilot.browser.ChromeProbe;
 import com.jobpilot.browser.PlaywrightDriverSupport;
 import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.BrowserType;
@@ -38,6 +39,7 @@ class ShixisengDetailParseTest {
 
     @BeforeAll
     static void locateDriver() {
+        assumeTrue(ChromeProbe.available(), "本机没有 Chrome，跳过浏览器用例");
         assumeTrue(PlaywrightDriverSupport.ensureDriverDir() != null,
                 "本机没有可用的 patchright driver，跳过");
     }

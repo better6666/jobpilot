@@ -19,7 +19,10 @@ class PortFallbackListenerTest {
     @Test
     void 被占用时顺延到下一个可用端口() throws IOException {
         int occupied = freePort();
-        try (ServerSocket ignored = new ServerSocket(occupied)) {
+        // 显式绑 127.0.0.1 而不是裸 new ServerSocket(port)：裸构造绑的是通配地址，
+        // Windows 上落到只监听 IPv6 的 :: socket，而 isListening 只连 127.0.0.1，
+        // 占用探不到（CI 的 windows-latest 上实测挂过）。显式回环两个平台都能探到
+        try (ServerSocket ignored = bindLoopback(occupied)) {
             int resolved = PortFallbackListener.resolvePort(occupied);
             assertThat(resolved).isGreaterThan(occupied);
             // 顺延到的端口必须真的能绑上
@@ -35,7 +38,7 @@ class PortFallbackListenerTest {
         // 井水不犯河水：绑得上，但发往 127.0.0.1 的请求全被 IPv4 那个接走
         int occupied = freePort();
         try (ServerSocket holder = new ServerSocket()) {
-            holder.bind(new InetSocketAddress("0.0.0.0", occupied));
+            holder.bind(new InetSocketAddress("127.0.0.1", occupied));
             assertThat(PortFallbackListener.resolvePort(occupied)).isGreaterThan(occupied);
         }
     }
@@ -54,6 +57,12 @@ class PortFallbackListenerTest {
     @Test
     void 随机端口不干预() {
         assertThat(PortFallbackListener.resolvePort(0)).isZero();
+    }
+
+    private static ServerSocket bindLoopback(int port) throws IOException {
+        ServerSocket socket = new ServerSocket();
+        socket.bind(new InetSocketAddress("127.0.0.1", port));
+        return socket;
     }
 
     private static int freePort() throws IOException {
