@@ -35,6 +35,16 @@ jobs:
       - name: 构建并跑测试
         run: ./gradlew build
 
+      # 测试挂了把报告传上来：Windows 上的失败在本地复现不了，
+      # 没有 XML 就只能看 Gradle 的摘要行猜
+      - name: 上传测试报告
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ runner.os }}
+          path: build/test-results/test/*.xml
+          retention-days: 7
+
       - name: 裁剪运行时（模块清单经实跑验证，勿用 jdeps 推断）
         run: |
           jlink --add-modules java.base,java.desktop,java.instrument,java.logging,java.management,java.naming,java.net.http,java.security.jgss,java.security.sasl,java.sql,java.transaction.xa,java.xml,jdk.crypto.ec,jdk.unsupported \

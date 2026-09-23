@@ -253,3 +253,13 @@ tasks.named<JavaExec>("bootRun") {
 tasks.register("printRuntimeClasspath") {
     doLast { println(sourceSets["main"].runtimeClasspath.asPath) }
 }
+
+// 测试失败时把完整堆栈打到控制台：CI 上 --log-failed 只能拿到摘要行，
+// 没有堆栈就只能在 Windows 上瞎猜（实测吃过亏）
+tasks.withType<Test> {
+    testLogging {
+        exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+        showExceptions = true
+        showCauses = true
+    }
+}
