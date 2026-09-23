@@ -2,6 +2,7 @@ package com.jobpilot.browser;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.CleanupMode;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
@@ -21,7 +22,10 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class PlaywrightNodeSupportTest {
 
-    @TempDir
+    // Windows 上 JarFile 的底层 FileChannel 要等 GC 才释放，@TempDir 默认的
+    // 收尾删目录会以 "Failed to delete temp directory" 挂掉——和断言无关，
+    // 是平台文件语义。改成不删，交给 JVM 退出时清理
+    @TempDir(cleanup = CleanupMode.NEVER)
     Path tempDir;
 
     @AfterEach
