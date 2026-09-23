@@ -1,5 +1,6 @@
 package com.jobpilot.browser;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -22,6 +23,13 @@ class PlaywrightNodeSupportTest {
 
     @TempDir
     Path tempDir;
+
+    @AfterEach
+    void releaseLogHandles() {
+        // logback 的文件 appender 攥着日志句柄，Windows 不允许删除打开的文件，
+        // @TempDir 清理就会以 "Failed to delete temp directory" 挂掉
+        ((ch.qos.logback.classic.LoggerContext) org.slf4j.LoggerFactory.getILoggerFactory()).stop();
+    }
 
     private URLClassLoader bundleLoader(Path jar) throws IOException {
         // 父加载器用 platform：看不见测试 classpath 上真的 driver-bundle（100+MB）
@@ -65,7 +73,9 @@ class PlaywrightNodeSupportTest {
         Path jar = createBundleJar(PlaywrightDriverSupport.nodePlatformDir(), nodeName());
         Path driverDir = tempDir.resolve("driver");
         Files.createDirectories(driverDir);
-        Files.writeString(driverDir.resolve("node"), "already-here");
+        // 预置的文件名也要按平台：Windows 上代码认 node.exe，
+        // 写成 "node" 的话"已存在"判不成立，会被真解压覆盖
+        Files.writeString(driverDir.resolve(nodeName()), "already-here");
 
         boolean ok;
         try (URLClassLoader loader = bundleLoader(jar)) {
