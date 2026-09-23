@@ -128,6 +128,15 @@
           </select>
         </div>
         <div>
+          <label>套餐档位</label>
+          <select id="fPlan">
+            <option value="trial">试用版 ￥2.9 / 3天</option>
+            <option value="standard">标准版 Plus ￥19.9 起</option>
+            <option value="advanced">进阶版 Pro ￥32.9 起</option>
+          </select>
+          <div class="hint">决定客户拿到哪些功能和每日额度，见「套餐配置」卡片</div>
+        </div>
+        <div>
           <label>数量（1~100）</label>
           <input id="fCount" type="number" min="1" max="100" value="1">
         </div>
@@ -165,6 +174,19 @@
           </div>
         </div>
         <div id="issuedKeys" class="keys"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>套餐配置</h2>
+      <div class="hint" style="margin-bottom:14px">
+        三档套餐的价格、天数、功能开关、每日额度。<b>改完点保存立刻生效</b>，不用发版。
+        客户端的会员页和每日限额都读这里——额度改小，正在跑的投递下一次心跳就对不上。
+      </div>
+      <div id="plansEditor"></div>
+      <div class="row">
+        <button id="btnPlansSave">保存套餐配置</button>
+        <span id="plansToast" class="toast"></span>
       </div>
     </div>
 
@@ -283,14 +305,25 @@ async function admin(path, options = {}) {
     setConnected(false);
     throw new Error('管理密钥错误或已失效');
   }
-  return res.json();
+  const text = await res.text();
+  if (!res.ok) {
+    // 不能直接 res.json()：服务端 500 时返回的是 HTML 错误页，
+    // JSON.parse 会抛 "Unexpected token 'I', \"Internal S\"..."，
+    // 把真正的原因盖掉。先按文本截一段出来
+    throw new Error(`服务端 ${res.status}：` + text.slice(0, 160).replace(/\s+/g, ' '));
+  }
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    throw new Error('响应不是合法 JSON：' + text.slice(0, 160).replace(/\s+/g, ' '));
+  }
 }
 
 function setConnected(on) {
   $('panel').style.display = on ? '' : 'none';
   $('connState').className = 'state ' + (on ? 'ok' : 'off');
   $('connState').textContent = on ? '已连接' : '未连接';
-  if (on) { loadStats(); loadAiSettings(); }
+  if (on) { loadStats(); loadAiSettings(); loadPlans(); }
 }
 
 async function connect() {
@@ -363,6 +396,7 @@ async function issue() {
   const type = $('fType').value;
   const body = {
     type,
+    plan: $('fPlan').value,
     count: parseInt($('fCount').value, 10) || 1,
     max_devices: parseInt($('fMaxDevices').value, 10) || 1
   };
@@ -509,6 +543,170 @@ $('cardRows').addEventListener('click', (e) => {
 //   aiKeyEdited = true  → 带上输入框里的值，空串表示清除
 let aiKeyEdited = false;
 
+
+// ---------------------------------------------------------------- 套餐配置
+
+const PLAN_META = {
+  trial:    { label: '试用版',    badge: 'Trial' },
+  standard: { label: '标准版 Plus', badge: 'Plus' },
+  advanced: { label: '进阶版 Pro',  badge: 'Pro' },
+};
+
+const FEATURE_LABELS = {
+  job_search: '搜索岗位',
+  basic_filter: '基础筛选（城市/薪资/学历/经验/关键词）',
+  advanced_filter: '高级筛选（行业/规模/黑白名单/跨平台去重）',
+  ai_match: 'AI 岗位匹配',
+  ai_explanation: 'AI 匹配理由解读',
+  auto_apply: '自动投递',
+  smart_apply: '智能投递策略',
+  multi_resume: '多简历版本',
+  ai_greeting: 'AI 个性化打招呼',
+  analytics: '投递数据统计',
+  natural_language_rule: '自然语言描述求职要求',
+  ab_test: '简历 A/B 测试',
+  ai_strategy: 'AI 求职策略建议',
+};
+
+const QUOTA_LABELS = {
+  max_daily_apply: '每日投递',
+  max_daily_ai_analysis: '每日 AI 分析',
+  max_resume_count: '简历份数',
+  max_job_profile_count: '求职方向数',
+};
+
+let plansDraft = [];
+
+async function loadPlans() {
+  try {
+    const json = await admin('/admin/plans');
+    const list = (json.data && json.data.plans) || [];
+    plansDraft = list.length ? list : defaultPlansDraft();
+    renderPlans();
+  } catch (e) {
+    toast($('plansToast'), e.message, false);
+  }
+}
+
+function defaultPlansDraft() {
+  return [
+    { plan: 'trial', name: '试用版', price_cents: 290, duration_days: 3,
+      highlight_days: 0, recommended: false, sort_order: 1,
+      features: { job_search: true, basic_filter: true, auto_apply: true,
+                  analytics: true, ai_match: true },
+      quotas: { max_daily_apply: 10, max_daily_ai_analysis: 20,
+                max_resume_count: 1, max_job_profile_count: 1 } },
+    { plan: 'standard', name: '标准版 Plus', price_cents: 1990, duration_days: 30,
+      highlight_days: 0, recommended: false, sort_order: 2,
+      features: { job_search: true, basic_filter: true, advanced_filter: true,
+                  ai_match: true, auto_apply: true, ai_greeting: true,
+                  analytics: true },
+      quotas: { max_daily_apply: 60, max_daily_ai_analysis: 100,
+                max_resume_count: 1, max_job_profile_count: 3 } },
+    { plan: 'advanced', name: '进阶版 Pro', price_cents: 3290, duration_days: 30,
+      highlight_days: 60, recommended: true, sort_order: 3,
+      features: { job_search: true, basic_filter: true, advanced_filter: true,
+                  ai_match: true, ai_explanation: true, auto_apply: true,
+                  smart_apply: true, multi_resume: true, ai_greeting: true,
+                  analytics: true, natural_language_rule: true, ab_test: true,
+                  ai_strategy: true },
+      quotas: { max_daily_apply: 150, max_daily_ai_analysis: 400,
+                max_resume_count: 5, max_job_profile_count: 10 } },
+  ];
+}
+
+function renderPlans() {
+  $('plansEditor').innerHTML = plansDraft.map((p, i) => {
+    const meta = PLAN_META[p.plan] || { label: p.plan, badge: p.plan };
+    const feats = Object.keys(FEATURE_LABELS);
+    const quotas = Object.keys(QUOTA_LABELS);
+    return `
+      <div class="planrow" data-i="${i}" style="border:1px solid #e8e9ec;border-radius:10px;padding:14px;margin-bottom:12px">
+        <div class="row" style="justify-content:space-between;margin-bottom:10px">
+          <b>${meta.label} <span class="tag">${p.plan}</span></b>
+          <label class="hint" style="display:flex;align-items:center;gap:6px">
+            <input type="checkbox" data-f="recommended" ${p.recommended ? 'checked' : ''}>
+            重点推荐（客户端标「最受欢迎」）
+          </label>
+        </div>
+        <div class="grid">
+          <div><label>名称</label><input type="text" data-f="name" value="${esc(p.name || '')}"></div>
+          <div><label>价格（分）</label><input type="number" min="0" data-f="price_cents" value="${p.price_cents ?? 0}">
+            <div class="hint">显示为 ￥${((p.price_cents || 0) / 100).toFixed(1)}</div></div>
+          <div><label>默认天数</label><input type="number" min="1" max="3650" data-f="duration_days" value="${p.duration_days ?? 30}"></div>
+          <div><label>重点推荐时长（天，0=不推荐）</label><input type="number" min="0" max="3650" data-f="highlight_days" value="${p.highlight_days ?? 0}"></div>
+        </div>
+        <div style="margin-top:12px">
+          <label>功能开关</label>
+          <div class="row" style="flex-wrap:wrap;gap:10px 18px;margin-top:6px">
+            ${feats.map(f => `
+              <label class="hint" style="display:flex;align-items:center;gap:5px">
+                <input type="checkbox" data-feat="${f}" ${p.features && p.features[f] ? 'checked' : ''}>
+                ${FEATURE_LABELS[f]}
+              </label>`).join('')}
+          </div>
+        </div>
+        <div style="margin-top:12px">
+          <label>每日额度 / 数量上限</label>
+          <div class="grid" style="margin-top:6px">
+            ${quotas.map(q => `
+              <div><label class="hint">${QUOTA_LABELS[q]}</label>
+                <input type="number" min="0" data-quota="${q}" value="${(p.quotas && p.quotas[q]) ?? 0}"></div>`).join('')}
+          </div>
+        </div>
+      </div>`;
+  }).join('');
+
+  $('plansEditor').querySelectorAll('input[type=checkbox][data-feat]').forEach(el => {
+    el.addEventListener('change', () => {
+      const i = +el.closest('.planrow').dataset.i;
+      plansDraft[i].features = plansDraft[i].features || {};
+      plansDraft[i].features[el.dataset.feat] = el.checked;
+    });
+  });
+  $('plansEditor').querySelectorAll('input[data-quota]').forEach(el => {
+    el.addEventListener('input', () => {
+      const i = +el.closest('.planrow').dataset.i;
+      plansDraft[i].quotas = plansDraft[i].quotas || {};
+      plansDraft[i].quotas[el.dataset.quota] = parseInt(el.value, 10) || 0;
+    });
+  });
+  $('plansEditor').querySelectorAll('input[data-f]').forEach(el => {
+    el.addEventListener('input', () => {
+      const i = +el.closest('.planrow').dataset.i;
+      const f = el.dataset.f;
+      if (el.type === 'checkbox') plansDraft[i][f] = el.checked;
+      else if (['price_cents','duration_days','highlight_days'].includes(f))
+        plansDraft[i][f] = parseInt(el.value, 10) || 0;
+      else plansDraft[i][f] = el.value;
+    });
+  });
+}
+
+async function savePlans() {
+  $('btnPlansSave').disabled = true;
+  try {
+    const json = await admin('/admin/plans', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ plans: plansDraft })
+    });
+    if (!json.success) {
+      toast($('plansToast'), (json.error && json.error.message) || '保存失败', false);
+      return;
+    }
+    toast($('plansToast'), '已保存，客户端下次拉取即生效', true);
+  } catch (e) {
+    toast($('plansToast'), e.message, false);
+  } finally {
+    $('btnPlansSave').disabled = false;
+  }
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+}
+
 async function loadAiSettings() {
   let json;
   try {
@@ -598,6 +796,7 @@ async function fetchAiModels() {
   if ($('aiBaseUrl').value.trim()) body.base_url = $('aiBaseUrl').value.trim();
   if (aiKeyEdited && $('aiApiKey').value.trim()) body.api_key = $('aiApiKey').value.trim();
 
+  $('btnPlansSave').onclick = savePlans;
   $('btnAiModels').disabled = true;
   $('aiModelChips').innerHTML = '';
   try {

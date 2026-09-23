@@ -136,8 +136,7 @@
       </div>
       <div>
         <label>城市</label>
-        <input id="city" type="text" list="cityList" placeholder="上海">
-        <datalist id="cityList"></datalist>
+        <select id="city"></select>
       </div>
       <div id="filterFields"></div>
       <div>
@@ -331,6 +330,10 @@ async function loadConfig() {
   const c = (await api(`/api/${platform}/config`)).data;
   if (!c) return;
   $('keywords').value = (c.keywords || []).join('\n');
+  // 码表里没有的城市名（用户手填过）要补一个 option，否则 select 会显示空白
+  if (c.city && ![...$('city').options].some(o => o.value === c.city)) {
+    $('city').innerHTML += `<option value="${esc(c.city)}">${esc(c.city)}</option>`;
+  }
   $('city').value = c.city || '';
   renderFilters(c, window.__options || {});
   $('maxJobs').value = c.maxJobsPerKeyword;
@@ -477,8 +480,11 @@ function init() {
   (async () => {
     // 码表要先于配置：配置里选中的筛选项码要靠码表回填
     window.__options = await loadOptions();
-    $('cityList').innerHTML = (window.__options.cities || [])
-      .map(c => `<option value="${c.name}">${c.code}</option>`).join('');
+    // 灌码表 + 一项"全国"。用 select 而非 input+datalist：
+    // datalist 在 Chrome 应用模式窗口里下拉不弹，用户只能手打城市名
+    const cities = window.__options.cities || [];
+    $('city').innerHTML = '<option value="">全国</option>'
+      + cities.map(c => `<option value="${esc(c.name)}">${esc(c.name)}</option>`).join('');
     await loadConfig();
     await refreshStatus();
     await refreshDeliveries();

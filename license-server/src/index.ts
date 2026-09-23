@@ -155,12 +155,39 @@ function daysUntil(iso: string | null): number {
   return ms <= 0 ? 0 : Math.ceil(ms / 86400000)
 }
 
-function normalizePlan(v: unknown): Plan {
-  return v === 'standard' || v === 'advanced' || v === 'trial' ? v : 'trial'
+/**
+ * 归一档位。
+ *
+ * <p><b>不合法返回 null，不静默兜底成 trial</b>——静默兜底的话，后台选错档位
+ * 不会报错，客户拿到卡才发现权益不对，查起来要绕一圈。调用方拿到 null 自己
+ * 决定怎么报（本项目没有全局 onError，抛异常会变成 500 + HTML 错误页）。
+ *
+ * <p>没传（undefined/null/空串）才兜底成 trial，保持老调用方兼容。
+ */
+function normalizePlan(v: unknown): Plan | null {
+  if (v === undefined || v === null || v === '') {
+    return 'trial'
+  }
+  if (v === 'standard' || v === 'advanced' || v === 'trial') return v
+  return null
 }
 
-/** 读套餐配置；表空着就回退到代码里的兜底默认值，保证前台不至于全灰 */
+/**
+ * 读套餐配置。三个来源按优先级：
+ *   1. settings 表的 plans（后台刚保存的，最高优先级——改完立刻生效）
+ *   2. plans 表（早先的形态，老库可能还在用）
+ *   3. 代码里的 DEFAULT_PLANS 兜底，保证前台不至于全灰
+ */
 async function loadPlans(db: D1Database): Promise<PlanRow[]> {
+  try {
+    const row = await db.prepare(
+      'SELECT value FROM settings WHERE key = ?'
+    ).bind('plans').first<{ value: string }>()
+    const fromSettings = parseJson<PlanRow[]>(row?.value ?? '', [])
+    // 注意是「解析出来非空才用」：settings 里没有、或存了空数组，
+    // 都要继续往下找，不能现在就 return 空——那会让会员页三档全消失
+    if (fromSettings.length > 0) return fromSettings
+  } catch { /* settings 表还没建时继续往下找 */ }
   try {
     const rows = await db.prepare(
       'SELECT * FROM plans WHERE active = 1 ORDER BY sort_order'
@@ -561,8 +588,9 @@ app.post('/api/license/entitlement', async (c) => {
   if (auth instanceof Response) return auth
   const { card } = auth
 
+  const cardPlan = normalizePlan(card.plan) ?? 'trial'
   const rows = await loadPlans(c.env.DB)
-  const row = rows.find(r => r.plan === normalizePlan(card.plan)) ?? rows[0] ?? DEFAULT_PLANS[0]
+  const row = rows.find(r => r.plan === cardPlan) ?? rows[0] ?? DEFAULT_PLANS[0]
   const usable = checkCardUsable(card)
 
   return ok({
@@ -654,6 +682,9 @@ app.post('/admin/cards', async (c) => {
   const note = (body?.note ?? '').slice(0, 200)
   const maxDevices = clampInt(body?.max_devices, 1, 10, 1)
   const plan = normalizePlan(body?.plan)
+  if (plan === null) {
+    return fail(400, 'BAD_PLAN', 'plan 必须是 trial / standard / advanced')
+  }
 
   let durationDays: number | null = null
   let quotaTotal: number | null = null
@@ -750,6 +781,66 @@ app.get('/admin/stats', async (c) => {
 })
 
 /** 平台配置（AI 中转）。key 一律打码，和客户端一个规矩 */
+/**
+ * 套餐配置的读写。存 settings 表，key = plans。
+ *
+ * 价格、天数、功能开关、每日额度全放这里，后台改完立刻生效——
+ * 不发版就能调价、加功能、改额度。代码里的 DEFAULT_PLANS 只是表空着时的兜底。
+ */
+const PLANS_SETTING_KEY = 'plans'
+
+app.get('/admin/plans', async (c) => {
+  const row = await c.env.DB.prepare(
+    'SELECT value FROM settings WHERE key = ?'
+  ).bind(PLANS_SETTING_KEY).first<{ value: string }>()
+  return ok({
+    configured: row != null,
+    plans: row ? parseJson<unknown[]>(row.value, []) : [],
+  })
+})
+
+app.put('/admin/plans', async (c) => {
+  const body = await c.req.json<{ plans?: unknown[] }>().catch(() => null)
+  const plans = body?.plans
+  if (!Array.isArray(plans) || plans.length === 0) {
+    return fail(400, 'BAD_REQUEST', 'plans 必须是非空数组')
+  }
+  // 每个档位至少要有 plan / name / price_cents / duration_days，
+  // features 和 quotas 缺了就当空对象——清洗放在这，别让脏数据落库
+  for (let i = 0; i < plans.length; i++) {
+    const plan = String(((plans[i] || {}) as Record<string, unknown>).plan || '').trim()
+    if (!['trial', 'standard', 'advanced'].includes(plan)) {
+      return fail(400, 'BAD_PLAN', `第 ${i + 1} 行的 plan 必须是 trial / standard / advanced`)
+    }
+  }
+  const cleaned = plans.map((raw, i) => {
+    const p = (raw || {}) as Record<string, unknown>
+    const plan = String(p.plan || '').trim()
+    if (!['trial', 'standard', 'advanced'].includes(plan)) {
+      return fail(400, 'BAD_PLAN', `第 ${i + 1} 行的 plan 必须是 trial / standard / advanced`)
+    }
+    return {
+      plan,
+      name: String(p.name || plan).slice(0, 20),
+      price_cents: clampInt(p.price_cents, 0, 1000000, 0),
+      duration_days: clampInt(p.duration_days, 1, 3650, 30),
+      highlight_days: clampInt(p.highlight_days, 0, 3650, 0),
+      recommended: p.recommended === true ? 1 : 0,
+      sort_order: clampInt(p.sort_order, 0, 99, i + 1),
+      features: typeof p.features === 'object' && p.features ? p.features : {},
+      quotas: typeof p.quotas === 'object' && p.quotas ? p.quotas : {},
+    }
+  })
+
+  await c.env.DB.prepare(
+    `INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
+  ).bind(PLANS_SETTING_KEY, JSON.stringify(cleaned), nowIso()).run()
+
+  return ok({ saved: cleaned.length })
+})
+
+
 app.get('/admin/settings', async (c) => {
   const relay = await getAiRelay(c.env.DB)
   if (!relay) {

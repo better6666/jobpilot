@@ -175,10 +175,34 @@ public class BrowserManager {
                                 "--no-default-browser-check",
                                 "--disable-session-crashed-bubble"))
                         .setIgnoreDefaultArgs(List.of("--enable-automation"));
-        if (properties.getChannel() != null && !properties.getChannel().isBlank()) {
+        boolean wantChannel = properties.getChannel() != null && !properties.getChannel().isBlank();
+        if (wantChannel) {
             options.setChannel(properties.getChannel());
         }
-        BrowserContext ctx = playwright.chromium().launchPersistentContext(userDataDir, options);
+        BrowserContext ctx;
+        try {
+            ctx = playwright.chromium().launchPersistentContext(userDataDir, options);
+        } catch (Exception e) {
+            // 本机没装 Chrome、或被企业策略挡了时 channel 启动会直接失败，
+            // 抛出去就是 "Target page, context or browser has been closed"，
+            // 用户看到的只有一个看不懂的堆栈。退回 playwright 自带的 chromium，
+            // 功能可用、少一点反检测效果，总比完全不能用好
+            if (!wantChannel) {
+                throw e;
+            }
+            log.warn("用 channel={} 启动浏览器失败，退回 playwright 自带 chromium: {}",
+                    properties.getChannel(), e.getMessage());
+            BrowserType.LaunchPersistentContextOptions fallback =
+                    new BrowserType.LaunchPersistentContextOptions()
+                            .setHeadless(properties.isHeadless())
+                            .setSlowMo((double) properties.getSlowMoMs())
+                            .setViewportSize(properties.getWidth(), properties.getHeight())
+                            .setLocale("zh-CN")
+                            .setTimezoneId("Asia/Shanghai")
+                            .setArgs(options.args)
+                            .setIgnoreDefaultArgs(List.of("--enable-automation"));
+            ctx = playwright.chromium().launchPersistentContext(userDataDir, fallback);
+        }
         // 持久化上下文启动时自带一个空白标签页，直接复用会把第一个 navigate 浪费在 about:blank 上，
         // 而且 Boss 落地页判定会把它算进去，关掉
         for (var page : ctx.pages()) {
