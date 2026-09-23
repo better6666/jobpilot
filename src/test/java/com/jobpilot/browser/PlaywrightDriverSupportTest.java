@@ -9,6 +9,7 @@ import java.net.URLClassLoader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Locale;
 import java.util.Map;
 import java.util.jar.JarEntry;
 import java.util.jar.JarOutputStream;
@@ -172,7 +173,9 @@ class PlaywrightDriverSupportTest {
             // PlaywrightNodeSupportTest 覆盖，这里只断言默认路径
             if (System.getenv("PLAYWRIGHT_NODEJS_PATH") == null
                     || System.getenv("PLAYWRIGHT_NODEJS_PATH").isBlank()) {
-                assertThat(claimed.resolve("node")).isExecutable();
+                // Windows 上叫 node.exe，没有 POSIX 可执行位，
+                // Files.isExecutable 恒 false——所以只按文件名断言存在
+                assertThat(claimed.resolve(nodeName())).exists();
             }
             assertThat(System.getProperty(PlaywrightDriverSupport.CLI_DIR_PROPERTY))
                     .isEqualTo(driverDir.toAbsolutePath().toString());
@@ -188,5 +191,14 @@ class PlaywrightDriverSupportTest {
                 System.setProperty(PlaywrightDriverSupport.CLI_DIR_PROPERTY, originCli);
             }
         }
+    }
+
+    private static boolean isWindows() {
+        return System.getProperty("os.name", "").toLowerCase().contains("win");
+    }
+
+    /** Windows 上 node 可执行文件叫 node.exe，且没有 POSIX 可执行位 */
+    private static String nodeName() {
+        return isWindows() ? "node.exe" : "node";
     }
 }

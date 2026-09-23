@@ -30,7 +30,10 @@ public class PortFallbackListener implements ApplicationListener<ApplicationEnvi
     private static final String LOOPBACK_HOST = "127.0.0.1";
 
     /** 回环连接探测的超时：回环上"没人听"是立刻 refused 的，只有异常环境才会等满超时 */
-    private static final int CONNECT_TIMEOUT_MS = 200;
+    // 200ms 本机够用，但 CI 的 Windows runner 满载时回环连接也会超：
+    // 一旦超时就被当成"没人听"，占用探不到，端口顺延失效（实测挂过）。
+    // 500ms 对启动时那几次探测仍然无感
+    private static final int CONNECT_TIMEOUT_MS = 500;
 
     @Override
     public void onApplicationEvent(ApplicationEnvironmentPreparedEvent event) {

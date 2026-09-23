@@ -47,6 +47,11 @@ class JobPilotApplicationStartTest {
     void shutDown() {
         if (context != null) {
             context.close();
+            // logback 的文件 appender 在 context 关闭后还攥着日志句柄，
+            // Windows 上不允许删除打开的文件，@TempDir 清理就会失败，
+            // 整个用例以"Failed to delete temp directory"挂掉（CI windows 实测）。
+            // 显式停掉 logback 把句柄放掉
+            ((ch.qos.logback.classic.LoggerContext) org.slf4j.LoggerFactory.getILoggerFactory()).stop();
         }
         restore("spring.datasource.url", savedDatasourceUrl);
         restore("logging.file.name", savedLogFile);

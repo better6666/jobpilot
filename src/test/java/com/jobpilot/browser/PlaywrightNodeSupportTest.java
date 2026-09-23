@@ -53,9 +53,11 @@ class PlaywrightNodeSupportTest {
         }
 
         assertThat(ok).isTrue();
-        Path node = driverDir.resolve("node");
+        Path node = driverDir.resolve(nodeName());
         assertThat(node).hasContent("fake-node-binary");
-        assertThat(Files.isExecutable(node)).isTrue();
+        if (!isWindows()) {
+            assertThat(Files.isExecutable(node)).isTrue();
+        }
     }
 
     @Test
@@ -71,7 +73,7 @@ class PlaywrightNodeSupportTest {
         }
 
         assertThat(ok).isTrue();
-        assertThat(driverDir.resolve("node")).hasContent("already-here");
+        assertThat(driverDir.resolve(nodeName())).hasContent("already-here");
     }
 
     @Test
@@ -130,5 +132,14 @@ class PlaywrightNodeSupportTest {
             System.setProperty("os.name", originOs);
             System.setProperty("os.arch", originArch);
         }
+    }
+
+    private static boolean isWindows() {
+        return System.getProperty("os.name", "").toLowerCase().contains("win");
+    }
+
+    /** Windows 上 node 可执行文件叫 node.exe，且没有 POSIX 可执行位 */
+    private static String nodeName() {
+        return isWindows() ? "node.exe" : "node";
     }
 }

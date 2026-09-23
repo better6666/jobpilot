@@ -1,5 +1,6 @@
 package com.jobpilot.shixiseng;
 
+import com.microsoft.playwright.options.WaitUntilState;
 import com.jobpilot.browser.ChromeProbe;
 import com.jobpilot.browser.PlaywrightDriverSupport;
 import com.microsoft.playwright.BrowserContext;
@@ -55,8 +56,12 @@ class ShixisengDetailParseTest {
         page = context.newPage();
         String detail = Files.readString(
                 Path.of("src/test/resources/fixtures/shixiseng-detail.html"));
+        // 只等 DOMContentLoaded：夹具里引了实习僧的图片 CDN，
+        // 默认的 waitUntil=load 会等这些外网资源，CI 上拖到 30s 超时
         page.setContent("<html><body><div class=\"job-detail-page\">"
-                + detail + "</div></body></html>");
+                + detail + "</div></body></html>",
+                new Page.SetContentOptions()
+                        .setWaitUntil(WaitUntilState.DOMCONTENTLOADED));
     }
 
     @AfterEach

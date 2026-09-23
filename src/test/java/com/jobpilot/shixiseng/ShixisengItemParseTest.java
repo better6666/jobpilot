@@ -1,5 +1,6 @@
 package com.jobpilot.shixiseng;
 
+import com.microsoft.playwright.options.WaitUntilState;
 import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.BrowserType;
 import com.microsoft.playwright.Locator;
@@ -62,8 +63,12 @@ class ShixisengItemParseTest {
         String items = Files.readString(
                 Path.of("src/test/resources/fixtures/shixiseng-search-items.html"));
         // 包一层最小页面：readItem 用的都是相对条目自己的选择器，不需要外层结构
+        // 只等 DOMContentLoaded：夹具里引了实习僧的图片 CDN，
+        // 默认的 waitUntil=load 会等这些外网资源，CI 上拖到 30s 超时
         page.setContent("<html><body><div class=\"result-list\">"
-                + items + "</div></body></html>");
+                + items + "</div></body></html>",
+                new Page.SetContentOptions()
+                        .setWaitUntil(WaitUntilState.DOMCONTENTLOADED));
     }
 
     @AfterEach
