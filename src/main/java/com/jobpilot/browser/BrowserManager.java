@@ -203,14 +203,8 @@ public class BrowserManager {
                             .setIgnoreDefaultArgs(List.of("--enable-automation"));
             ctx = playwright.chromium().launchPersistentContext(userDataDir, fallback);
         }
-        // 持久化上下文启动时自带一个空白标签页，直接复用会把第一个 navigate 浪费在 about:blank 上，
-        // 而且 Boss 落地页判定会把它算进去，关掉
-        for (var page : ctx.pages()) {
-            try {
-                page.close();
-            } catch (Exception ignore) {
-            }
-        }
+        // 保留持久化上下文启动时的初始标签页。关闭最后一个标签页可能让有界面的
+        // Chrome 直接退出，随后首次 context.newPage() 会报 Target.createTarget 失败。
         return ctx;
     }
 
