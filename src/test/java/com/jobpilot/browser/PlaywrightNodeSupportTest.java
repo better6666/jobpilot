@@ -44,7 +44,7 @@ class PlaywrightNodeSupportTest {
 
     @Test
     void 从driverBundle解压当前平台的node并置可执行权限() throws IOException {
-        Path jar = createBundleJar(PlaywrightDriverSupport.nodePlatformDir(), "node");
+        Path jar = createBundleJar(PlaywrightDriverSupport.nodePlatformDir(), nodeName());
         Path driverDir = tempDir.resolve("driver");
 
         boolean ok;
@@ -62,7 +62,7 @@ class PlaywrightNodeSupportTest {
 
     @Test
     void node已存在时不解压() throws IOException {
-        Path jar = createBundleJar(PlaywrightDriverSupport.nodePlatformDir(), "node");
+        Path jar = createBundleJar(PlaywrightDriverSupport.nodePlatformDir(), nodeName());
         Path driverDir = tempDir.resolve("driver");
         Files.createDirectories(driverDir);
         Files.writeString(driverDir.resolve("node"), "already-here");
