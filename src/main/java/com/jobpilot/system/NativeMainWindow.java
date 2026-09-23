@@ -6,6 +6,7 @@ import lombok.extern.slf4j.Slf4j;
 
 import javax.swing.*;
 import javax.swing.table.DefaultTableModel;
+import javax.swing.border.EmptyBorder;
 import java.awt.*;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
@@ -63,6 +64,7 @@ public class NativeMainWindow {
     private final JComboBox<Platform> platform = new JComboBox<>(PLATFORMS.toArray(Platform[]::new));
     private final JLabel runState = new JLabel("状态：读取中…");
     private final JLabel counters = new JLabel("已扫描 0 · 已投递 0 · 预演 0 · 已过滤 0 · 失败 0");
+    private final JLabel[] metricValues = new JLabel[4];
     private final JButton start = new JButton("开始投递");
     private final JButton stop = new JButton("停止");
     private final JTextArea keywords = new JTextArea(4, 24);
@@ -97,6 +99,14 @@ public class NativeMainWindow {
     private final JTextField cardKey = new JTextField();
     private final JTextArea planInfo = new JTextArea();
 
+    private static final Color CANVAS = new Color(246, 248, 252);
+    private static final Color WHITE = Color.WHITE;
+    private static final Color INK = new Color(29, 40, 57);
+    private static final Color MUTED = new Color(103, 117, 139);
+    private static final Color LINE = new Color(226, 232, 240);
+    private static final Color ACCENT = new Color(70, 86, 223);
+    private static final Color NAV = new Color(22, 32, 54);
+
     public NativeMainWindow(int port, Runnable onQuit) {
         this.base = "http://127.0.0.1:" + port;
         this.onQuit = onQuit;
@@ -112,39 +122,23 @@ public class NativeMainWindow {
     }
 
     private void build() {
-        try {
-            UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
-        } catch (Exception e) {
-            log.debug("使用默认 Swing 外观: {}", e.getMessage());
-        }
         frame = new JFrame("JobPilot · 简历自动投递");
         frame.setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
         frame.addWindowListener(new WindowAdapter() {
             @Override public void windowClosing(WindowEvent event) { quit(); }
         });
-        frame.setMinimumSize(new Dimension(900, 680));
-        frame.setSize(1120, 850);
+        frame.setMinimumSize(new Dimension(1050, 720));
+        frame.setSize(1280, 880);
         frame.setLocationRelativeTo(null);
 
-        JTabbedPane tabs = new JTabbedPane();
-        tabs.addTab("投递", deliveryPanel());
-        tabs.addTab("AI 话术", aiPanel());
-        tabs.addTab("卡密", licensePanel());
-        tabs.addTab("会员套餐", plansPanel());
-        tabs.addChangeListener(e -> {
-            if (tabs.getSelectedIndex() == 1) loadAi();
-            if (tabs.getSelectedIndex() == 2) loadLicense();
-            if (tabs.getSelectedIndex() == 3) loadPlans();
-        });
-        frame.add(tabs, BorderLayout.CENTER);
-
-        JPanel footer = new JPanel(new BorderLayout());
-        footer.setBorder(BorderFactory.createEmptyBorder(5, 12, 5, 12));
-        footer.add(new JLabel("本机运行 · 投递记录保存在此电脑"), BorderLayout.WEST);
-        JButton quit = new JButton("退出 JobPilot");
-        quit.addActionListener(e -> quit());
-        footer.add(quit, BorderLayout.EAST);
-        frame.add(footer, BorderLayout.SOUTH);
+        JPanel pages = new JPanel(new CardLayout());
+        pages.add(deliveryPanel(), "delivery");
+        pages.add(aiPanel(), "ai");
+        pages.add(licensePanel(), "license");
+        pages.add(plansPanel(), "plans");
+        frame.getContentPane().setBackground(CANVAS);
+        frame.add(sidebar(pages), BorderLayout.WEST);
+        frame.add(pages, BorderLayout.CENTER);
 
         loadPlatform();
         loadLicense();
@@ -156,48 +150,107 @@ public class NativeMainWindow {
     }
 
     private JPanel deliveryPanel() {
-        JPanel root = new JPanel(new BorderLayout(10, 10));
-        root.setBorder(BorderFactory.createEmptyBorder(12, 12, 12, 12));
-        JPanel toolbar = new JPanel(new BorderLayout(8, 8));
-        JPanel topRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 0));
-        topRow.add(new JLabel("平台"));
-        topRow.add(platform);
-        topRow.add(start);
-        topRow.add(stop);
+        JPanel root = new JPanel(new BorderLayout(0, 20));
+        root.setBackground(CANVAS);
+        root.setBorder(new EmptyBorder(30, 30, 26, 30));
+        JPanel heading = new JPanel(new BorderLayout());
+        heading.setOpaque(false);
+        heading.add(pageTitle("投递工作台", "设定目标职位，掌握每一步进度"), BorderLayout.WEST);
+        JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 9, 0));
+        actions.setOpaque(false);
+        platform.setPreferredSize(new Dimension(170, 38));
+        actions.add(platform);
+        primary(start);
+        secondary(stop);
+        actions.add(start);
+        actions.add(stop);
         stop.setEnabled(false);
-        toolbar.add(topRow, BorderLayout.NORTH);
-        JPanel stateRow = new JPanel(new GridLayout(0, 1, 0, 3));
-        stateRow.add(runState);
-        stateRow.add(counters);
-        toolbar.add(stateRow, BorderLayout.CENTER);
-        root.add(toolbar, BorderLayout.NORTH);
+        heading.add(actions, BorderLayout.EAST);
+        JPanel overview = new JPanel(new BorderLayout(0, 18));
+        overview.setOpaque(false);
+        overview.add(heading, BorderLayout.NORTH);
+        JPanel summary = new JPanel(new GridLayout(1, 4, 12, 0));
+        summary.setOpaque(false);
+        String[] names = {"已扫描", "已投递", "预演", "已过滤"};
+        for (int i = 0; i < names.length; i++) {
+            metricValues[i] = new JLabel("0");
+            JPanel tile = card(new BorderLayout(0, 8));
+            tile.add(label(names[i], 12, MUTED, Font.PLAIN), BorderLayout.NORTH);
+            tile.add(metricValues[i], BorderLayout.CENTER);
+            metricValues[i].setFont(new Font(Font.SANS_SERIF, Font.BOLD, 28));
+            metricValues[i].setForeground(INK);
+            summary.add(tile);
+        }
+        overview.add(summary, BorderLayout.SOUTH);
+        root.add(overview, BorderLayout.NORTH);
 
-        JPanel form = vertical();
-        form.add(titled("搜索关键词（每行一个）", new JScrollPane(keywords)));
-        JPanel basics = new JPanel(new GridLayout(0, 2, 12, 10));
-        basics.add(titled("城市", city));
-        basics.add(titled("每个关键词最多处理", maxJobs));
-        basics.add(titled("岗位间隔秒数", waitSeconds));
-        basics.add(titled("登录等待分钟数", loginTimeout));
-        form.add(basics);
-        form.add(filters);
-        form.add(titled("固定打招呼话术", new JScrollPane(sayHi)));
+        JPanel form = stack();
+        JPanel search = card(new BorderLayout(0, 15));
+        search.add(sectionHead("01  搜索范围", "每行输入一个关键词，按顺序检索"), BorderLayout.NORTH);
+        JPanel searchFields = new JPanel(new BorderLayout(0, 8));
+        searchFields.setOpaque(false);
+        keywords.setRows(3);
+        searchFields.add(field("搜索关键词", new JScrollPane(keywords)), BorderLayout.NORTH);
+        JPanel basics = grid2();
+        basics.add(field("城市", city));
+        basics.add(field("每个关键词最多处理", maxJobs));
+        basics.add(field("岗位间隔 · 秒", waitSeconds));
+        basics.add(field("登录等待 · 分钟", loginTimeout));
+        searchFields.add(basics, BorderLayout.CENTER);
+        search.add(searchFields, BorderLayout.CENTER);
+        form.add(search);
+        form.add(Box.createVerticalStrut(14));
+
+        JPanel filterCard = card(new BorderLayout(0, 12));
+        filterCard.add(sectionHead("02  岗位筛选", "按平台提供的条件收窄结果"), BorderLayout.NORTH);
+        filters.setOpaque(false);
+        filterCard.add(filters, BorderLayout.CENTER);
+        form.add(filterCard);
+        form.add(Box.createVerticalStrut(14));
+
+        JPanel settings = card(new BorderLayout(0, 14));
+        settings.add(sectionHead("03  投递设置", "确认消息和筛选规则后保存"), BorderLayout.NORTH);
+        JPanel settingFields = stack();
+        sayHi.setRows(2);
+        settingFields.add(field("固定打招呼话术 · 仅 Boss 直聘", new JScrollPane(sayHi)));
+        settingFields.add(dryRun);
+        settingFields.add(inactiveHr);
         scoreRules.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
-        form.add(titled("打分规则（JSON）", new JScrollPane(scoreRules)));
-        form.add(dryRun);
-        form.add(inactiveHr);
+        scoreRules.setRows(6);
+        settingFields.add(field("高级设置 · 打分规则 JSON", new JScrollPane(scoreRules)));
+        settings.add(settingFields, BorderLayout.CENTER);
         JButton save = new JButton("保存配置");
+        primary(save);
         save.addActionListener(e -> saveConfig());
-        form.add(save);
+        JPanel saveRow = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 0));
+        saveRow.setOpaque(false);
+        saveRow.add(save);
+        settings.add(saveRow, BorderLayout.SOUTH);
+        form.add(settings);
 
+        JScrollPane formScroll = scroll(form);
+        JPanel activity = card(new BorderLayout(0, 12));
+        activity.add(sectionHead("实时动态", "当前平台的状态与投递记录"), BorderLayout.NORTH);
+        JPanel status = new JPanel(new BorderLayout(0, 8));
+        status.setOpaque(false);
+        runState.setForeground(INK);
+        runState.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 13));
+        counters.setForeground(MUTED);
+        status.add(runState, BorderLayout.NORTH);
+        status.add(counters, BorderLayout.CENTER);
+        JPanel activityBody = new JPanel(new BorderLayout(0, 14));
+        activityBody.setOpaque(false);
+        activityBody.add(status, BorderLayout.NORTH);
         JTabbedPane bottom = new JTabbedPane();
         logs.setEditable(false);
         logs.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
-        bottom.addTab("运行日志", new JScrollPane(logs));
+        bottom.addTab("运行日志", scroll(logs));
         JPanel records = new JPanel(new BorderLayout());
         JTable table = new JTable(deliveries);
         table.setAutoResizeMode(JTable.AUTO_RESIZE_OFF);
-        records.add(new JScrollPane(table), BorderLayout.CENTER);
+        table.setRowHeight(30);
+        table.getTableHeader().setReorderingAllowed(false);
+        records.add(scroll(table), BorderLayout.CENTER);
         JPanel recordActions = new JPanel(new FlowLayout(FlowLayout.RIGHT));
         JButton refresh = new JButton("刷新记录");
         refresh.addActionListener(e -> refreshDeliveries());
@@ -207,10 +260,13 @@ public class NativeMainWindow {
         recordActions.add(clear);
         records.add(recordActions, BorderLayout.SOUTH);
         bottom.addTab("投递记录", records);
-
-        JSplitPane split = new JSplitPane(JSplitPane.VERTICAL_SPLIT, new JScrollPane(form), bottom);
-        split.setResizeWeight(0.65);
-        split.setDividerLocation(440);
+        activityBody.add(bottom, BorderLayout.CENTER);
+        activity.add(activityBody, BorderLayout.CENTER);
+        JSplitPane split = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, formScroll, activity);
+        split.setBorder(null);
+        split.setDividerSize(16);
+        split.setResizeWeight(0.61);
+        split.setDividerLocation(610);
         root.add(split, BorderLayout.CENTER);
         platform.addActionListener(e -> loadPlatform());
         start.addActionListener(e -> runPlatform("start"));
@@ -219,16 +275,30 @@ public class NativeMainWindow {
     }
 
     private JPanel aiPanel() {
-        JPanel form = vertical();
-        form.setBorder(BorderFactory.createEmptyBorder(16, 16, 16, 16));
-        form.add(aiEnabled);
-        form.add(titled("话术来源", aiMode));
-        form.add(aiInfo);
-        form.add(titled("接口地址（自有接口模式）", aiUrl));
-        form.add(titled("API Key（留空表示保留原值）", aiKey));
-        form.add(titled("模型名称", aiModel));
-        form.add(titled("求职者背景", new JScrollPane(aiPersona)));
-        form.add(titled("生成温度", aiTemperature));
+        JPanel form = stack();
+        JPanel intro = card(new BorderLayout(0, 12));
+        intro.add(sectionHead("AI 话术", "根据求职者背景生成更贴合岗位的沟通内容"), BorderLayout.NORTH);
+        intro.add(aiEnabled, BorderLayout.CENTER);
+        form.add(intro);
+        form.add(Box.createVerticalStrut(14));
+        JPanel source = card(new BorderLayout(0, 12));
+        source.add(sectionHead("模型与接口", "选择平台中转或填写自己的接口"), BorderLayout.NORTH);
+        JPanel fields = stack();
+        fields.add(field("话术来源", aiMode));
+        fields.add(aiInfo);
+        fields.add(field("接口地址 · 自有接口模式", aiUrl));
+        fields.add(field("API Key · 留空保留原值", aiKey));
+        fields.add(field("模型名称", aiModel));
+        source.add(fields, BorderLayout.CENTER);
+        form.add(source);
+        form.add(Box.createVerticalStrut(14));
+        JPanel content = card(new BorderLayout(0, 12));
+        content.add(sectionHead("个人背景", "用于生成贴近你经历的打招呼内容"), BorderLayout.NORTH);
+        JPanel personaFields = stack();
+        personaFields.add(field("求职者背景", new JScrollPane(aiPersona)));
+        personaFields.add(field("生成温度", aiTemperature));
+        content.add(personaFields, BorderLayout.CENTER);
+        form.add(content);
         JPanel buttons = new JPanel(new FlowLayout(FlowLayout.LEFT));
         JButton save = new JButton("保存 AI 配置");
         save.addActionListener(e -> saveAi());
@@ -248,17 +318,19 @@ public class NativeMainWindow {
         buttons.add(clearKey);
         form.add(buttons);
         aiMode.addActionListener(e -> updateAiFields());
-        JPanel root = new JPanel(new BorderLayout());
-        root.add(new JScrollPane(form), BorderLayout.CENTER);
-        return root;
+        return page("AI 话术", "管理个性化沟通方式", scroll(form));
     }
 
     private JPanel licensePanel() {
-        JPanel form = vertical();
-        form.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
-        form.add(licenseState);
-        form.add(Box.createVerticalStrut(18));
-        form.add(titled("卡密", cardKey));
+        JPanel form = stack();
+        JPanel panel = card(new BorderLayout(0, 16));
+        panel.add(sectionHead("卡密管理", "查看授权状态，激活或解绑当前设备"), BorderLayout.NORTH);
+        JPanel content = stack();
+        licenseState.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 15));
+        licenseState.setForeground(INK);
+        content.add(licenseState);
+        content.add(field("输入卡密", cardKey));
+        panel.add(content, BorderLayout.CENTER);
         JPanel actions = new JPanel(new FlowLayout(FlowLayout.LEFT));
         JButton activate = new JButton("激活卡密");
         activate.addActionListener(e -> {
@@ -278,22 +350,25 @@ public class NativeMainWindow {
         });
         actions.add(activate);
         actions.add(unbind);
-        form.add(actions);
-        JPanel root = new JPanel(new BorderLayout());
-        root.add(form, BorderLayout.NORTH);
-        return root;
+        panel.add(actions, BorderLayout.SOUTH);
+        form.add(panel);
+        return page("卡密", "管理这台电脑的使用授权", scroll(form));
     }
 
     private JPanel plansPanel() {
-        JPanel root = new JPanel(new BorderLayout());
+        JPanel root = card(new BorderLayout(0, 18));
         planInfo.setEditable(false);
         planInfo.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 14));
-        planInfo.setBorder(BorderFactory.createEmptyBorder(18, 18, 18, 18));
-        root.add(new JScrollPane(planInfo), BorderLayout.CENTER);
+        planInfo.setBackground(WHITE);
+        root.add(sectionHead("可用套餐", "价格和额度以服务端实时信息为准"), BorderLayout.NORTH);
+        root.add(scroll(planInfo), BorderLayout.CENTER);
         JButton refresh = new JButton("刷新套餐");
         refresh.addActionListener(e -> loadPlans());
-        root.add(refresh, BorderLayout.SOUTH);
-        return root;
+        JPanel row = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        row.setOpaque(false);
+        row.add(refresh);
+        root.add(row, BorderLayout.SOUTH);
+        return page("会员套餐", "查看可用方案与每日额度", root);
     }
 
     private void loadPlatform() {
@@ -320,11 +395,11 @@ public class NativeMainWindow {
             JComboBox<Choice> box = new JComboBox<>();
             fillChoices(box, options.path(key), config.path(key).asText(""), false);
             filterBoxes.put(key, box);
-            filters.add(titled(FILTER_NAMES.getOrDefault(key, key), box));
+            filters.add(field(FILTER_NAMES.getOrDefault(key, key), box));
         }
         if (selected.salaryText()) {
             salaryText.setText(config.path("salary").asText(""));
-            filters.add(titled("薪资区间（元，例如 12000,20000）", salaryText));
+            filters.add(field("薪资区间 · 元，如 12000,20000", salaryText));
         }
         filters.revalidate();
         filters.repaint();
@@ -392,6 +467,10 @@ public class NativeMainWindow {
                     + status.path("delivered").asInt() + " · 预演 " + status.path("previewed").asInt()
                     + " · 已过滤 " + status.path("filtered").asInt() + " · 失败 "
                     + status.path("failed").asInt() + " · 跳过 " + status.path("skipped").asInt());
+            metricValues[0].setText(String.valueOf(status.path("scanned").asInt()));
+            metricValues[1].setText(String.valueOf(status.path("delivered").asInt()));
+            metricValues[2].setText(String.valueOf(status.path("previewed").asInt()));
+            metricValues[3].setText(String.valueOf(status.path("filtered").asInt()));
             boolean running = "RUNNING".equals(state) || "STOPPING".equals(state);
             start.setEnabled(!running);
             stop.setEnabled(running);
@@ -593,19 +672,183 @@ public class NativeMainWindow {
         return new JSpinner(new SpinnerNumberModel(value, min, max, 1));
     }
 
-    private static JPanel vertical() {
-        JPanel panel = new JPanel();
-        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+    private JPanel sidebar(JPanel pages) {
+        JPanel side = new JPanel(new BorderLayout());
+        side.setBackground(NAV);
+        side.setPreferredSize(new Dimension(212, 0));
+        side.setBorder(new EmptyBorder(28, 17, 22, 17));
+        JPanel top = stack();
+        top.setBackground(NAV);
+        JLabel mark = label("◈  JobPilot", 22, WHITE, Font.BOLD);
+        mark.setBorder(new EmptyBorder(0, 10, 3, 0));
+        top.add(mark);
+        JLabel tagline = label("求职投递助手", 12, new Color(149, 164, 191), Font.PLAIN);
+        tagline.setBorder(new EmptyBorder(0, 11, 30, 0));
+        top.add(tagline);
+        JLabel menu = label("工作区", 11, new Color(125, 143, 174), Font.BOLD);
+        menu.setBorder(new EmptyBorder(0, 11, 10, 0));
+        top.add(menu);
+        String[][] items = {{"▦  投递工作台", "delivery"}, {"✦  AI 话术", "ai"},
+                {"▣  卡密管理", "license"}, {"◇  会员套餐", "plans"}};
+        List<JButton> buttons = new ArrayList<>();
+        for (String[] item : items) {
+            JButton button = new NavButton(item[0]);
+            button.setHorizontalAlignment(SwingConstants.LEFT);
+            button.setFocusPainted(false);
+            button.setBorder(new EmptyBorder(12, 15, 12, 10));
+            button.setBackground(NAV);
+            button.setForeground(new Color(186, 197, 216));
+            button.setMaximumSize(new Dimension(Integer.MAX_VALUE, 44));
+            button.setAlignmentX(Component.LEFT_ALIGNMENT);
+            button.putClientProperty("JButton.buttonType", "roundRect");
+            button.addActionListener(e -> {
+                ((CardLayout) pages.getLayout()).show(pages, item[1]);
+                buttons.forEach(other -> {
+                    boolean selected = other == button;
+                    other.setBackground(selected ? ACCENT : NAV);
+                    other.setForeground(selected ? WHITE : new Color(186, 197, 216));
+                });
+                if ("ai".equals(item[1])) loadAi();
+                if ("license".equals(item[1])) loadLicense();
+                if ("plans".equals(item[1])) loadPlans();
+            });
+            buttons.add(button);
+            top.add(button);
+            top.add(Box.createVerticalStrut(4));
+        }
+        buttons.get(0).setBackground(ACCENT);
+        buttons.get(0).setForeground(WHITE);
+        side.add(top, BorderLayout.NORTH);
+        JPanel bottom = stack();
+        bottom.setBackground(NAV);
+        JLabel local = label("●  本机运行", 12, new Color(145, 224, 186), Font.BOLD);
+        local.setBorder(new EmptyBorder(0, 10, 10, 0));
+        bottom.add(local);
+        JButton quit = new JButton("退出 JobPilot");
+        quit.setHorizontalAlignment(SwingConstants.LEFT);
+        quit.setForeground(new Color(186, 197, 216));
+        quit.setBackground(NAV);
+        quit.setContentAreaFilled(false);
+        quit.setBorderPainted(false);
+        quit.setBorder(new EmptyBorder(10, 12, 10, 10));
+        quit.addActionListener(e -> quit());
+        bottom.add(quit);
+        side.add(bottom, BorderLayout.SOUTH);
+        return side;
+    }
+
+    private static JPanel page(String title, String subtitle, Component body) {
+        JPanel page = new JPanel(new BorderLayout(0, 22));
+        page.setBackground(CANVAS);
+        page.setBorder(new EmptyBorder(30, 32, 30, 32));
+        page.add(pageTitle(title, subtitle), BorderLayout.NORTH);
+        page.add(body, BorderLayout.CENTER);
+        return page;
+    }
+
+    private static JPanel pageTitle(String title, String subtitle) {
+        JPanel panel = new JPanel(new BorderLayout(0, 5));
+        panel.setOpaque(false);
+        panel.add(label(title, 25, INK, Font.BOLD), BorderLayout.NORTH);
+        panel.add(label(subtitle, 13, MUTED, Font.PLAIN), BorderLayout.SOUTH);
         return panel;
     }
 
-    private static JPanel titled(String label, Component component) {
-        JPanel panel = new JPanel(new BorderLayout(0, 5));
-        panel.setBorder(BorderFactory.createEmptyBorder(5, 3, 5, 3));
-        panel.add(new JLabel(label), BorderLayout.NORTH);
+    private static JPanel sectionHead(String title, String subtitle) {
+        JPanel panel = new JPanel(new BorderLayout(0, 4));
+        panel.setOpaque(false);
+        panel.add(label(title, 16, INK, Font.BOLD), BorderLayout.NORTH);
+        panel.add(label(subtitle, 12, MUTED, Font.PLAIN), BorderLayout.SOUTH);
+        return panel;
+    }
+
+    private static JLabel label(String text, int size, Color color, int weight) {
+        JLabel result = new JLabel(text);
+        result.setFont(new Font(Font.SANS_SERIF, weight, size));
+        result.setForeground(color);
+        return result;
+    }
+
+    private static JPanel card(LayoutManager layout) {
+        JPanel panel = new RoundedCard(layout);
+        panel.setBorder(new EmptyBorder(20, 22, 20, 22));
+        panel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        return panel;
+    }
+
+    private static final class RoundedCard extends JPanel {
+        private RoundedCard(LayoutManager layout) {
+            super(layout);
+            setOpaque(false);
+        }
+        @Override protected void paintComponent(Graphics graphics) {
+            Graphics2D g = (Graphics2D) graphics.create();
+            g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            g.setColor(WHITE);
+            g.fillRoundRect(0, 0, getWidth(), getHeight(), 18, 18);
+            g.dispose();
+            super.paintComponent(graphics);
+        }
+    }
+
+    private static final class NavButton extends JButton {
+        private NavButton(String title) {
+            super(title);
+            setOpaque(false);
+            setContentAreaFilled(false);
+            setBorderPainted(false);
+        }
+        @Override protected void paintComponent(Graphics graphics) {
+            Graphics2D g = (Graphics2D) graphics.create();
+            g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            g.setColor(getBackground());
+            g.fillRoundRect(0, 0, getWidth(), getHeight(), 10, 10);
+            g.dispose();
+            super.paintComponent(graphics);
+        }
+    }
+
+    private static JPanel stack() {
+        JPanel panel = new JPanel();
+        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+        panel.setBackground(CANVAS);
+        return panel;
+    }
+
+    private static JPanel grid2() {
+        JPanel panel = new JPanel(new GridLayout(0, 2, 14, 8));
+        panel.setOpaque(false);
+        return panel;
+    }
+
+    private static JPanel field(String title, Component component) {
+        JPanel panel = new JPanel(new BorderLayout(0, 7));
+        panel.setOpaque(false);
+        panel.setBorder(new EmptyBorder(5, 0, 8, 0));
+        panel.add(label(title, 12, MUTED, Font.BOLD), BorderLayout.NORTH);
         panel.add(component, BorderLayout.CENTER);
         panel.setAlignmentX(Component.LEFT_ALIGNMENT);
         return panel;
+    }
+
+    private static JScrollPane scroll(Component content) {
+        JScrollPane pane = new JScrollPane(content);
+        pane.setBorder(null);
+        pane.getVerticalScrollBar().setUnitIncrement(18);
+        return pane;
+    }
+
+    private static void primary(JButton button) {
+        button.setBackground(ACCENT);
+        button.setForeground(WHITE);
+        button.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 13));
+        button.setPreferredSize(new Dimension(Math.max(104, button.getPreferredSize().width + 20), 38));
+        button.putClientProperty("JButton.buttonType", "roundRect");
+    }
+
+    private static void secondary(JButton button) {
+        button.setPreferredSize(new Dimension(Math.max(80, button.getPreferredSize().width + 18), 38));
+        button.putClientProperty("JButton.buttonType", "roundRect");
     }
 
     private static String path(Platform platform, String resource) {
@@ -623,9 +866,13 @@ public class NativeMainWindow {
         box.removeAllItems();
         box.addItem(new Choice("", cityNames ? "全国" : "不限"));
         if (options.isArray()) {
-            options.forEach(option -> box.addItem(new Choice(
-                    cityNames ? option.path("name").asText("") : option.path("code").asText(""),
-                    option.path("name").asText(""))));
+            options.forEach(option -> {
+                String value = cityNames ? option.path("name").asText("")
+                        : option.path("code").asText("");
+                if (!value.isEmpty()) {
+                    box.addItem(new Choice(value, option.path("name").asText("")));
+                }
+            });
         }
         if (!selected.isEmpty()) {
             boolean found = false;

@@ -29,6 +29,7 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-jdbc")
     implementation("com.baomidou:mybatis-plus-spring-boot3-starter:3.5.9")
     implementation("org.xerial:sqlite-jdbc:3.45.1.0")
+    implementation("com.formdev:flatlaf:3.7.2")
 
     // 浏览器自动化：playwright-java 只是壳，真正干活的是 Node driver 进程，
     // 由 installPatchrightDriver 任务装配（patchright = 打了反检测补丁的 playwright）。

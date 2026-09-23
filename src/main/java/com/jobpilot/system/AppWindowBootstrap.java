@@ -8,6 +8,7 @@ import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.boot.web.context.WebServerApplicationContext;
 
 import javax.swing.SwingUtilities;
+import com.formdev.flatlaf.FlatLightLaf;
 
 /** 启动后显示原生 Swing 主窗口。 */
 @Slf4j
@@ -29,6 +30,7 @@ public class AppWindowBootstrap implements ApplicationListener<ApplicationReadyE
                 ? web.getWebServer().getPort() : 9527;
         int windowPort = port;
         SwingUtilities.invokeLater(() -> {
+            FlatLightLaf.setup();
             NativeMainWindow window = new NativeMainWindow(windowPort, () -> quit(context));
             DesktopSupport.installReopenHandler(window::show);
             window.show();
