@@ -80,13 +80,33 @@ public class PortFallbackListener implements ApplicationListener<ApplicationEnvi
         //    结果是谁都连不上。而启动后打开的正是本机页面，这种占用一样得让位
         //    （实测：Python 占着 0.0.0.0:9527 时通配绑定照样成功，app 起来后
         //    9527 和 9528 都连不上）
-        return canBind(port) && !isListening(port);
+        // 三个都要过：通配能绑（Tomcat 起得来）、回环能绑（没人占 127.0.0.1）、
+        // 回环连不上（没人正在 listen）。少任何一个都会把已占用的端口判成空闲
+        return canBind(port) && canBindLoopback(port) && !isListening(port);
     }
 
     private static boolean canBind(int port) {
         try (ServerSocket socket = new ServerSocket()) {
             // 不设 SO_REUSEADDR：要探测的就是"现在有没有人正在监听"
             socket.bind(new InetSocketAddress(port));
+            return true;
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
+    /**
+     * 回环地址上能不能绑。
+     *
+     * <p>光绑通配地址不够：Windows 上通配绑定落在 {@code ::}（纯 IPv6），
+     * 和只绑 127.0.0.1 的进程井水不犯河水，两边都说端口空闲，结果 Tomcat
+     * 起来后 127.0.0.1 上的请求全被那个进程接走（CI 的 windows-latest 上
+     * 实测：三个端口用例 + 起应用的用例一起挂）。补一次显式回环绑定，
+     * 谁占了回环立刻就探到。
+     */
+    private static boolean canBindLoopback(int port) {
+        try (ServerSocket socket = new ServerSocket()) {
+            socket.bind(new InetSocketAddress(LOOPBACK_HOST, port));
             return true;
         } catch (IOException e) {
             return false;
