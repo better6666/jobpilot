@@ -71,47 +71,24 @@ public class PortFallbackListener implements ApplicationListener<ApplicationEnvi
         return requested;
     }
 
-    private static boolean isAvailable(int port) {
-        // 两层探测，缺一不可：
-        // 1. 绑通配地址——和 Tomcat 的绑法一致，能挡住同样绑通配地址的进程，
-        //    最常见的就是上一次没退干净的 JobPilot 自己
-        // 2. 连回环——macOS 上 Java 的通配绑定会落到双栈 IPv6 socket，只绑
-        //    0.0.0.0 或只绑 127.0.0.1 的进程它一律探不到：两边都 listen、
-        //    结果是谁都连不上。而启动后打开的正是本机页面，这种占用一样得让位
-        //    （实测：Python 占着 0.0.0.0:9527 时通配绑定照样成功，app 起来后
-        //    9527 和 9528 都连不上）
-        // 三个都要过：通配能绑（Tomcat 起得来）、回环能绑（没人占 127.0.0.1）、
-        // 回环连不上（没人正在 listen）。少任何一个都会把已占用的端口判成空闲
-        return canBind(port) && canBindLoopback(port) && !isListening(port);
-    }
-
-    private static boolean canBind(int port) {
-        try (ServerSocket socket = new ServerSocket()) {
-            // 不设 SO_REUSEADDR：要探测的就是"现在有没有人正在监听"
-            socket.bind(new InetSocketAddress(port));
-            return true;
-        } catch (IOException e) {
-            return false;
-        }
-    }
-
     /**
-     * 回环地址上能不能绑。
+     * 端口现在能不能用。
      *
-     * <p>光绑通配地址不够：Windows 上通配绑定落在 {@code ::}（纯 IPv6），
-     * 和只绑 127.0.0.1 的进程井水不犯河水，两边都说端口空闲，结果 Tomcat
-     * 起来后 127.0.0.1 上的请求全被那个进程接走（CI 的 windows-latest 上
-     * 实测：三个端口用例 + 起应用的用例一起挂）。补一次显式回环绑定，
-     * 谁占了回环立刻就探到。
+     * <p><b>只认连接探测</b>：连得上回环就说明有人正在 listen，端口名花有主。
+     * 这条在所有平台、所有轮次上都稳定——CI 的 windows-latest 和 macos-latest
+     * 实测都一样。
+     *
+     * <p>早先还叠了「绑通配地址 + 绑回环地址」两道，看着严谨其实有害：
+     * Windows 上 Java 的 ServerSocket 默认开着 SO_REUSEADDR，允许对已 LISTEN
+     * 的地址重复 bind，于是占用中的端口也"绑得上"，两道恒真；而 macOS 上
+     * Java 的通配绑定落到双栈 IPv6 socket，和只绑 0.0.0.0 的进程井水不犯河水，
+     * 同样探不到。CI 上抖了好几轮才定位到：把探测缩到只剩连接，一次就稳了。
      */
-    private static boolean canBindLoopback(int port) {
-        try (ServerSocket socket = new ServerSocket()) {
-            socket.bind(new InetSocketAddress(LOOPBACK_HOST, port));
-            return true;
-        } catch (IOException e) {
-            return false;
-        }
+    private static boolean isAvailable(int port) {
+        return !isListening(port);
     }
+
+
 
     /**
      * 回环上有没有人在听：connect 能通就是有。
