@@ -63,8 +63,8 @@ class JobPilotApplicationStartTest {
         try (ServerSocket holder = new ServerSocket(occupied)) {
             context = JobPilotApplication.start(new String[]{
                     "--server.port=" + occupied,
-                    // 别在跑测试的机器上弹浏览器
-                    "--jobpilot.open-page=false"
+                    // 别在跑测试的机器上弹桌面窗口
+                    "--jobpilot.console=false"
             });
         }
 
@@ -80,7 +80,7 @@ class JobPilotApplicationStartTest {
         int requested = freePort();
         context = JobPilotApplication.start(new String[]{
                 "--server.port=" + requested,
-                "--jobpilot.open-page=false"
+                "--jobpilot.console=false"
         });
 
         assertThat(context.isRunning()).isTrue();

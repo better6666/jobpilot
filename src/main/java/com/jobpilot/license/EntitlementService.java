@@ -85,7 +85,7 @@ public class EntitlementService {
         if (!properties.isEnabled()) {
             Entitlement e = new Entitlement();
             // 自用模式：全功能、无配额限制，方便自己调试
-            e.getFeatures().put("__all__", true);
+            e.setFeatures(Map.of("__all__", true));
             cached = e;
             return e;
         }

@@ -61,7 +61,7 @@ jobs:
           # api-base 留空就连不上服务端，用户看到的永远是"未激活"。
           # 系统属性优先级低于命令行参数，本地联调仍可用
           # --license.api-base=http://127.0.0.1:8787 覆盖
-          jpackage --type app-image --name JobPilot --app-version 1.0.1 \
+          jpackage --type app-image --name JobPilot --app-version 1.0.2 \
             --input build/stage --main-jar jobpilot-0.1.0.jar \
             --runtime-image build/runtime --dest build/dist \
             --java-options "-Dlicense.api-base=https://jobpilot.better999.dpdns.org"
@@ -82,9 +82,8 @@ jobs:
             NODE="$APPDATA/JobPilot/driver/node.exe"
           fi
           rm -rf "$(dirname "$NODE")"
-          # open-page=false：CI 里不开浏览器窗口（跑在无头 runner 上，开了也没人看，
-          # 白等一轮子进程）。启动链路另由装机后的真机验证覆盖
-          "$APP" --server.port=18080 --license.enabled=false --jobpilot.open-page=false &
+          # CI 里禁用桌面窗口；本机 API 和打包资源仍按完整启动链路冒烟。
+          "$APP" --server.port=18080 --license.enabled=false --jobpilot.console=false &
           APP_PID=$!
           for i in $(seq 1 60); do
             curl -sf http://localhost:18080/api/health && break
@@ -106,7 +105,7 @@ jobs:
       - name: macOS 转 dmg
         if: runner.os == 'macOS'
         run: |
-          jpackage --type dmg --name JobPilot --app-version 1.0.1 \
+          jpackage --type dmg --name JobPilot --app-version 1.0.2 \
             --app-image build/dist/JobPilot.app --dest build/dist
           rm -rf build/dist/JobPilot.app
 

@@ -121,6 +121,13 @@ class EntitlementServiceTest {
     }
 
     @Test
+    void 自用模式刷新权益不会修改不可变默认映射() {
+        properties.setEnabled(false);
+        Entitlement refreshed = real().refresh();
+        assertThat(refreshed.getFeatures()).containsEntry("__all__", true);
+    }
+
+    @Test
     void 配额为零视为不限制() {
         Entitlement e = trial();
         e.getQuotas().put("max_daily_apply", 0);

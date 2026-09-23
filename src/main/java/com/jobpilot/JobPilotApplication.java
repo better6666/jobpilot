@@ -2,7 +2,6 @@ package com.jobpilot;
 
 import com.jobpilot.browser.PlaywrightDriverSupport;
 import com.jobpilot.system.AppWindowBootstrap;
-import com.jobpilot.system.LocalPageOpener;
 import com.jobpilot.system.PortFallbackListener;
 import com.jobpilot.system.SystemPaths;
 import org.springframework.boot.SpringApplication;
@@ -53,20 +52,15 @@ public class JobPilotApplication {
         com.jobpilot.browser.PlaywrightDriverSupport.ensureDriverDir();
 
         SpringApplication app = new SpringApplication(JobPilotApplication.class);
-        // 端口被占就顺延、启动后打开本机页面、给 JVM 一个控制台窗口：
-        // 三件都是给"双击启动"的最终用户兜底。控制台窗口尤其必要——
-        // 界面在 Chrome 的 --app= 窗口里，JVM 自己没有窗口，macOS 上
-        // 双击一个已在运行的 .app 只会"激活"它，没有窗口可激活时
-        // Dock 图标就一直跳、什么都不出现，用户以为打不开。
+        // 端口被占时顺延，并在服务就绪后显示原生 Swing 主窗口。
         // 必须调实例方法 run(args)：run(Class, String...) 是静态方法，会另起一个
         // SpringApplication，这里 addListeners 注册的监听器会被整个丢掉（踩过）。
         // Spring Boot 的 SpringApplication.headless 出厂是 true，configureHeadlessProperty()
-        // 会把 java.awt.headless 显式设成 "true"——控制台窗口就永远出不来
+        // 会把 java.awt.headless 显式设成 "true"——桌面窗口就永远出不来
         // （GraphicsEnvironment 构造时缓存这个值，之后再改属性也没用）。
         // 必须在 run() 之前调，它只在属性未设置时才沿用传入值。
         app.setHeadless(false);
         app.addListeners(new PortFallbackListener());
-        app.addListeners(new LocalPageOpener());
         app.addListeners(new AppWindowBootstrap());
         return app.run(args);
     }
