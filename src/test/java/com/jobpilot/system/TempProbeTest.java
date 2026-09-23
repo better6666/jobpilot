@@ -13,6 +13,15 @@ class TempProbeTest {
       int occupied = ignored.getLocalPort();
       System.out.println("PROBE occupied=" + occupied);
       System.out.println("  isBound=" + ignored.isBound());
+      // 关键：occupied 本身的三道探测
+      boolean cb, cbl, ls;
+      try (ServerSocket s2 = new ServerSocket()) { s2.bind(new InetSocketAddress(occupied)); cb = true; }
+      catch (IOException e) { cb = false; }
+      try (ServerSocket s2 = new ServerSocket()) { s2.bind(new InetSocketAddress("127.0.0.1", occupied)); cbl = true; }
+      catch (IOException e) { cbl = false; }
+      try (Socket s2 = new Socket()) { s2.connect(new InetSocketAddress("127.0.0.1", occupied), 500); ls = true; }
+      catch (IOException e) { ls = false; }
+      System.out.println("  occupied 三道: canBind=" + cb + " canBindLoop=" + cbl + " isListening=" + ls);
       System.out.println("  resolvePort=" + PortFallbackListener.resolvePort(occupied));
       // 逐个探测 requested+1 .. +5
       for (int i = 1; i <= 5; i++) {
