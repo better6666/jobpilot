@@ -160,6 +160,23 @@ public class BrowserManager {
         }
     }
 
+    /**
+     * 删掉上次崩溃留下的浏览器锁文件。
+     *
+     * <p>Chromium 崩溃后会在 profile 目录里留 lockfile / SingletonLock，
+     * 下次启动读到坏锁就会「起来就死」——newPage 直接抛 Failed to open a
+     * new tab。Chrome 正在跑时锁会被立刻重建，所以启动前清理是安全的。
+     */
+    private void cleanStaleLocks(Path userDataDir) {
+        for (String name : new String[]{
+                "SingletonLock", "SingletonSocket", "SingletonCookie", "lockfile"}) {
+            try {
+                java.nio.file.Files.deleteIfExists(userDataDir.resolve(name));
+            } catch (Exception ignore) {
+            }
+        }
+    }
+
     private BrowserContext launchContext() {
         Path userDataDir = userDataDir(com.jobpilot.system.SystemPaths.dataDir());
         BrowserType.LaunchPersistentContextOptions options =
@@ -175,6 +192,11 @@ public class BrowserManager {
                                 "--no-default-browser-check",
                                 "--disable-session-crashed-bubble"))
                         .setIgnoreDefaultArgs(List.of("--enable-automation"));
+        // 上一次崩溃留下的锁文件会让 Chromium 起来就死（表现为 newPage 抛
+        // "Failed to open a new tab"）。Chrome 正在跑时锁会被重建，所以这里
+        // 清理是安全的
+        cleanStaleLocks(userDataDir);
+
         boolean wantChannel = properties.getChannel() != null && !properties.getChannel().isBlank();
         if (wantChannel) {
             options.setChannel(properties.getChannel());
@@ -201,7 +223,19 @@ public class BrowserManager {
                             .setTimezoneId("Asia/Shanghai")
                             .setArgs(options.args)
                             .setIgnoreDefaultArgs(List.of("--enable-automation"));
-            ctx = playwright.chromium().launchPersistentContext(userDataDir, fallback);
+            try {
+                ctx = playwright.chromium().launchPersistentContext(userDataDir, fallback);
+            } catch (Exception e2) {
+                // 数据目录可能被上一次崩溃写坏（版本不匹配的 profile、残留锁），
+                // 改名留档换新目录再试最后一次。用户重新登录一次就能恢复
+                Path backup = userDataDir.resolveSibling(
+                        userDataDir.getFileName() + "-broken-" + System.currentTimeMillis());
+                try {
+                    java.nio.file.Files.move(userDataDir, backup);
+                    log.warn("浏览器数据目录疑似损坏，已挪到 {}，用全新目录重试", backup);
+                } catch (Exception ignore) { }
+                ctx = playwright.chromium().launchPersistentContext(userDataDir, fallback);
+            }
         }
         // 保留持久化上下文启动时的初始标签页。关闭最后一个标签页可能让有界面的
         // Chrome 直接退出，随后首次 context.newPage() 会报 Target.createTarget 失败。

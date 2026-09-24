@@ -390,6 +390,23 @@ async function saveConfig() {
 async function refreshStatus() {
   try {
     const s = (await api(`/api/${platform}/status`)).data;
+    // 预演模式开着时挂一条醒目横幅：用户最常见的误解就是「点了开始却没投」，
+    // 其实是出厂默认的预演模式还开着，得主动取消勾选才会真投
+    const dry = $('dryRun').checked;
+    let banner = document.getElementById('dryRunBanner');
+    if (dry && !banner) {
+      banner = document.createElement('div');
+      banner.id = 'dryRunBanner';
+      banner.style.cssText = 'background:#fff7e0;border:1px solid #f0d590;border-radius:10px;'
+        + 'padding:12px 16px;margin-bottom:14px;font-size:13.5px;color:#8a6d1a';
+      banner.innerHTML = '<b>⚠ 预演模式开启中</b>——现在点「开始投递」不会真发消息，'
+        + '只在本地记录。确认筛出来的岗位符合预期后，'
+        + '取消下方「预演模式」的勾选再点开始，才会真实投递。';
+      const wrap = document.querySelector('.wrap');
+      wrap.insertBefore(banner, wrap.querySelector('.top').nextSibling);
+    } else if (!dry && banner) {
+      banner.remove();
+    }
     if (!s) return;
     const [cls, text] = STATE_MAP[s.state] || ['ok', s.state];
     $('runState').className = 'state ' + cls;
