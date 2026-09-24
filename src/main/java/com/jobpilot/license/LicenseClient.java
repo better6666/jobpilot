@@ -77,27 +77,44 @@ public class LicenseClient {
             log.warn("license.api-base 不是合法的 http(s) 地址: {}", base);
             return null;
         }
+        HttpRequest request;
         try {
-            HttpRequest request = HttpRequest.newBuilder(uri)
+            request = HttpRequest.newBuilder(uri)
                     .timeout(Duration.ofSeconds(10))
                     .GET()
                     .build();
-            HttpResponse<String> response = HTTP.send(request, HttpResponse.BodyHandlers.ofString());
-            String bodyText = response.body();
-            if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                log.warn("卡密服务端 GET {} 返回 {}", path, response.statusCode());
-                return null;
-            }
-            return (bodyText == null || bodyText.isBlank())
-                    ? objectMapper.createObjectNode()
-                    : objectMapper.readTree(bodyText);
-        } catch (IOException | InterruptedException | IllegalArgumentException e) {
-            if (e instanceof InterruptedException) {
-                Thread.currentThread().interrupt();
-            }
-            log.warn("卡密服务端 GET 失败 | {} | {}", path, e.toString());
+        } catch (IllegalArgumentException e) {
+            log.warn("license.api-base 不是合法地址: {}", base);
             return null;
         }
+        for (int attempt = 0; attempt < 2; attempt++) {
+            try {
+                HttpResponse<String> response = HTTP.send(request, HttpResponse.BodyHandlers.ofString());
+                int status = response.statusCode();
+                if (status >= 200 && status < 300) {
+                    String bodyText = response.body();
+                    return (bodyText == null || bodyText.isBlank())
+                            ? objectMapper.createObjectNode()
+                            : objectMapper.readTree(bodyText);
+                }
+                log.warn("卡密服务端 GET {} 返回 {}", path, status);
+                if (status != 404 && status < 500) return null;
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return null;
+            } catch (IOException | IllegalArgumentException e) {
+                log.warn("卡密服务端 GET 失败 | {} | {}", path, e.toString());
+            }
+            if (attempt == 0) {
+                try {
+                    Thread.sleep(250);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return null;
+                }
+            }
+        }
+        return null;
     }
 
     /**

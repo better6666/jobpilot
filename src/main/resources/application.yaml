@@ -45,10 +45,10 @@ mybatis-plus:
 
 # 卡密校验配置
 # enabled=false 时完全跳过校验（自用模式）
-# api-base 指向 license-server 部署后的地址，例如 https://jobpilot-license.xxx.workers.dev
+# 默认经下载站同域名代理卡密接口；命令行或环境配置仍可覆盖
 license:
   enabled: true
-  api-base: ""
+  api-base: https://getjobs.dpdns.org
   card-key: ""
   verify-interval-minutes: 10
   grace-hours: 72

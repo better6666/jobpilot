@@ -1,10 +1,14 @@
 package com.jobpilot.license;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -43,5 +47,26 @@ class LicenseClientTest {
     void 连不上的合法地址返回null不抛异常() {
         // 127.0.0.1:1 是保留未监听端口，必然连接失败
         assertNull(client.post("http://127.0.0.1:1", "/verify", Map.of("token", "t")));
+    }
+
+    @Test
+    void 套餐读取遇到暂时的404会重试() throws Exception {
+        AtomicInteger calls = new AtomicInteger();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/api/plans", exchange -> {
+            boolean ready = calls.incrementAndGet() > 1;
+            byte[] body = (ready ? "{\"success\":true,\"data\":{\"plans\":[]}}" : "Not Found")
+                    .getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(ready ? 200 : 404, body.length);
+            try (var output = exchange.getResponseBody()) { output.write(body); }
+        });
+        server.start();
+        try {
+            String base = "http://127.0.0.1:" + server.getAddress().getPort();
+            assertTrue(client.get(base, "/api/plans").path("success").asBoolean());
+            assertEquals(2, calls.get());
+        } finally {
+            server.stop(0);
+        }
     }
 }
