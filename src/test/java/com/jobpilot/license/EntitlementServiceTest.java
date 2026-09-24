@@ -10,6 +10,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.dao.EmptyResultDataAccessException;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -184,6 +185,14 @@ class EntitlementServiceTest {
         // usedToday 返回 null（库里没这行）要当 0 处理，不能 NPE
         when(jdbcTemplate.queryForObject(anyString(), eq(Integer.class), any(), any()))
                 .thenReturn(null);
+        assertThat(service.remainingToday("apply", "max_daily_apply")).isEqualTo(10);
+    }
+
+    @Test
+    void 当天首次投递没有计数行时额度仍可用() {
+        given(trial());
+        when(jdbcTemplate.queryForObject(anyString(), eq(Integer.class), any(), any()))
+                .thenThrow(new EmptyResultDataAccessException(1));
         assertThat(service.remainingToday("apply", "max_daily_apply")).isEqualTo(10);
     }
 }

@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jobpilot.system.SystemPaths;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
@@ -188,10 +189,15 @@ public class EntitlementService {
         if (jdbcTemplate == null) {
             return 0;
         }
-        Integer n = jdbcTemplate.queryForObject(
-                "SELECT count FROM usage_counter WHERE counter_key = ? AND day = ?",
-                Integer.class, counterKey, today());
-        return n == null ? 0 : n;
+        try {
+            Integer n = jdbcTemplate.queryForObject(
+                    "SELECT count FROM usage_counter WHERE counter_key = ? AND day = ?",
+                    Integer.class, counterKey, today());
+            return n == null ? 0 : n;
+        } catch (EmptyResultDataAccessException e) {
+            // 第一次使用当天没有计数行，这是正常的 0 次，不应中断投递。
+            return 0;
+        }
     }
 
     /** 今天还能用几次；配额为 0 或负数视为不限制，返回 Integer.MAX_VALUE */

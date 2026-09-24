@@ -205,8 +205,8 @@ public class LiepinDriver {
                 }
                 dismissBlockingModals(page);
                 if (!waitForCards(page, listener)) {
-                    listener.onProgress("【" + keyword + "】第 " + pageIndex + " 页没有岗位卡片，跳过");
-                    continue;
+                    listener.onProgress("【" + keyword + "】页面未显示岗位卡片，请检查猎聘页面是否要求登录或验证；本关键词停止采集");
+                    break;
                 }
                 int count = page.locator(CARD_SELECTOR).count();
                 // 快照：这一轮的卡片和实体必须来自同一次响应

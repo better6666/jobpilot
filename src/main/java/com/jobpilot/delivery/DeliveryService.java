@@ -248,8 +248,15 @@ public abstract class DeliveryService<C extends JobCard> {
                 collect(keyword, searchUrl, config.getMaxJobsPerKeyword(),
                         this::appendLog, () -> stopRequested,
                         (card, listPage) -> {
-                            processCard(card, keyword, config, listPage);
-                            pace(config);
+                            try {
+                                processCard(card, keyword, config, listPage);
+                            } catch (Exception e) {
+                                status.setFailed(status.getFailed() + 1);
+                                appendLog("处理岗位失败 | " + brief(card) + " | " + e.getMessage());
+                                log.warn("[{}] 处理岗位失败", platform(), e);
+                            } finally {
+                                pace(config);
+                            }
                         });
                 if (stopRequested) {
                     break;
@@ -257,9 +264,13 @@ public abstract class DeliveryService<C extends JobCard> {
             }
             if (stopRequested) {
                 finish("已手动停止。本次共投递 " + status.getDelivered() + " 个岗位");
+            } else if (status.getScanned() == 0) {
+                finish("未读取到可处理的岗位，本次没有投递。请检查关键词、平台登录态和招聘网站页面");
             } else {
-                finish("全部关键词处理完成。共投递 " + status.getDelivered()
-                        + " 个，过滤 " + status.getFiltered() + " 个，失败 " + status.getFailed() + " 个");
+                finish("全部关键词处理完成。共扫描 " + status.getScanned()
+                        + " 个，投递 " + status.getDelivered() + " 个，预演 "
+                        + status.getPreviewed() + " 个，过滤 " + status.getFiltered()
+                        + " 个，失败 " + status.getFailed() + " 个");
             }
         } catch (Exception e) {
             log.error("投递任务异常终止", e);
