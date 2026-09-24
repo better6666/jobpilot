@@ -13,6 +13,7 @@ import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 
 import java.util.Map;
+import java.util.function.BooleanSupplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -34,7 +35,7 @@ import static org.mockito.Mockito.when;
  *
  * 覆盖：正常上报、剩余为 0 转 EXPIRED、时长卡不白跑、不可达时计数不丢、
  * 未激活不上报，以及 exhausted() 在自用/fail-open 下不误伤。
- * 上报是异步的，所以一律用 timeout(...) 等 executor 跑完。
+ * 上报是异步的：Mockito 看到请求发出时，状态落库和发布可能尚未完成。
  */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
@@ -97,6 +98,14 @@ class LicenseServiceReportTest {
         verify(licenseClient, never()).post(eq(API_BASE), eq("/report"), anyMap());
     }
 
+    private void awaitState(BooleanSupplier condition) throws InterruptedException {
+        long deadline = System.nanoTime() + 2_000_000_000L;
+        while (!condition.getAsBoolean() && System.nanoTime() < deadline) {
+            Thread.sleep(10);
+        }
+        assertTrue(condition.getAsBoolean(), "等待异步上报完成超时");
+    }
+
     @Test
     void 投递成功一次就上报一次() throws Exception {
         givenActive();
@@ -114,6 +123,7 @@ class LicenseServiceReportTest {
                 .isNotEqualTo("dev-1")
                 .matches("[0-9a-f]{64}");
         // 上报结果要落到状态里，激活页的"剩余次数"才是真的
+        awaitState(() -> Long.valueOf(99L).equals(service.status().getQuotaRemaining()));
         assertEquals(99L, service.status().getQuotaRemaining());
     }
 
@@ -127,6 +137,7 @@ class LicenseServiceReportTest {
         service.reportUsage(1);
 
         verify(licenseClient, timeout(2000)).post(eq(API_BASE), eq("/report"), anyMap());
+        awaitState(() -> service.status().getState() == LicenseState.EXPIRED);
         assertEquals(LicenseState.EXPIRED, service.status().getState());
         assertFalse(service.status().isAllowed());
         assertTrue(service.exhausted());
