@@ -104,6 +104,8 @@ public class NativeMainWindow {
     private final JLabel licenseState = new JLabel("卡密状态：读取中…");
     private final JTextField cardKey = new JTextField();
     private final JPanel planCards = new JPanel(new GridLayout(0, 2, 16, 16));
+    private final JPanel planComparison = new JPanel(new BorderLayout());
+    private JScrollPane plansScroll;
 
     private static final Color CANVAS = new Color(246, 248, 251);
     private static final Color WHITE = Color.WHITE;
@@ -452,24 +454,29 @@ public class NativeMainWindow {
     }
 
     private JPanel plansPanel() {
-        JPanel root = new JPanel(new BorderLayout(0, 18));
+        JPanel root = new JPanel(new BorderLayout(0, 20));
         root.setBackground(CANVAS);
         JPanel head = new JPanel(new BorderLayout());
         head.setOpaque(false);
-        head.add(sectionHead("可用套餐", "价格和每日额度以服务端实时信息为准"), BorderLayout.WEST);
+        head.add(sectionHead("找到适合你的节奏", "所有价格、功能与额度均来自实时套餐配置"), BorderLayout.WEST);
         JButton refresh = new JButton("刷新套餐");
         refresh.addActionListener(e -> loadPlans());
         head.add(refresh, BorderLayout.EAST);
         root.add(head, BorderLayout.NORTH);
+        JPanel sections = new JPanel(new BorderLayout(0, 18));
+        sections.setBackground(CANVAS);
         planCards.setLayout(new GridLayout(1, 0, 16, 0));
         planCards.setBackground(CANVAS);
-        planCards.setPreferredSize(new Dimension(820, 300));
+        planCards.setPreferredSize(new Dimension(820, 380));
         planCards.add(emptyState("正在读取套餐", "请稍候。"));
-        JPanel wrap = new JPanel(new BorderLayout());
-        wrap.setOpaque(false);
-        wrap.add(planCards, BorderLayout.NORTH);
-        root.add(wrap, BorderLayout.CENTER);
-        return page("会员套餐", "选择适合当前求职节奏的方案", root);
+        sections.add(planCards, BorderLayout.NORTH);
+        planComparison.setOpaque(false);
+        planComparison.setPreferredSize(new Dimension(820, 460));
+        planComparison.add(emptyState("套餐对比", "正在读取功能和额度。"));
+        sections.add(planComparison, BorderLayout.CENTER);
+        plansScroll = scroll(sections);
+        root.add(plansScroll, BorderLayout.CENTER);
+        return page("会员套餐", "价格清晰，权益看得见", root);
     }
 
     private void loadPlatform() {
@@ -756,8 +763,11 @@ public class NativeMainWindow {
                 planCards.removeAll();
                 planCards.setLayout(new GridLayout(1, 1));
                 planCards.add(emptyState("暂时无法读取套餐", "请稍后点击刷新重试。"));
+                planComparison.removeAll();
                 planCards.revalidate();
                 planCards.repaint();
+                planComparison.revalidate();
+                planComparison.repaint();
             });
           }
         });
@@ -769,35 +779,133 @@ public class NativeMainWindow {
             if (!plans.isArray() || plans.isEmpty()) {
                 planCards.setLayout(new GridLayout(1, 1));
                 planCards.add(emptyState("暂无套餐", "请稍后刷新。"));
+                planComparison.removeAll();
             } else {
                 planCards.setLayout(new GridLayout(1, plans.size(), 16, 0));
                 plans.forEach(plan -> planCards.add(planCard(plan)));
+                showPlanComparison(plans);
             }
             planCards.revalidate();
             planCards.repaint();
+            planComparison.revalidate();
+            planComparison.repaint();
+            SwingUtilities.invokeLater(() -> plansScroll.getVerticalScrollBar().setValue(0));
     }
 
     private JPanel planCard(JsonNode plan) {
-        JPanel card = card(new BorderLayout(0, 18));
+        boolean recommended = plan.path("recommended").asBoolean(false);
+        JPanel card = new PlanCard(recommended);
+        card.setLayout(new BorderLayout(0, 16));
+        card.setBorder(new EmptyBorder(21, 22, 20, 22));
+        String key = plan.path("plan").asText("");
         String title = plan.path("name").asText("套餐");
-        String subtitle = plan.path("recommended").asBoolean(false) ? "推荐方案" : "按需选择";
-        card.add(sectionHead(title, subtitle), BorderLayout.NORTH);
-        JPanel details = new JPanel(new GridLayout(0, 1, 0, 12));
-        details.setOpaque(false);
+        JPanel top = new JPanel(new BorderLayout(0, 6));
+        top.setOpaque(false);
+        top.add(label(recommended ? "最受推荐" : "JOBPILOT PLAN", 10,
+                recommended ? ACCENT : MUTED, Font.BOLD), BorderLayout.NORTH);
+        top.add(label(title, 19, INK, Font.BOLD), BorderLayout.CENTER);
+        String summary = switch (key) {
+            case "trial" -> "先体验求职投递流程";
+            case "standard" -> "日常求职与 AI 沟通";
+            case "advanced" -> "多方向求职与智能策略";
+            default -> "按自己的节奏选择";
+        };
+        top.add(label(summary, 11, MUTED, Font.PLAIN), BorderLayout.SOUTH);
+        card.add(top, BorderLayout.NORTH);
+
+        JPanel middle = new JPanel();
+        middle.setLayout(new BoxLayout(middle, BoxLayout.Y_AXIS));
+        middle.setOpaque(false);
         JsonNode durations = plan.path("durations");
         if (durations.isArray() && !durations.isEmpty()) {
             JsonNode first = durations.get(0);
-            details.add(label("¥" + String.format("%.2f",
-                    first.path("price_cents").asDouble() / 100.0), 28, INK, Font.BOLD));
-            durations.forEach(duration -> details.add(label(
-                    duration.path("days").asInt() + " 天  ·  ¥"
-                            + String.format("%.2f", duration.path("price_cents").asDouble() / 100.0),
-                    13, MUTED, Font.PLAIN)));
+            JLabel price = label(money(first.path("price_cents").asInt()), 31, INK, Font.BOLD);
+            price.setAlignmentX(Component.LEFT_ALIGNMENT);
+            middle.add(price);
+            JLabel term = label("起 · " + first.path("days").asInt() + " 天", 11, MUTED, Font.PLAIN);
+            term.setAlignmentX(Component.LEFT_ALIGNMENT);
+            middle.add(term);
+            middle.add(Box.createVerticalStrut(15));
+            for (JsonNode duration : durations) {
+                JPanel row = new JPanel(new BorderLayout());
+                row.setOpaque(false);
+                row.setAlignmentX(Component.LEFT_ALIGNMENT);
+                row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 27));
+                row.add(label(duration.path("days").asInt() + " 天", 12, MUTED, Font.PLAIN), BorderLayout.WEST);
+                row.add(label(money(duration.path("price_cents").asInt()), 12, INK, Font.BOLD), BorderLayout.EAST);
+                middle.add(row);
+            }
         }
-        card.add(details, BorderLayout.CENTER);
-        card.add(label("每日投递上限  " + plan.path("quotas")
-                .path("max_daily_apply").asText("-"), 13, ACCENT, Font.BOLD), BorderLayout.SOUTH);
+        card.add(middle, BorderLayout.CENTER);
+        JsonNode quotas = plan.path("quotas");
+        JPanel bottom = new JPanel(new GridLayout(2, 1, 0, 4));
+        bottom.setOpaque(false);
+        bottom.add(label("每日投递  " + quota(quotas, "max_daily_apply", "次"),
+                12, recommended ? ACCENT : INK, Font.BOLD));
+        bottom.add(label("每日 AI 分析  " + quota(quotas, "max_daily_ai_analysis", "次"),
+                11, MUTED, Font.PLAIN));
+        card.add(bottom, BorderLayout.SOUTH);
         return card;
+    }
+
+    private void showPlanComparison(JsonNode plans) {
+        planComparison.removeAll();
+        JPanel card = card(new BorderLayout(0, 17));
+        card.add(sectionHead("一眼看清套餐差异", "额度按天计算；功能以当前服务端配置为准"), BorderLayout.NORTH);
+        JPanel matrix = new JPanel(new GridLayout(0, 4, 0, 0));
+        matrix.setOpaque(false);
+        matrix.add(matrixCell("功能与额度", true, false));
+        plans.forEach(plan -> matrix.add(matrixCell(plan.path("name").asText("套餐"), true, true)));
+        String[][] quotaRows = {
+                {"每日投递", "max_daily_apply", "次"},
+                {"每日 AI 分析", "max_daily_ai_analysis", "次"},
+                {"可用简历", "max_resume_count", "份"},
+                {"岗位画像", "max_job_profile_count", "个"}
+        };
+        for (String[] row : quotaRows) {
+            matrix.add(matrixCell(row[0], false, false));
+            plans.forEach(plan -> matrix.add(matrixCell(
+                    quota(plan.path("quotas"), row[1], row[2]), false, true)));
+        }
+        String[][] featureRows = {
+                {"高级筛选", "advanced_filter"},
+                {"AI 打招呼", "ai_greeting"},
+                {"AI 匹配理由", "ai_explanation"},
+                {"智能投递", "smart_apply"},
+                {"多简历管理", "multi_resume"},
+                {"自然语言规则", "natural_language_rule"}
+        };
+        for (String[] row : featureRows) {
+            matrix.add(matrixCell(row[0], false, false));
+            plans.forEach(plan -> {
+                JsonNode features = plan.path("features");
+                matrix.add(matrixCell(features.isObject()
+                        ? features.path(row[1]).asBoolean(false) ? "✓  支持" : "—"
+                        : "未公布", false, true));
+            });
+        }
+        card.add(matrix, BorderLayout.CENTER);
+        planComparison.add(card, BorderLayout.CENTER);
+    }
+
+    private static JLabel matrixCell(String value, boolean heading, boolean centered) {
+        JLabel cell = label(value, heading ? 12 : 11,
+                heading ? INK : value.startsWith("✓") ? ACCENT : MUTED,
+                heading || value.startsWith("✓") ? Font.BOLD : Font.PLAIN);
+        cell.setHorizontalAlignment(centered ? SwingConstants.CENTER : SwingConstants.LEFT);
+        cell.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(0, 0, 1, 0, LINE),
+                new EmptyBorder(9, centered ? 3 : 0, 9, 3)));
+        return cell;
+    }
+
+    private static String quota(JsonNode quotas, String key, String unit) {
+        JsonNode value = quotas.path(key);
+        return value.isNumber() ? value.asInt() + " " + unit : "未公布";
+    }
+
+    private static String money(int cents) {
+        return String.format(java.util.Locale.CHINA, "¥%.2f", cents / 100.0);
     }
 
     private JsonNode api(String method, String path, Object body) {
@@ -1019,6 +1127,25 @@ public class NativeMainWindow {
             g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
             g.setColor(WHITE);
             g.fillRoundRect(0, 0, getWidth(), getHeight(), 18, 18);
+            g.dispose();
+            super.paintComponent(graphics);
+        }
+    }
+
+    private static final class PlanCard extends JPanel {
+        private final boolean recommended;
+        private PlanCard(boolean recommended) {
+            this.recommended = recommended;
+            setOpaque(false);
+        }
+        @Override protected void paintComponent(Graphics graphics) {
+            Graphics2D g = (Graphics2D) graphics.create();
+            g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            g.setColor(WHITE);
+            g.fillRoundRect(1, 1, getWidth() - 2, getHeight() - 2, 18, 18);
+            g.setStroke(new BasicStroke(recommended ? 2f : 1f));
+            g.setColor(recommended ? ACCENT : LINE);
+            g.drawRoundRect(1, 1, getWidth() - 3, getHeight() - 3, 18, 18);
             g.dispose();
             super.paintComponent(graphics);
         }

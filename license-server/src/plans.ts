@@ -96,8 +96,11 @@ export const DEFAULT_DURATIONS: Record<Plan, Array<{ days: number; price_cents: 
   ],
 }
 
-export function parseJson<T>(raw: string | null | undefined, fallback: T): T {
+export function parseJson<T>(raw: unknown, fallback: T): T {
   if (!raw) return fallback
+  // settings 中的套餐对象已经过一次 JSON.parse；D1 plans 表则仍是字符串。
+  if (typeof raw === 'object') return raw as T
+  if (typeof raw !== 'string') return fallback
   try {
     const v = JSON.parse(raw)
     return v && typeof v === 'object' ? (v as T) : fallback
