@@ -63,7 +63,12 @@ public class LiepinDriver {
     private static final String LOGIN_URL = "https://www.liepin.com/login";
     /** 登录令牌。快照里 liepin_login_valid 的值可能是 "0"，不能作判据 */
     private static final String LOGIN_COOKIE = "lt_auth";
-    private static final String CARD_SELECTOR = "div[class*='job-card-pc-container']";
+    /** 猎聘 2026-09 改版后岗位卡片类名从 kebab-case 变成 camelCase，
+     *  前面拼了 CSS module 哈希（如 _40108OjE3M.jobCardPcContainer）。
+     *  用 class*='jobCardPcContainer' 部分匹配绕过哈希，
+     *  不能用 data-nick——那是岗位标题链接不是卡片容器，
+     *  选了它的话 card.locator("聊一聊按钮") 就找不到了 */
+    private static final String CARD_SELECTOR = "[class*='jobCardPcContainer']";
     private static final String PAGINATION_BOX = ".list-pagination-box";
     private static final String CHAT_HEADER = ".__im_basic__header-wrap";
     private static final String CHAT_CLOSE = "div.__im_basic__contacts-title svg";
@@ -423,6 +428,7 @@ public class LiepinDriver {
                 sendFollowUp(listPage, greeting);
             }
             closeChatWindow(listPage);
+            forceCleanImOverlay(listPage);
             listener.onProgress("已打招呼 | " + target);
             return DeliveryOutcome.delivered(greeting);
         } catch (Exception e) {
@@ -507,6 +513,30 @@ public class LiepinDriver {
             sleep(1000);
         } catch (Exception e) {
             log.debug("追问语发送失败（不影响投递判定）: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * 投递后暴力清理 IM overlay。
+     *
+     * <p>猎聘投递后会打开一个 IM 聊天弹窗。closeChatWindow 用 CSS 选择器关它，
+     * 但弹窗结构随版本变化，选择器一旦失配弹窗就留在页面上，把后面所有岗位的
+     * 沟通按钮全挡住——实测连续投 2 个成功后从第 3 个起全部失败就是这个原因。
+     * 用 JS 直接删 DOM 节点不依赖任何选择器，更可靠。
+     */
+    private void forceCleanImOverlay(Page page) {
+        try {
+            page.keyboard().press("Escape");
+            page.evaluate("() => {" +
+                "  document.querySelectorAll('[class*=\'__im_\']')." +
+                "    forEach(el => el.remove());" +
+                "  document.querySelectorAll('[class*=\'im-overlay\'], [class*=\'im-panel\'], " +
+                "    [class*=\'chat-window\'], [class*=\'deliver-greeting\'], " +
+                "    [class*=\'el-overlay\'], [class*=\'v-modal\'], [class*=\'van-overlay\'], " +
+                "    [class*=\'modal-mask\'], [class*=\'backdrop\']').forEach(el => el.remove());" +
+                "}");
+        } catch (Exception e) {
+            log.debug("暴力清理 IM overlay 失败: {}", e.getMessage());
         }
     }
 
