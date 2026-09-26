@@ -128,7 +128,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${{ github.ref_name }}" \
-            build/dist/*.dmg JobPilot-windows.zip \
-            --title "JobPilot ${{ github.ref_name }}" \
-            --generate-notes
+          # 每个 job 只产出一个平台的包，却想往同一个 release 上挂两个文件：
+          # 直接 gh release create 传全列表会在 mac 上找不到 win zip、win 上找不到
+          # dmg 而整步红掉（v1.0.9 实测）。所以 release 先建后传，各自只传自己那份。
+          TAG="${GITHUB_REF_NAME}"
+          FILES=""
+          ls build/dist/*.dmg >/dev/null 2>&1 && FILES="build/dist/*.dmg"
+          [ -f JobPilot-windows.zip ] && FILES="$FILES JobPilot-windows.zip"
+          # 两个 job 抢同一个 tag：谁先到谁建，后到的 create 失败就直接传
+          gh release create "$TAG" --title "JobPilot $TAG" --generate-notes || true
+          gh release upload "$TAG" $FILES --clobber
