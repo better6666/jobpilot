@@ -21,6 +21,10 @@ jobs:
           - os: macos-latest
           - os: windows-latest
     runs-on: ${{ matrix.os }}
+    # 默认 token 是只读的：建 Release 会 403（v1.0.9 和 v1.0.10 两次实测同一个错，
+    # 报 "Resource not accessible by integration"）。不加这行 Release 永远挂不上
+    permissions:
+      contents: write
     defaults:
       run:
         shell: bash
