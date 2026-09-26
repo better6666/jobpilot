@@ -126,6 +126,25 @@ class PlatformOptionsEndpointTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    void 学历和工作年限码表必须经options暴露() throws Exception {
+        // 管理页的下拉是按键名从 /options 取的：码表只写进 job51-options.json 而控制器
+        // 不吐这个键，下拉框就是空的，用户只能靠 PUT /config 设学历（1.0.10 实测踩过）
+        Map<String, Object> job51 = data("job51");
+        for (String type : List.of("degree", "experience")) {
+            List<Map<String, String>> list = (List<Map<String, String>>) job51.get(type);
+            assertNotNull(list, type + " 没出现在 /options/job51 里，管理页下拉会是空的");
+            assertFalse(list.isEmpty(), type + " 码表是空的");
+            for (Map<String, String> item : list) {
+                assertFalse(item.get("name").isBlank(), type + " 有条目名为空");
+                assertFalse(item.get("code").isBlank(), type + " 有条目码为空");
+            }
+            long distinct = list.stream().map(item -> item.get("code")).distinct().count();
+            assertEquals(list.size(), distinct, type + " 码表有重复");
+        }
+    }
+
+    @Test
     void 各平台城市码位数符合平台自己的约定() throws Exception {
         // Boss 9 位、51job 6 位、智联 3 位；猎聘是内部码，位数不固定所以跳过
         assertDigits("boss", 9);

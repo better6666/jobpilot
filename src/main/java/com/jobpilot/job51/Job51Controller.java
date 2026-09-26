@@ -59,12 +59,14 @@ public class Job51Controller {
         return ApiResponse.ok(job51Service.configForPage());
     }
 
-    /** 管理页下拉框数据：城市 + 薪资。51job 的筛选维度只有这两个，其余靠打分规则 */
+    /** 管理页下拉框数据：城市 + 薪资 + 学历 + 工作年限，键名要和 job51-options.json 一致 */
     @GetMapping("/options")
     public ApiResponse<Map<String, Object>> options() {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("cities", job51Options.cities());
         data.put("salary", job51Options.filters("salary"));
+        data.put("degree", job51Options.filters("degree"));
+        data.put("experience", job51Options.filters("experience"));
         return ApiResponse.ok(data);
     }
 
