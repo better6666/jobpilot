@@ -709,7 +709,7 @@ public class Job51Driver {
      * <ol>
      *   <li>页面上出现可见的"投递成功"文本</li>
      *   <li>投递按钮总数比点击前少——那一行的按钮被撤了</li>
-     *   <li>原下标的按钮不再是"投递"</li>
+     *   <li>原下标的按钮变成"已投递/已申请"，或不再是投递按钮</li>
      * </ol>
      * 必须轮询：提示条有出现延迟，按钮状态也要等接口回来才变，点完立刻看一眼全判失败。
      */
@@ -734,7 +734,9 @@ public class Job51Driver {
             }
             try {
                 String after = applyButtonTextAt(page, index);
-                if (after != null && !after.contains("投递")) {
+                // "已投递"里含"投递"，所以不能只判"不再是投递"：那样按钮明明已经
+                // 变成已投递还算没确认，同一岗位当天会被反复真投（实测投了 4 次）。
+                if (after != null && (isAlreadyApplied(after) || !after.contains("投递"))) {
                     log.debug("51job 投递按钮文本已变为：{}", after);
                     return true;
                 }
