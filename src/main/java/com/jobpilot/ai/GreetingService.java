@@ -198,6 +198,15 @@ public class GreetingService {
     }
 
     /**
+     * AI 这条路现在通不通：开着 + 填了人设 + 接口配全。
+     * 只管配置齐不齐，不代表接口一定应答（key 被禁用要到第一次调用才知道）。
+     */
+    public boolean aiUsable() {
+        AiConfig cfg = properties.get();
+        return cfg.isEnabled() && !isBlank(cfg.getPersona()) && isConfigured(cfg);
+    }
+
+    /**
      * 管理页和运行日志用的一句话状态。没启用返回 null。
      * 半配置状态（开着但没填人设/接口）要说出来，否则用户只会看到
      * "怎么话术没变化"而不知道去哪配。

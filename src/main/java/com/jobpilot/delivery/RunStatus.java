@@ -34,6 +34,10 @@ public class RunStatus {
     private int skipped;
     private String startedAt;
     private String finishedAt;
+    /** 本平台今日已投数（额度按平台各算一份，不跨平台共用） */
+    private int quotaUsed;
+    /** 每平台每日额度；<=0 表示不限（自用模式或后台配成不限） */
+    private int quotaLimit;
     private final List<String> logs = Collections.synchronizedList(new ArrayList<>());
 
     public static RunStatus idle() {

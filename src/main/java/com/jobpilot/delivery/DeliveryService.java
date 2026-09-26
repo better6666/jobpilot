@@ -9,6 +9,9 @@ import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 
 import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadLocalRandom;
@@ -50,6 +53,7 @@ public abstract class DeliveryService<C extends JobCard> {
 
     private volatile RunStatus status = RunStatus.idle();
     private volatile boolean stopRequested;
+    private volatile boolean stoppedForHour;
     /** 已经因为"卡密不能用"停过一次了，避免每张卡片都打一行日志 */
     private volatile boolean stoppedForLicense;
     /** 已经因为"当日投递额度用完"停过一次 */
@@ -150,13 +154,30 @@ public abstract class DeliveryService<C extends JobCard> {
         if (error != null) {
             return error;
         }
+        // 额度已经用完时别进浏览器：以前会照常打开、登录态检测、扫到第一个岗位
+        // 才静默停下，最后的日志是"已手动停止。本次共投递 0 个岗位"，
+        // 用户读到的是"登录了却不投"。
+        String quotaError = quotaPreCheck(config);
+        if (quotaError != null) {
+            return quotaError;
+        }
+        String greetingError = greetingPreCheck(config);
+        if (greetingError != null) {
+            return greetingError;
+        }
+        // 次数卡用完时启动也是白跑
+        if (licenseService.exhausted()) {
+            return "卡密已不能使用（次数已用完或已到期），请重新激活后再投递";
+        }
         // 四个平台共用一个浏览器上下文，同一时刻只允许一个在跑
         String holder = coordinator.acquire(platform());
         if (holder != null) {
             return "「" + holder + "」正在投递，请先等它结束";
         }
         stopRequested = false;
+        stoppedForHour = false;
         stoppedForLicense = false;
+        stoppedForQuota = false;
         status = RunStatus.running(keywords.size(), config.isDryRun(), displayName());
         appendLog("投递任务启动：" + String.join("、", keywords)
                 + (config.isDryRun() ? "（预演模式，不会真发消息）" : ""));
@@ -189,7 +210,13 @@ public abstract class DeliveryService<C extends JobCard> {
     }
 
     public RunStatus status() {
-        return status;
+        // 额度是"登录了却不投"最容易误判的一环，管理页每次轮询都带回本平台的真实余量
+        RunStatus current = status;
+        if (entitlementService != null) {
+            current.setQuotaLimit(entitlementService.current().quota("max_daily_apply"));
+            current.setQuotaUsed(entitlementService.usedToday(applyCounterKey()));
+        }
+        return current;
     }
 
     public List<Delivery> recentDeliveries(int limit) {
@@ -262,7 +289,12 @@ public abstract class DeliveryService<C extends JobCard> {
                     break;
                 }
             }
-            if (stopRequested) {
+            if (stoppedForQuota) {
+                // 额度闸停机时已经把原因写进日志和 message 了，别再覆盖成"已手动停止"
+                finishState();
+            } else if (stoppedForHour) {
+                finish(hourlyLimitMessage());
+            } else if (stopRequested) {
                 finish("已手动停止。本次共投递 " + status.getDelivered() + " 个岗位");
             } else if (status.getScanned() == 0) {
                 finish("未读取到可处理的岗位，本次没有投递。请检查关键词、平台登录态和招聘网站页面");
@@ -279,6 +311,55 @@ public abstract class DeliveryService<C extends JobCard> {
     }
 
     /**
+     * 当日投递额度的计数键：一个平台一个键。
+     *
+     * <p>原来五平台共用 {@code apply} 一个计数器，结果是 Boss 一家就能把进阶版的
+     * 300 吃满，猎聘/智联当天再怎么登录都是空跑——用户看到的就是"投不了简历"。
+     * 招聘平台的风控本来就是按平台各算一套，额度口径跟着按平台分才讲得通。
+     */
+    private String applyCounterKey() {
+        return "apply:" + platform();
+    }
+
+    /**
+     * 每平台每小时最多投这么多。
+     *
+     * <p>日额度抬到 300 之后，把账号送进风控的不是总量而是<em>密度</em>：两个岗位
+     * 之间只随机等十秒，一小时理论上能发两百多个。40 个约等于一分钟一个。
+     */
+    static final int HOURLY_LIMIT = 40;
+
+    /** 本小时的计数桶。键自带小时，整点一换就是全新的一行，不用清库也不用定时任务 */
+    private String hourCounterKey() {
+        return applyCounterKey() + ":" + LocalDateTime.now().format(HOUR_KEY_FORMAT);
+    }
+
+    private static final DateTimeFormatter HOUR_KEY_FORMAT =
+            DateTimeFormatter.ofPattern("yyyyMMddHH");
+    private static final DateTimeFormatter HOUR_READABLE =
+            DateTimeFormatter.ofPattern("HH:mm");
+
+    /**
+     * 本小时还有余量。
+     *
+     * <p>计数走本地 {@code usage_counter} 而不是卡密服务端，因为这道闸是保护用户
+     * 账号的，跟授权无关——自用模式（{@code license.enabled=false}，日额度不限）照样要限。
+     *
+     * <p>满了就收工而不是原地等下一小时：任务挂在那儿一小时，浏览器一直开着、
+     * 全局单跑锁也一直占着，别的平台这段时间一个都投不了。
+     */
+    private boolean hourlyWindowOpen() {
+        return entitlementService == null
+                || entitlementService.usedToday(hourCounterKey()) < HOURLY_LIMIT;
+    }
+
+    private String hourlyLimitMessage() {
+        return "「" + displayName() + "」本小时已投满 " + HOURLY_LIMIT + " 个，本次先收工。"
+                + LocalTime.now().plusHours(1).withMinute(0).format(HOUR_READABLE)
+                + "（下一个整点）之后重新点开始就继续——发得太密容易被平台风控。";
+    }
+
+    /**
      * 处理一个岗位：去重 → 过滤/打分 → 投递 → 落库。
      * 包成 protected 是为了能单测：mock 掉 mapper 和适配器，不碰浏览器。
      */
@@ -289,12 +370,19 @@ public abstract class DeliveryService<C extends JobCard> {
             stopRequested = true;
             if (!stoppedForQuota) {
                 stoppedForQuota = true;
-                int quota = entitlementService == null ? 0
-                        : entitlementService.current().quota("max_daily_apply");
-                appendLog("今日投递额度已用完（" + quota + " 个）。升级套餐可以提高每日额度，"
-                        + "明天自动恢复。");
+                appendLog(quotaExhaustedMessage());
                 // 状态里带上，前端会员页/卡密条能据此提示升级
                 publishQuotaNotice();
+            }
+            return;
+        }
+
+        // 每小时节流。预演不发消息，不用占这道闸
+        if (!config.isDryRun() && !hourlyWindowOpen()) {
+            stopRequested = true;
+            if (!stoppedForHour) {
+                stoppedForHour = true;
+                appendLog(hourlyLimitMessage());
             }
             return;
         }
@@ -338,7 +426,8 @@ public abstract class DeliveryService<C extends JobCard> {
                     record(card, keyword, "已投递", null, score, outcome.greeting(), existing);
                     status.setDelivered(status.getDelivered() + 1);
                     if (entitlementService != null) {
-                        entitlementService.recordUse("apply");
+                        entitlementService.recordUse(applyCounterKey());
+                        entitlementService.recordUse(hourCounterKey());
                     }
                     // 次数卡扣减。异步发、失败不打断投递，见 LicenseService.reportUsage
                     licenseService.reportUsage(1);
@@ -368,12 +457,55 @@ public abstract class DeliveryService<C extends JobCard> {
     /** 今天还能投几个。测试缝没注入 entitlement 时视为不限，别把单测打崩 */
     private int remainingDailyApply() {
         return entitlementService == null ? Integer.MAX_VALUE
-                : entitlementService.remainingToday("apply", "max_daily_apply");
+                : entitlementService.remainingToday(applyCounterKey(), "max_daily_apply");
+    }
+
+    /** 启动前查额度：预演模式不发消息、不计数，所以额度用完也允许进来看效果 */
+    private String quotaPreCheck(PlatformConfig config) {
+        if (config.isDryRun() || remainingDailyApply() > 0) {
+            return null;
+        }
+        return quotaExhaustedMessage();
+    }
+
+    /**
+     * 本平台是否必须有一句自己的话术。只有"由我们把话术打进聊天框"的平台需要
+     * （Boss），猎聘点"聊一聊"时平台自己发默认招呼语、51job/智联/实习僧走投递
+     * 按钮压根不发消息，空着 sayHi 也照样能投。
+     */
+    protected boolean greetingRequired() {
+        return false;
+    }
+
+    /**
+     * 启动前查话术。AI 那条路走不通（没开、没填人设、接口没配全）时，
+     * 唯一能发的就是配置里的固定话术；固定话术也是空的，真投出去就是给 HR
+     * 发一条空白消息，白白烧掉一个额度还容易被举报，所以直接拦住。
+     */
+    private String greetingPreCheck(PlatformConfig config) {
+        if (config.isDryRun() || !greetingRequired() || greetingService.aiUsable()) {
+            return null;
+        }
+        String sayHi = config.getSayHi();
+        if (sayHi != null && !sayHi.isBlank()) {
+            return null;
+        }
+        return "还没法真投：AI 话术当前不可用（没开启／没填求职者背景／接口没配全），"
+                + "而这个平台的固定打招呼语是空的。请先在上方填一句打招呼语，"
+                + "或到「AI 话术」页把接口配好。";
+    }
+
+    /** 额度用完的说明。带着平台名，否则用户以为整个软件都停了 */
+    private String quotaExhaustedMessage() {
+        int quota = entitlementService == null ? 0
+                : entitlementService.current().quota("max_daily_apply");
+        return "「" + displayName() + "」今日投递额度已用完（每平台 " + quota + " 个）。"
+                + "明天 0 点后自动恢复，升级套餐可提高额度，也可以先切别的平台投。";
     }
 
     /** 额度用尽时把提示写进运行状态，前端据此引导升级而不是让用户干看 */
     private void publishQuotaNotice() {
-        status.setMessage("今日投递额度已用完，升级套餐可提高每日额度");
+        status.setMessage(quotaExhaustedMessage());
     }
 
     /**
@@ -432,10 +564,14 @@ public abstract class DeliveryService<C extends JobCard> {
     }
 
     private void finish(String message) {
-        status.setState(RunStatus.RunState.FINISHED);
         status.setMessage(message);
-        status.setFinishedAt(Instant.now().toString());
         appendLog(message);
+        finishState();
+    }
+
+    private void finishState() {
+        status.setState(RunStatus.RunState.FINISHED);
+        status.setFinishedAt(Instant.now().toString());
     }
 
     protected void appendLog(String message) {

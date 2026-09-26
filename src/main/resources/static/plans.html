@@ -83,8 +83,12 @@
 
   <div class="note">
     <b>关于额度</b><br>
-    每日投递额度是为了账号安全设计的硬上限，不是为了限制你——招聘平台对异常高频投递会风控，
+    每日投递额度<b>按平台各算一份</b>（Boss 用满了不影响猎聘、智联继续投），
+    它是为账号安全设计的硬上限，不是为了限制你——招聘平台对异常高频投递会风控，
     慢一点反而回复率更高。额度用尽当天会自动停止，第二天恢复，不会中断你的投递历史。
+    <br><br>
+    除了每日额度，每个平台还有<b>每小时 40 个</b>的速度上限——一天投满不等于一口气猛发，
+    跑到点数会先收工，下一个整点重新点「开始」就继续。
     <br><br>
     <b>到期之后</b><br>
     套餐到期只关闭付费功能，<b>不会删除</b>你的投递记录、筛选规则和统计数据。重新订阅后全部恢复。
@@ -118,7 +122,7 @@ const FEATURE_LABELS = {
   ai_strategy: 'AI 求职策略建议',
 };
 const QUOTA_LABELS = {
-  max_daily_apply: '每日投递',
+  max_daily_apply: '每平台每日投递',
   max_daily_ai_analysis: '每日 AI 分析',
   max_resume_count: '简历份数',
   max_job_profile_count: '求职方向数',
@@ -151,7 +155,7 @@ function renderCurrent(ent) {
   const apply = ent.quotas && ent.quotas.max_daily_apply;
   const ai = ent.quotas && ent.quotas.max_daily_ai_analysis;
   $('curQuota').innerHTML = apply
-    ? '每日额度：投递 ' + apply + ' 个 · AI 分析 ' + ai + ' 次'
+    ? '每日额度：每平台投递 ' + apply + ' 个 · AI 分析 ' + ai + ' 次'
     : '每日额度：不限';
 }
 

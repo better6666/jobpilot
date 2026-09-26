@@ -154,7 +154,7 @@ public class EntitlementService {
         f.put("ab_test", false); f.put("ai_strategy", false);
         e.setFeatures(f);
         Map<String, Integer> q = new LinkedHashMap<>();
-        q.put("max_daily_ai_analysis", 20); q.put("max_daily_apply", 10);
+        q.put("max_daily_ai_analysis", 20); q.put("max_daily_apply", 20);
         q.put("max_resume_count", 1); q.put("max_job_profile_count", 1);
         e.setQuotas(q);
         return e;

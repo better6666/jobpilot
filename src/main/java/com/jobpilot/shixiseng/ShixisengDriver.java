@@ -22,7 +22,7 @@ import java.util.function.BooleanSupplier;
  * <p>实习僧是 Vue SPA，但<b>搜索列表是服务端渲染的</b>——HTML 里直接带
  * 20 条 {@code div.intern-item}，不用等 XHR，这是它比智联好采集的原因。
  *
- * <p>三个和别的平台不一样的地方（都来自 2026-09-22 实测）：
+ * <p>四个和别的平台不一样的地方（2026-09-22 采集实测 + 2026-09-26 投递实测）：
  * <ul>
  *   <li><b>岗位名混着 icon-font 私用区字符</b>（{@code \uf57f} 之类），
  *       每个字段读出来都要过 {@link ShixisengJobCard#cleanText}</li>
@@ -30,6 +30,8 @@ import java.util.function.BooleanSupplier;
  *       不像 51job 要挖 sensorsdata 埋点</li>
  *   <li><b>投递入口在详情页</b>（{@code .resume_apply}，文案"投个简历"），
  *       不在列表页，所以每个岗位都要开一次详情</li>
+ *   <li><b>详情页挂着四五个 {@code .el-dialog}，全是 {@code display:none}</b>，
+ *       挑弹窗必须按可见性筛，取 {@code first()} 会一直命中隐藏的那一个</li>
  * </ul>
  */
 @Slf4j
@@ -319,9 +321,9 @@ public class ShixisengDriver {
     /**
      * 投递一个岗位：开详情页 → 点"投个简历" → 处理简历选择框 → 关遮罩。
      *
-     * <p><b>投递后的确认弹窗形态未经真实验证</b>——实习僧详情页公开可见，
-     * 但点"投个简历"之后走的是登录态流程，本机没有实习僧账号。
-     * 已按页面可见部分实现，登录后需实测校准。
+     * <p>登录后实测（2026-09-26）：点完"投个简历"有两条分岔——简历齐全时弹
+     * {@code .deliver-dialog-box} 让挑简历，简历没完善时弹 message-box 直接拒投。
+     * 后者得人工去网页端补简历，脚本不能替，所以把平台原话记进失败原因就收工。
      */
     public DeliveryOutcome deliver(ShixisengJobCard card, Page listPage,
                                    ShixisengProperties.ShixisengConfig config,
@@ -376,8 +378,10 @@ public class ShixisengDriver {
 
             // 简历选择框：没有预设默认简历时必弹，勾上默认再确认
             if (!handleResumeDialog(detail, stop)) {
+                String notice = platformNotice(detail);
                 closeAnyModalOverlays(detail);
-                return DeliveryOutcome.failed("简历选择框没能处理，放弃投递");
+                return DeliveryOutcome.failed(notice != null
+                        ? "平台提示：" + notice : "简历选择框没能处理，放弃投递");
             }
             // 投递成功会给提示，等一等再收尾
             for (int i = 0; i < 10 && !stop.getAsBoolean(); i++) {
@@ -459,15 +463,19 @@ public class ShixisengDriver {
     /**
      * 处理简历选择框。返回是否顺利走到确认。
      *
-     * <p>没有默认简历时实习僧会弹选择框，要先勾"默认"再点确认。
-     * 弹窗形态未实测，这里按常见两套（ElementUI / 自定义 dialog）兜底。
+     * <p>没有默认简历时实习僧会弹 {@code .deliver-dialog-box} 选择框，要先勾"默认"再点确认。
+     * 实测（2026-09-26 抓详情页 DOM）：详情页常驻四五个 {@code .el-dialog}，全是
+     * {@code display:none}，所以必须挑<em>可见</em>的那一个，取 first() 会永远命中隐藏窗。
      */
     private boolean handleResumeDialog(Page page, BooleanSupplier stop) {
         for (int i = 0; i < 8 && !stop.getAsBoolean(); i++) {
             try {
-                Locator dialog = page.locator(
-                        ".el-dialog, [role='dialog'], .dialog, .resume-dialog").first();
-                if (dialog.count() == 0 || !dialog.isVisible()) {
+                if (platformNotice(page) != null) {
+                    // 平台直接把投递拒了，往下走只会得到一句没用的"未确认投递结果"
+                    return false;
+                }
+                Locator dialog = visibleDialog(page);
+                if (dialog == null) {
                     // 没有弹窗：要么直接投成功了，要么还在等
                     if (isApplySucceeded(page)) {
                         return true;
@@ -508,6 +516,56 @@ public class ShixisengDriver {
             }
         }
         return false;
+    }
+
+    /**
+     * 挑出当前<em>可见</em>的那个弹窗。
+     *
+     * <p>不能取 {@code .first()}：实测详情页常驻挂着四个 {@code .el-dialog}
+     * （切换城市、举报、投递、Riot 问卷），默认全是 {@code display:none}，
+     * first() 永远命中隐藏的那个，简历选择框真弹出来也看不见。
+     */
+    Locator visibleDialog(Page page) {
+        try {
+            Locator dialogs = page.locator(".el-dialog");
+            for (int i = 0; i < dialogs.count(); i++) {
+                Locator candidate = dialogs.nth(i);
+                try {
+                    if (candidate.isVisible()) {
+                        return candidate;
+                    }
+                } catch (Exception ignore) {
+                    // 节点在轮询间被移除，跳过
+                }
+            }
+        } catch (Exception ignore) {
+        }
+        return null;
+    }
+
+    /**
+     * 投递被平台直接挡下时给的理由，没有则 {@code null}。
+     *
+     * <p>实测 2026-09-26：简历没完善时点"投个简历"，弹的不是简历选择框而是
+     * ElementUI 的 message-box（"友情提示 / 请完善简历后投递"，按钮"取消""去完善"）。
+     * 它和 {@code .el-dialog} 不是一类组件，得单独认。
+     *
+     * <p>只取正文：那个框是"标题 + 正文 + 按钮"三段，整段读出来会带上
+     * "友情提示""取消""去完善"，落进失败原因里读不通。
+     */
+    String platformNotice(Page page) {
+        try {
+            Locator message = page.locator(".el-message-box__message").first();
+            if (message.count() == 0 || !message.isVisible()) {
+                return null;
+            }
+            String text = ShixisengJobCard.cleanText(message.innerText(
+                    new Locator.InnerTextOptions().setTimeout(ACTION_TIMEOUT_MS)));
+            return text == null || text.isBlank() ? null : text.strip();
+        } catch (Exception e) {
+            log.debug("实习僧平台提示读取失败: {}", e.getMessage());
+            return null;
+        }
     }
 
     /** 投递是否成功：找"投递成功"类提示 */

@@ -9,6 +9,9 @@
  *   auto_apply / smart_apply / multi_resume / ai_greeting / analytics
  *   natural_language_rule / ab_test / ai_strategy
  * 配额：max_daily_ai_analysis / max_daily_apply / max_resume_count / max_job_profile_count
+ *
+ * max_daily_apply 的口径是<em>每个招聘平台各这么多</em>（客户端按 apply:平台名 分桶计数，
+ * 见 jobpilot 的 DeliveryService#applyCounterKey）。写 300 就是 Boss 300、猎聘 300……
  */
 
 export type Plan = 'trial' | 'standard' | 'advanced'
@@ -42,7 +45,7 @@ export const DEFAULT_PLANS: PlanRow[] = [
       multi_resume: false, ai_greeting: false, analytics: true,
       natural_language_rule: false, ab_test: false, ai_strategy: false,
     }),
-    quotas: JSON.stringify({ max_daily_ai_analysis: 20, max_daily_apply: 10,
+    quotas: JSON.stringify({ max_daily_ai_analysis: 20, max_daily_apply: 20,
       max_resume_count: 1, max_job_profile_count: 1 }),
     sort_order: 1, active: 1, updated_at: '',
   },
@@ -57,7 +60,7 @@ export const DEFAULT_PLANS: PlanRow[] = [
       multi_resume: false, ai_greeting: true, analytics: true,
       natural_language_rule: false, ab_test: false, ai_strategy: false,
     }),
-    quotas: JSON.stringify({ max_daily_ai_analysis: 100, max_daily_apply: 60,
+    quotas: JSON.stringify({ max_daily_ai_analysis: 100, max_daily_apply: 120,
       max_resume_count: 1, max_job_profile_count: 3 }),
     sort_order: 2, active: 1, updated_at: '',
   },
@@ -72,7 +75,7 @@ export const DEFAULT_PLANS: PlanRow[] = [
       multi_resume: true, ai_greeting: true, analytics: true,
       natural_language_rule: true, ab_test: true, ai_strategy: true,
     }),
-    quotas: JSON.stringify({ max_daily_ai_analysis: 400, max_daily_apply: 150,
+    quotas: JSON.stringify({ max_daily_ai_analysis: 400, max_daily_apply: 300,
       max_resume_count: 5, max_job_profile_count: 10 }),
     sort_order: 3, active: 1, updated_at: '',
   },

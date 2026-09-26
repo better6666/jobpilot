@@ -840,7 +840,7 @@ public class NativeMainWindow {
         JsonNode quotas = plan.path("quotas");
         JPanel bottom = new JPanel(new GridLayout(2, 1, 0, 4));
         bottom.setOpaque(false);
-        bottom.add(label("每日投递  " + quota(quotas, "max_daily_apply", "次"),
+        bottom.add(label("每平台每日投递  " + quota(quotas, "max_daily_apply", "个"),
                 12, recommended ? ACCENT : INK, Font.BOLD));
         bottom.add(label("每日 AI 分析  " + quota(quotas, "max_daily_ai_analysis", "次"),
                 11, MUTED, Font.PLAIN));
@@ -851,13 +851,13 @@ public class NativeMainWindow {
     private void showPlanComparison(JsonNode plans) {
         planComparison.removeAll();
         JPanel card = card(new BorderLayout(0, 17));
-        card.add(sectionHead("一眼看清套餐差异", "额度按天计算；功能以当前服务端配置为准"), BorderLayout.NORTH);
+        card.add(sectionHead("一眼看清套餐差异", "投递额度按平台各算一份、按天重置；功能以当前服务端配置为准"), BorderLayout.NORTH);
         JPanel matrix = new JPanel(new GridLayout(0, 4, 0, 0));
         matrix.setOpaque(false);
         matrix.add(matrixCell("功能与额度", true, false));
         plans.forEach(plan -> matrix.add(matrixCell(plan.path("name").asText("套餐"), true, true)));
         String[][] quotaRows = {
-                {"每日投递", "max_daily_apply", "次"},
+                {"每平台每日投递", "max_daily_apply", "个"},
                 {"每日 AI 分析", "max_daily_ai_analysis", "次"},
                 {"可用简历", "max_resume_count", "份"},
                 {"岗位画像", "max_job_profile_count", "个"}

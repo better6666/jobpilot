@@ -569,7 +569,7 @@ const FEATURE_LABELS = {
 };
 
 const QUOTA_LABELS = {
-  max_daily_apply: '每日投递',
+  max_daily_apply: '每平台每日投递',
   max_daily_ai_analysis: '每日 AI 分析',
   max_resume_count: '简历份数',
   max_job_profile_count: '求职方向数',
@@ -594,14 +594,14 @@ function defaultPlansDraft() {
       highlight_days: 0, recommended: false, sort_order: 1,
       features: { job_search: true, basic_filter: true, auto_apply: true,
                   analytics: true, ai_match: true },
-      quotas: { max_daily_apply: 10, max_daily_ai_analysis: 20,
+      quotas: { max_daily_apply: 20, max_daily_ai_analysis: 20,
                 max_resume_count: 1, max_job_profile_count: 1 } },
     { plan: 'standard', name: '标准版 Plus', price_cents: 1990, duration_days: 30,
       highlight_days: 0, recommended: false, sort_order: 2,
       features: { job_search: true, basic_filter: true, advanced_filter: true,
                   ai_match: true, auto_apply: true, ai_greeting: true,
                   analytics: true },
-      quotas: { max_daily_apply: 60, max_daily_ai_analysis: 100,
+      quotas: { max_daily_apply: 120, max_daily_ai_analysis: 100,
                 max_resume_count: 1, max_job_profile_count: 3 } },
     { plan: 'advanced', name: '进阶版 Pro', price_cents: 3290, duration_days: 30,
       highlight_days: 60, recommended: true, sort_order: 3,
@@ -610,7 +610,7 @@ function defaultPlansDraft() {
                   smart_apply: true, multi_resume: true, ai_greeting: true,
                   analytics: true, natural_language_rule: true, ab_test: true,
                   ai_strategy: true },
-      quotas: { max_daily_apply: 150, max_daily_ai_analysis: 400,
+      quotas: { max_daily_apply: 300, max_daily_ai_analysis: 400,
                 max_resume_count: 5, max_job_profile_count: 10 } },
   ];
 }

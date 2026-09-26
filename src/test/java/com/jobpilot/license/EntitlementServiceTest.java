@@ -153,7 +153,7 @@ class EntitlementServiceTest {
         Entitlement e = s.current();
         assertThat(e.getPlan()).isEqualTo("trial");
         assertThat(e.isUsable()).isFalse();
-        assertThat(e.quota("max_daily_apply")).isEqualTo(10);
+        assertThat(e.quota("max_daily_apply")).isEqualTo(20);
         // 降级状态下基础功能不可用（卡片不可用），不会误放行
         assertThat(s.allows("basic_filter")).isFalse();
     }

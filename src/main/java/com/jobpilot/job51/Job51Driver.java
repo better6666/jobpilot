@@ -49,6 +49,9 @@ import java.util.regex.Pattern;
  *   <li>弹窗是 Vant + ElementUI 两套混用，扫码下载 App、投递成功框都要关，
  *       遮罩会吃掉后续所有点击</li>
  *   <li>阿里 WAF（acw_tc cookie）命中验证时当前关键词直接放弃，重试只会更惨</li>
+ *   <li><b>登录态只能用 DOM 判</b>：we.51job.com 登录后发的 cookie 是不带平台名的
+ *       {@code JSESSIONID}（匿名访客也有），拿 cookie 名当判据会把已登录误判成未登录，
+ *       整个平台一个岗位都投不出去。见 {@link #isLoggedIn}</li>
  *   <li>日上限 toast 只存在一两秒，投递完要立刻探</li>
  *   <li>翻页是 Element Plus 分页：next 按钮 → 页码数字 → 跳页输入框，三级降级</li>
  * </ul>
@@ -65,9 +68,23 @@ public class Job51Driver {
 
     private static final String DOMAIN = "https://we.51job.com";
     private static final String SEARCH_URL = "https://we.51job.com/pc/search";
-    /** 登录主 token。51job 的登录态主要靠它，DOM 只作兜底 */
-    private static final String LOGIN_COOKIE = "51job";
+    /**
+     * 登录态信号：用户名入口、"我的投递"入口、通用用户信息块。
+     * 三个都是 51job 导航栏登录后的实际节点（其中前两个来自上游 get_jobs 的真机验证）。
+     */
+    private static final String[] LOGGED_IN_SELECTORS = {
+            "a.uname.e_icon.at",
+            "a[href*='/pc/my/myjob']",
+            ".login-info, .user-info, .username"
+    };
+    /** 未登录的硬信号：导航栏上的登录/注册按钮 */
+    private static final String[] LOGGED_OUT_SELECTORS = {
+            "span.login.loginBtnClick",
+            "text=登录/注册"
+    };
     private static final String LIST_CONTAINER = ".j_joblist, .j_result";
+    /** 页面渲染settling的短轮询次数（×500ms ≈ 14 秒） */
+    private static final int SETTLE_POLLS = 28;
     /** 搜索接口。只拦 GET，POST 的是别的功能 */
     private static final String SEARCH_API = "/api/job/search-pc";
     /** 投递按钮：限定列表容器 + 排除"一键投递"，两道都要。
@@ -111,21 +128,31 @@ public class Job51Driver {
     // 登录
     // ------------------------------------------------------------------
 
-    /** 打开搜索页并等待登录。已登录（profile 里有 cookie）直接返回。 */
+    /**
+     * 打开搜索页并等待登录。判据是页面 DOM，见 {@link #isLoggedIn}。
+     * <p>
+     * 登录页要在同一个标签页里手动扫码，所以这里只导航 + 轮询，不做任何点击。
+     */
     public LoginResult ensureLogin(int timeoutMinutes, ProgressListener listener, BooleanSupplier stop) {
         Page page = browserManager.context().newPage();
         configureTimeouts(page);
         try {
             navigate(page, SEARCH_URL, listener);
-            if (hasLoginCookie()) {
-                listener.onProgress("已检测到 51job 登录态，直接进入岗位列表");
-                return LoginResult.LOGGED_IN;
+            // 搜索页是 SPA，导航完成（DOMCONTENTLOADED）时导航栏还没渲染，
+            // 立刻判一次必然报"未登录"。先给十几秒短轮询 settle，还不行才提示用户扫码，
+            // 否则窗口刚开就闪一句"请登录"，用户扫完码又被后面的判据绕回去。
+            for (int i = 0; i < SETTLE_POLLS && !stop.getAsBoolean(); i++) {
+                if (isLoggedIn(page)) {
+                    listener.onProgress("已检测到 51job 登录态，直接进入岗位列表");
+                    return LoginResult.LOGGED_IN;
+                }
+                sleep(500);
             }
             listener.onProgress("未检测到 51job 登录态，请在浏览器窗口里登录（等待 " + timeoutMinutes + " 分钟）");
             long deadline = System.currentTimeMillis() + timeoutMinutes * 60_000L;
             while (System.currentTimeMillis() < deadline && !stop.getAsBoolean()) {
                 sleep(2000);
-                if (hasLoginCookie()) {
+                if (isLoggedIn(page)) {
                     listener.onProgress("登录成功");
                     return LoginResult.LOGGED_IN;
                 }
@@ -137,22 +164,57 @@ public class Job51Driver {
     }
 
     /**
-     * 当前 profile 是否已登录 51job。
+     * 当前页面是否已登录 51job——只看 DOM，不看 cookie。
      * <p>
-     * cookie 名 {@code 51job} 是登录主 token，第一判据。DOM 兜底只看
-     * {@code a[class*='uname']} 的文本是不是"登录"——这个类名改过几版，
-     * 只在 cookie 判不出来时才用。
+     * <b>为什么不能靠 cookie 名判</b>：这个判据曾经是"profile 里有没有名为
+     * {@code 51job} 的 cookie"，而 we.51job.com 登录后发的其实是不带平台名的
+     * {@code JSESSIONID}（匿名访客第一次访问也发），结果是<b>登录了也永远判成未登录</b>，
+     * 点开始就卡在"请扫码登录"直到超时，一个岗位都不投。
+     * <p>
+     * 三个登录态信号（用户名入口 / 我的投递 / 通用用户信息块）任中即算已登录；
+     * 导航栏的"登录/注册"按钮是未登录的硬信号。两个都没命中时按未登录处理
+     * （宁可让用户重扫一次，也不要带着未登录的会话去点投递，那只会全部失败），
+     * 同时打一行诊断日志，方便平台改版后对着选择器找原因。
      */
-    public boolean hasLoginCookie() {
-        try {
-            List<String> names = browserManager.context().cookies(DOMAIN).stream()
-                    .map(c -> c.name).toList();
-            if (names.contains(LOGIN_COOKIE)) {
+    public boolean isLoggedIn(Page page) {
+        for (String selector : LOGGED_IN_SELECTORS) {
+            Locator hit = findVisible(page, selector);
+            if (hit != null) {
+                // 命中哪个节点要打出来：51job 的 .username 这类泛用类名有假阳性风险，
+                // 光看"已登录/未登录"的结论排查不了
+                log.info("51job 登录判据命中 | {} | 节点文本={}", selector, nodeText(hit));
                 return true;
             }
-            return names.stream().anyMatch(n -> n.startsWith("job51") || n.startsWith("51job"));
+        }
+        boolean loggedOutShown = findVisible(page, LOGGED_OUT_SELECTORS[0]) != null
+                || findVisible(page, LOGGED_OUT_SELECTORS[1]) != null;
+        if (!loggedOutShown) {
+            log.info("51job 登录态两个方向都没探到选择器，按未登录处理 | cookie={}", loginCookieNames());
+        }
+        return false;
+    }
+
+    /** 选择器命中的第一个可见节点；没有则 null */
+    private static Locator findVisible(Page page, String selector) {
+        try {
+            Locator hit = page.locator(selector).first();
+            return hit.count() > 0 && hit.isVisible() ? hit : null;
         } catch (Exception e) {
-            return false;
+            // 选择器本身不被当前 Playwright 语法接受、或页面刚好在跳转，都算没命中
+            return null;
+        }
+    }
+
+    private static String nodeText(Locator locator) {
+        try {
+            String text = locator.textContent();
+            if (text == null) {
+                return "(无文本)";
+            }
+            text = text.trim().replaceAll("\\s+", " ");
+            return text.length() > 30 ? text.substring(0, 30) + "…" : text;
+        } catch (Exception e) {
+            return "(读不到)";
         }
     }
 

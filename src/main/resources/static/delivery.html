@@ -108,6 +108,7 @@
         <span id="runMsg" style="font-size:13px;color:#8a8f99"></span>
       </div>
       <div class="row">
+        <span id="quotaTag" class="state ok">今日额度：读取中…</span>
         <span id="licenseTag" class="state ok">卡密：读取中…</span>
       </div>
     </div>
@@ -427,6 +428,17 @@ async function refreshStatus() {
     $('logs').textContent = logs.length ? logs.join('\n') : '（还没有日志）';
     $('logs').scrollTop = $('logs').scrollHeight;
 
+    // 额度按平台各算一份。用完必须一眼看见，否则用户只会觉得"登录了却不投"
+    const qTag = $('quotaTag');
+    if (s.quotaLimit > 0) {
+      const left = Math.max(0, s.quotaLimit - s.quotaUsed);
+      qTag.textContent = `今日额度：${s.quotaUsed}/${s.quotaLimit}`
+        + (left === 0 ? '（已用完，明天恢复）' : `（剩 ${left}）`);
+      qTag.className = 'state ' + (left === 0 ? 'bad' : left <= s.quotaLimit * 0.1 ? 'warn' : 'ok');
+    } else {
+      qTag.textContent = '今日额度：不限';
+      qTag.className = 'state ok';
+    }
     const ls = (await api(`/api/${platform}/license`)).data;
     if (ls) {
       $('licenseTag').textContent = '卡密：' + (ls.state || '-') + (ls.allowed ? '' : '（投递被拦截）');

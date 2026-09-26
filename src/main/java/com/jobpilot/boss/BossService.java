@@ -77,6 +77,12 @@ public class BossService extends DeliveryService<BossJobCard> {
         return null;
     }
 
+    /** Boss 是把话术亲手打进聊天框的，空着就等于给 HR 发空白消息 */
+    @Override
+    protected boolean greetingRequired() {
+        return true;
+    }
+
     @Override
     protected String cityCode(PlatformConfig config) {
         return BossSearchUrl.resolveCityCode(options, config.getCity());
