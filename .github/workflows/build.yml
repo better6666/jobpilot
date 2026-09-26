@@ -61,7 +61,7 @@ jobs:
           # api-base 留空就连不上服务端，用户看到的永远是"未激活"。
           # 系统属性优先级低于命令行参数，本地联调仍可用
           # --license.api-base=http://127.0.0.1:8787 覆盖
-          jpackage --type app-image --name JobPilot --app-version 1.0.9 \
+          jpackage --type app-image --name JobPilot --app-version 1.0.10 \
             --input build/stage --main-jar jobpilot-0.1.0.jar \
             --runtime-image build/runtime --dest build/dist \
             --java-options "-Dlicense.api-base=https://getjobs.dpdns.org"
@@ -105,7 +105,7 @@ jobs:
       - name: macOS 转 dmg
         if: runner.os == 'macOS'
         run: |
-          jpackage --type dmg --name JobPilot --app-version 1.0.9 \
+          jpackage --type dmg --name JobPilot --app-version 1.0.10 \
             --app-image build/dist/JobPilot.app --dest build/dist
           rm -rf build/dist/JobPilot.app
 
