@@ -691,6 +691,9 @@ public class Job51Driver {
             if (!success) {
                 return DeliveryOutcome.failed("未确认投递结果");
             }
+            // 成功框是接口回来之后才渲染的：点完立刻关会扑空，留在这儿直到下一个岗位
+            sleep(700);
+            closeAnyModalOverlays(listPage);
             listener.onProgress("已投递 | " + target);
             return DeliveryOutcome.delivered(config.getSayHi());
         } catch (Exception e) {
@@ -965,7 +968,8 @@ public class Job51Driver {
                 Locator close = page.locator(
                         "button.el-dialog__headerbtn, button[aria-label='Close'], " +
                                 "i.el-dialog__close.el-icon.el-icon-close, .van-popup__close-icon, " +
-                                ".van-icon-cross, [class*='subscribe-close']").first();
+                                ".van-icon-cross, [class*='subscribe-close'], " +
+                                "[class*='close']:not(body):not(html)").first();
                 if (close.count() > 0 && close.isVisible()) {
                     close.click(new Locator.ClickOptions()
                             .setTimeout(3000).setForce(true));
@@ -973,31 +977,60 @@ public class Job51Driver {
                 }
             } catch (Exception ignore) {
             }
-            try {
-                // 兜底：JS 暴力 remove 残留遮罩层
-                Object removed = page.evaluate("() => {" +
-                        "  let n = 0;" +
-                        "  const sels = ['.el-overlay', '.v-modal', '.van-overlay'," +
-                        "    '[class*=\"mask\"]', '[class*=\"overlay\"]'];" +
-                        "  for (const s of sels) {" +
-                        "    document.querySelectorAll(s).forEach(el => {" +
-                        "      const st = getComputedStyle(el);" +
-                        "      if (st && (st.position === 'fixed' || st.position === 'absolute')" +
-                        "          && el.offsetHeight > 200) { el.remove(); n++; }" +
-                        "    });" +
-                        "  }" +
-                        "  return n;" +
-                        "}");
-                if (removed instanceof Number && ((Number) removed).intValue() > 0) {
-                    closedThisRound = true;
-                }
-            } catch (Exception ignore) {
+            // 兜底：真按钮点了没反应（或压根没有）时按层剥掉。
+            // 必须先点按钮，因为那是站点自己的关闭路径；直接 remove 的层
+            // 会被 Vue 下一次渲染重新画出来。
+            List<String> removed = removeStuckLayers(page);
+            if (!removed.isEmpty()) {
+                log.info("51job 剥离残留遮罩: {}", removed);
+                closedThisRound = true;
             }
             if (!closedThisRound) {
                 return;
             }
             sleep(500);
         }
+    }
+
+    /**
+     * 剥掉关不掉的整屏层，返回被剥掉的层描述（用于日志）。
+     *
+     * <p>51job 投递后的"投递成功 + 微信扫一扫与HR沟通"推广框不给标准关闭按钮：
+     * 既不是 {@code el-dialog} 也没有 {@code *mask}/{@code *overlay} 命名，
+     * 原来的选择器一条都不命中，于是它一直糊在屏幕上——投递虽然还能继续（点击是
+     * force 的），用户看到的就是"卡住了"。
+     *
+     * <p>判定条件刻意收得很紧，必须同时满足：定位 fixed/absolute、肉眼可见、
+     * 尺寸够大、<em>而且</em>文案里有招聘推广的关键词。顶栏和侧边悬浮条都是
+     * fixed 但没这些文案，所以不会被误删。
+     */
+    private List<String> removeStuckLayers(Page page) {
+        String script = "() => {"
+                + "  const hit = [];"
+                + "  const area = window.innerWidth * window.innerHeight * 0.25;"
+                + "  for (const el of document.querySelectorAll('div, section, aside')) {"
+                + "    const st = getComputedStyle(el);"
+                + "    if (st.position !== 'fixed' && st.position !== 'absolute') continue;"
+                + "    if (st.display === 'none' || st.visibility === 'hidden') continue;"
+                + "    if (Number(st.opacity) === 0) continue;"
+                + "    const r = el.getBoundingClientRect();"
+                + "    if (r.width < 200 || r.height < 200 || r.width * r.height < area) continue;"
+                + "    const txt = (el.innerText || '') + ' ' + (el.className || '');"
+                + "    if (!/投递成功|微信扫一扫|与HR|扫码|下载App|下载 App/.test(txt)) continue;"
+                + "    hit.push(el.tagName + '.' + String(el.className).slice(0, 48));"
+                + "    el.remove();"
+                + "  }"
+                + "  return Array.from(new Set(hit)).slice(0, 6);"
+                + "}";
+        try {
+            Object out = page.evaluate(script);
+            if (out instanceof List<?> list) {
+                return list.stream().map(String::valueOf).toList();
+            }
+        } catch (Exception e) {
+            log.debug("剥离残留遮罩失败: {}", e.getMessage());
+        }
+        return List.of();
     }
 
     // ------------------------------------------------------------------
