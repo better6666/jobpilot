@@ -74,6 +74,31 @@ class Job51SearchUrlTest {
                 + "&keyword=%E9%99%88%E5%88%97%E8%AE%BE%E8%AE%A1", url);
     }
 
+    /**
+     * 多值码要发成 %2C 连接的整串：这是从 51job 搜索接口上抓下来的真实形状
+     * （选"学历要求=大专"时它自己发 degree=04%2C05%2C06%2C07）。
+     * 裸逗号浏览器容错，但网关不一定，所以这里断言编码后的结果。
+     */
+    @Test
+    void 学历和经验的多值码用百分号逗号() {
+        Job51Properties.Job51Config config = config();
+        config.setDegree("04,05,06,07");
+        config.setExperience("01,02");
+        String url = Job51SearchUrl.build("070300", "设计", config);
+        assertTrue(url.contains("degree=04%2C05%2C06%2C07"), url);
+        assertTrue(url.contains("workYear=01%2C02"), url);
+    }
+
+    @Test
+    void 学历和经验为不限时省略() {
+        Job51Properties.Job51Config config = config();
+        config.setDegree("0");
+        config.setExperience("0");
+        String url = Job51SearchUrl.build("070300", "设计", config);
+        assertFalse(url.contains("degree"), url);
+        assertFalse(url.contains("workYear"), url);
+    }
+
     @Test
     void 什么都没配时只有关键词() {
         assertEquals("https://we.51job.com/pc/search?keyword=%E8%AE%BE%E8%AE%A1",

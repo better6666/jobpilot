@@ -409,6 +409,16 @@ public abstract class DeliveryService<C extends JobCard> {
                 return;
             }
 
+            // "我的条件"是硬门槛，排在打分前面：够不着的岗位不该占打分名额，
+            // 也不该因为用户没配规则（threshold=0 全放行）就被投出去。
+            String beyondReach = RequirementFilter.reject(card, config);
+            if (beyondReach != null) {
+                record(card, keyword, "已过滤", beyondReach, null, null, existing);
+                status.setFiltered(status.getFiltered() + 1);
+                appendLog("过滤 | " + target + " | " + beyondReach);
+                return;
+            }
+
             FilterResult verdict = filter(card, config);
             if (verdict.rejectReason() != null) {
                 record(card, keyword, "已过滤", verdict.rejectReason(), verdict.score(), null, existing);

@@ -23,6 +23,15 @@ public class PlatformConfig {
     /** 薪资筛选项，值为平台自己的码，"0"/空 = 不限 */
     private String salary = "";
 
+    /**
+     * 我的最高学历，存中文档位名（大专/本科/…），空 = 不设限。
+     * 各平台的 URL 筛选挡不住"要求高于我"的岗位，这一项专管那个，见 {@link RequirementFilter}
+     */
+    private String myDegree = "";
+
+    /** 我的工作经验，存中文档位名（应届生/1-3年/…），空 = 不设限 */
+    private String myExperience = "";
+
     /** 每个关键词最多处理多少个岗位（防一次跑太久触发风控） */
     private int maxJobsPerKeyword = 50;
 

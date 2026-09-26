@@ -43,5 +43,14 @@ public class Job51Properties {
 
         /** 城市名（如"苏州"）或 51job 地区码（如 070300），启动时统一换成码 */
         private String city = "苏州";
+
+        /**
+         * 学历要求，值为逗号连接的档位码（{@code degree=04,05,06,07}）。
+         * 51job 这个筛选是"及以上"方向，整串码直接存在码表里，见 job51-options.json
+         */
+        private String degree = "";
+
+        /** 工作年限，值同上（{@code workYear=01,02}），语义是"不超过这一档" */
+        private String experience = "";
     }
 }

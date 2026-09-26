@@ -42,12 +42,20 @@ public class NativeMainWindow {
     private static final List<Platform> PLATFORMS = List.of(
             new Platform("boss", "Boss 直聘", List.of("jobType", "salary", "experience", "degree", "scale", "stage"), false),
             new Platform("liepin", "猎聘", List.of("salary"), false),
-            new Platform("job51", "51job", List.of("salary"), false),
+            new Platform("job51", "51job", List.of("salary", "degree", "experience"), false),
             new Platform("zhilian", "智联招聘", List.of(), true),
             new Platform("shixiseng", "实习僧", List.of(), false));
     private static final Map<String, String> FILTER_NAMES = Map.of(
             "jobType", "职位类型", "salary", "薪资", "experience", "经验",
             "degree", "学历", "scale", "公司规模", "stage", "融资阶段");
+    /**
+     * "我的条件"两档下拉的选项。存中文档位名而不是码：这条过滤在本地跑，
+     * 五个平台共用，而只有 51job 和 Boss 有码表。见 delivery/RequirementFilter。
+     */
+    private static final String[] MY_DEGREES = {
+            "初中及以下", "高中/中专", "大专", "本科", "硕士", "博士"};
+    private static final String[] MY_EXPERIENCES = {
+            "在校生/应届生", "1年以下", "1-3年", "3-5年", "5-10年", "10年以上"};
 
     private final String base;
     private final Runnable onQuit;
@@ -73,6 +81,8 @@ public class NativeMainWindow {
     private final JTextArea keywords = new JTextArea(4, 24);
     private final JComboBox<Choice> city = new JComboBox<>();
     private final JPanel filters = new JPanel(new GridLayout(0, 2, 12, 10));
+    private final JComboBox<Choice> myDegree = new JComboBox<>();
+    private final JComboBox<Choice> myExperience = new JComboBox<>();
     private final Map<String, JComboBox<Choice>> filterBoxes = new LinkedHashMap<>();
     private final JTextField salaryText = new JTextField();
     private final JSpinner maxJobs = spinner(50, 1, 500);
@@ -500,6 +510,11 @@ public class NativeMainWindow {
         fillChoices(city, options.path("cities"), config.path("city").asText(""), true);
         filterBoxes.clear();
         filters.removeAll();
+        // "我的条件"排最前：它五个渠道都有，而下面的筛选项是渠道给多少算多少
+        fillProfileChoices(myDegree, config.path("myDegree").asText(""), MY_DEGREES);
+        filters.add(field("我的学历 · 高于它的岗位不投", myDegree));
+        fillProfileChoices(myExperience, config.path("myExperience").asText(""), MY_EXPERIENCES);
+        filters.add(field("我的经验 · 要求更高的不投", myExperience));
         for (String key : selected.filters()) {
             JComboBox<Choice> box = new JComboBox<>();
             fillChoices(box, options.path(key), config.path(key).asText(""), false);
@@ -559,6 +574,8 @@ public class NativeMainWindow {
         }
         body.put("salary", selected.salaryText() ? salaryText.getText().trim()
                 : filterBoxes.containsKey("salary") ? choiceValue(filterBoxes.get("salary")) : "");
+        body.put("myDegree", choiceValue(myDegree));
+        body.put("myExperience", choiceValue(myExperience));
         filterBoxes.forEach((key, box) -> {
             if (!"salary".equals(key)) body.put(key, choiceValue(box));
         });
@@ -1277,6 +1294,21 @@ public class NativeMainWindow {
                 box.addItem(new Choice(selected, selected));
                 box.setSelectedIndex(box.getItemCount() - 1);
             }
+        }
+    }
+
+    /**
+     * "我的条件"下拉。值直接用中文档位名：这条过滤在本地跑、五个平台共用，
+     * 而只有 Boss 和 51job 有码表，走码表反而凑不齐一套统一的档。
+     */
+    private static void fillProfileChoices(JComboBox<Choice> box, String selected, String[] names) {
+        box.removeAllItems();
+        box.addItem(new Choice("", "不限"));
+        for (String name : names) {
+            box.addItem(new Choice(name, name));
+        }
+        if (!selected.isEmpty()) {
+            selectChoice(box, selected);
         }
     }
 
