@@ -211,44 +211,28 @@ class LiepinQuotaPrecheckTest {
     }
 
     // ------------------------------------------------------------------
-    // 每小时节流
+    // 投递速度：内置上限已撤，只剩日额度这道闸
     // ------------------------------------------------------------------
 
     /**
-     * 日额度抬到 300 之后，风控看的是密度不是总量。这里把小时桶灌满，断言真投被闸住、
-     * 任务转入停止，并且日志把"为什么停"和"什么时候能接着投"说清楚。
+     * 产品口径：不内置每小时密度上限，速度只由用户设的间隔秒数决定。
+     * 小时桶里就算写着 999 也不该拦投递——拦人的只有日额度。
      */
     @Test
-    void 本小时投满了就收工不再猛发() {
+    void 每小时上限已撤掉投得再密也照投() {
         when(entitlementService.usedToday(startsWith("apply:liepin:2026"))).thenReturn(999);
-        when(deliveryMapper.selectOne(any())).thenReturn(null);
-        LiepinService service = liepinService();
-
-        service.processCardForTest(card(), "陈列设计", liepinProperties.get(), null);
-
-        verify(liepinDriver, never()).deliver(any(), any(), any(), any(), any(), any());
-        assertTrue(service.status().getLogs().stream().anyMatch(l -> l.contains("本小时已投满 40 个")),
-                service.status().getLogs().toString());
-    }
-
-    /** 预演不发任何东西到平台，不该被小时节流拖住 */
-    @Test
-    void 预演不受小时节流影响() {
-        when(entitlementService.usedToday(startsWith("apply:liepin:2026"))).thenReturn(999);
-        LiepinProperties.LiepinConfig config = liepinProperties.get();
-        config.setDryRun(true);
         when(deliveryMapper.selectOne(any())).thenReturn(null);
         when(liepinDriver.deliver(any(), any(), any(), any(), any(), any()))
-                .thenReturn(DeliveryOutcome.preview("预演"));
+                .thenReturn(DeliveryOutcome.delivered("已沟通"));
 
-        liepinService().processCardForTest(card(), "陈列设计", config, null);
+        liepinService().processCardForTest(card(), "陈列设计", liepinProperties.get(), null);
 
         verify(liepinDriver).deliver(any(), any(), any(), any(), any(), any());
     }
 
-    /** 一次真投要同时记进日额度桶和本小时桶，少记一个闸就形同虚设 */
+    /** 撤了小时闸之后，一次真投只该记日额度一个桶，不该再写小时桶 */
     @Test
-    void 真投成功同时记日额度和小时两个桶() {
+    void 真投只记日额度一个桶() {
         when(deliveryMapper.selectOne(any())).thenReturn(null);
         when(liepinDriver.deliver(any(), any(), any(), any(), any(), any()))
                 .thenReturn(DeliveryOutcome.delivered("已沟通"));
@@ -256,7 +240,7 @@ class LiepinQuotaPrecheckTest {
         liepinService().processCardForTest(card(), "陈列设计", liepinProperties.get(), null);
 
         verify(entitlementService).recordUse("apply:liepin");
-        verify(entitlementService).recordUse(startsWith("apply:liepin:2026"));
+        verify(entitlementService, never()).recordUse(startsWith("apply:liepin:2026"));
     }
 
     @Test

@@ -86,7 +86,7 @@ public class NativeMainWindow {
     private final Map<String, JComboBox<Choice>> filterBoxes = new LinkedHashMap<>();
     private final JTextField salaryText = new JTextField();
     private final JSpinner maxJobs = spinner(50, 1, 500);
-    private final JSpinner waitSeconds = spinner(10, 3, 120);
+    private final JSpinner waitSeconds = spinner(10, 1, 120);
     private final JSpinner loginTimeout = spinner(5, 1, 30);
     private final JTextArea sayHi = new JTextArea(3, 24);
     private final JTextArea scoreRules = new JTextArea(8, 24);

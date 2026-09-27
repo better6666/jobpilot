@@ -9,9 +9,6 @@ import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 
 import java.time.Instant;
-import java.time.LocalDateTime;
-import java.time.LocalTime;
-import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadLocalRandom;
@@ -53,7 +50,6 @@ public abstract class DeliveryService<C extends JobCard> {
 
     private volatile RunStatus status = RunStatus.idle();
     private volatile boolean stopRequested;
-    private volatile boolean stoppedForHour;
     /** 已经因为"卡密不能用"停过一次了，避免每张卡片都打一行日志 */
     private volatile boolean stoppedForLicense;
     /** 已经因为"当日投递额度用完"停过一次 */
@@ -175,7 +171,6 @@ public abstract class DeliveryService<C extends JobCard> {
             return "「" + holder + "」正在投递，请先等它结束";
         }
         stopRequested = false;
-        stoppedForHour = false;
         stoppedForLicense = false;
         stoppedForQuota = false;
         status = RunStatus.running(keywords.size(), config.isDryRun(), displayName());
@@ -292,8 +287,6 @@ public abstract class DeliveryService<C extends JobCard> {
             if (stoppedForQuota) {
                 // 额度闸停机时已经把原因写进日志和 message 了，别再覆盖成"已手动停止"
                 finishState();
-            } else if (stoppedForHour) {
-                finish(hourlyLimitMessage());
             } else if (stopRequested) {
                 finish("已手动停止。本次共投递 " + status.getDelivered() + " 个岗位");
             } else if (status.getScanned() == 0) {
@@ -322,44 +315,6 @@ public abstract class DeliveryService<C extends JobCard> {
     }
 
     /**
-     * 每平台每小时最多投这么多。
-     *
-     * <p>日额度抬到 300 之后，把账号送进风控的不是总量而是<em>密度</em>：两个岗位
-     * 之间只随机等十秒，一小时理论上能发两百多个。40 个约等于一分钟一个。
-     */
-    static final int HOURLY_LIMIT = 40;
-
-    /** 本小时的计数桶。键自带小时，整点一换就是全新的一行，不用清库也不用定时任务 */
-    private String hourCounterKey() {
-        return applyCounterKey() + ":" + LocalDateTime.now().format(HOUR_KEY_FORMAT);
-    }
-
-    private static final DateTimeFormatter HOUR_KEY_FORMAT =
-            DateTimeFormatter.ofPattern("yyyyMMddHH");
-    private static final DateTimeFormatter HOUR_READABLE =
-            DateTimeFormatter.ofPattern("HH:mm");
-
-    /**
-     * 本小时还有余量。
-     *
-     * <p>计数走本地 {@code usage_counter} 而不是卡密服务端，因为这道闸是保护用户
-     * 账号的，跟授权无关——自用模式（{@code license.enabled=false}，日额度不限）照样要限。
-     *
-     * <p>满了就收工而不是原地等下一小时：任务挂在那儿一小时，浏览器一直开着、
-     * 全局单跑锁也一直占着，别的平台这段时间一个都投不了。
-     */
-    private boolean hourlyWindowOpen() {
-        return entitlementService == null
-                || entitlementService.usedToday(hourCounterKey()) < HOURLY_LIMIT;
-    }
-
-    private String hourlyLimitMessage() {
-        return "「" + displayName() + "」本小时已投满 " + HOURLY_LIMIT + " 个，本次先收工。"
-                + LocalTime.now().plusHours(1).withMinute(0).format(HOUR_READABLE)
-                + "（下一个整点）之后重新点开始就继续——发得太密容易被平台风控。";
-    }
-
-    /**
      * 处理一个岗位：去重 → 过滤/打分 → 投递 → 落库。
      * 包成 protected 是为了能单测：mock 掉 mapper 和适配器，不碰浏览器。
      */
@@ -377,15 +332,8 @@ public abstract class DeliveryService<C extends JobCard> {
             return;
         }
 
-        // 每小时节流。预演不发消息，不用占这道闸
-        if (!config.isDryRun() && !hourlyWindowOpen()) {
-            stopRequested = true;
-            if (!stoppedForHour) {
-                stoppedForHour = true;
-                appendLog(hourlyLimitMessage());
-            }
-            return;
-        }
+        // 每小时节流已按产品口径撤掉：速度只由"每个岗位间隔秒数"（waitSeconds）决定，
+        // 用户自己掌握节奏，被风控了由用户自己处理。日额度仍是硬闸，见上面。
 
         // 次数卡在投递过程中用完（上报后服务端确认剩余为 0）就得停：
         // 继续发就是免费帮客户投，卖卡的那一方白亏
@@ -437,7 +385,6 @@ public abstract class DeliveryService<C extends JobCard> {
                     status.setDelivered(status.getDelivered() + 1);
                     if (entitlementService != null) {
                         entitlementService.recordUse(applyCounterKey());
-                        entitlementService.recordUse(hourCounterKey());
                     }
                     // 次数卡扣减。异步发、失败不打断投递，见 LicenseService.reportUsage
                     licenseService.reportUsage(1);
