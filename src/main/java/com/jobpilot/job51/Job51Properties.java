@@ -6,7 +6,6 @@ import lombok.Data;
 import lombok.EqualsAndHashCode;
 import org.springframework.stereotype.Service;
 
-import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -38,11 +37,7 @@ public class Job51Properties {
     @EqualsAndHashCode(callSuper = true)
     public static class Job51Config extends PlatformConfig {
 
-        /** 搜索关键词，逐个跑。出厂给一组服装/零售方向的，用户按自己方向改 */
-        private List<String> keywords = new ArrayList<>(List.of("陈列设计", "视觉设计"));
-
-        /** 城市名（如"苏州"）或 51job 地区码（如 070300），启动时统一换成码 */
-        private String city = "苏州";
+        // 搜索关键词和城市出厂不预填，沿用 PlatformConfig 的空默认——预填谁的意向就成了谁的私货
 
         /**
          * 学历要求，值为逗号连接的档位码（{@code degree=04,05,06,07}）。

@@ -91,11 +91,12 @@ class LiepinQuotaPrecheckTest {
         when(entitlementService.usedToday(anyString())).thenReturn(0);
         when(entitlementService.remainingToday(anyString(), anyString())).thenReturn(150);
 
-        // 出厂默认是预演 + 各平台自带关键词/城市，这里统一收成"真投 + 全国"，
+        // 出厂是预演 + 关键词和城市全空，这里统一收成"真投 + 全国 + 有词"，
         // 让每个用例只表达自己要测的那一件事
         LiepinProperties.LiepinConfig liepin = new LiepinProperties.LiepinConfig();
         liepin.setDryRun(false);
         liepin.setCity("");
+        liepin.setKeywords(List.of("视觉设计"));
         when(liepinProperties.get()).thenReturn(liepin);
 
         BossProperties.BossConfig boss = new BossProperties.BossConfig();

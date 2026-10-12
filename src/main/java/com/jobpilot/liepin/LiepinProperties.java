@@ -6,7 +6,6 @@ import lombok.Data;
 import lombok.EqualsAndHashCode;
 import org.springframework.stereotype.Service;
 
-import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -39,10 +38,6 @@ public class LiepinProperties {
     @EqualsAndHashCode(callSuper = true)
     public static class LiepinConfig extends PlatformConfig {
 
-        /** 搜索关键词，逐个跑。出厂给一组服装/零售方向的，用户按自己方向改 */
-        private List<String> keywords = new ArrayList<>(List.of("陈列设计", "视觉设计"));
-
-        /** 城市名（如"苏州"）或猎聘城市码（如 060080），启动时统一换成码 */
-        private String city = "苏州";
+        // 搜索关键词和城市出厂不预填，沿用 PlatformConfig 的空默认——预填谁的意向就成了谁的私货
     }
 }

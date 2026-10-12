@@ -6,7 +6,6 @@ import lombok.Data;
 import lombok.EqualsAndHashCode;
 import org.springframework.stereotype.Service;
 
-import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -42,11 +41,7 @@ public class BossProperties {
     @EqualsAndHashCode(callSuper = true)
     public static class BossConfig extends PlatformConfig {
 
-        /** 搜索关键词，逐个跑 */
-        private List<String> keywords = new ArrayList<>(List.of("陈列设计"));
-
-        /** 城市名（如"上海"）或城市码（如 101020100），启动时统一换成码 */
-        private String city = "上海";
+        // 搜索关键词和城市出厂不预填，沿用 PlatformConfig 的空默认——预填谁的意向就成了谁的私货
 
         /** 固定打招呼话术。AI 话术启用时这里是兜底：生成失败或输出重复，就发这一条 */
         private String sayHi = "您好！我对这个岗位很感兴趣，我的经历与岗位要求比较匹配，方便发一份简历给您看看吗？期待您的回复。";
