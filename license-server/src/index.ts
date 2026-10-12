@@ -739,17 +739,13 @@ app.post('/api/ai/chat', async (c) => {
   const temperature = Number.isFinite(rawTemp) ? Math.min(2, Math.max(0, rawTemp)) : 0.9
 
   // 客户端可以指定模型，但名字必须是这台中转列得出来的——不然一张卡报个任意模型名
-  // 就能让平台买单。清单拉不出来（中转抽风、Key 换了）时退回平台默认模型：
-  // 没把握的名字不替客户转给中转，选模型的功能也不该把整批话术卡死。
+  // 就能让平台买单。对不上号就退回平台默认模型，不拒请求：老用户在"我自己的接口"
+  // 里填过的模型名升级后会留在配置里，拿它当错误把人卡住没道理。
   const requested = (body?.model ?? '').trim().slice(0, 80)
   let model = relay.model
   if (requested && requested !== relay.model) {
     const allowed = await cachedRelayModels(c.env.RATE_LIMIT, relay)
-    if (allowed && !allowed.includes(requested)) {
-      return fail(400, 'MODEL_NOT_ALLOWED', '平台的中转里没有这个模型：' + requested)
-    }
-    // 清单拉不到（allowed 为 null）时不替客户转一个没把握的名字，用平台默认模型继续生成
-    if (allowed) model = requested
+    if (allowed?.includes(requested)) model = requested
   }
 
   const result = await callRelay(relay, body?.system ?? '', user, temperature, model)
@@ -792,10 +788,16 @@ app.post('/api/ai/models', async (c) => {
     return fail(502, 'RELAY_FAILED', listed.error)
   }
   await cacheRelayModels(c.env.RATE_LIMIT, relay, listed.models)
+  // 分组只当"这个模型挂在哪"的说明用，不判可用不可用：平台这台中转由运营方配，
+  // 后台的模型清单也是同一份，客户端再说"调不通"就和后台自相矛盾了。
+  const groups = Object.fromEntries(listed.models.map(name => [
+    name,
+    { groups: listed.details[name]?.groups ?? [], available: true }
+  ]))
   return ok({
     models: listed.models,
-    model_groups: listed.details,
-    available_count: Object.values(listed.details).filter(d => d.available).length,
+    model_groups: groups,
+    available_count: listed.models.length,
     model: relay.model
   })
 })
