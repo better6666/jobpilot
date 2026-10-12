@@ -700,7 +700,9 @@ public class NativeMainWindow {
         boolean custom = "custom".equals(choiceValue(aiMode));
         aiUrl.setEnabled(custom);
         aiKey.setEnabled(custom);
-        aiModel.setEnabled(custom);
+        // 平台模式下模型也能选（拉的是平台中转的清单），留空就是用平台后台那个默认值
+        aiModel.setEnabled(true);
+        aiModel.setToolTipText(custom ? null : "留空 = 用平台默认模型；「拉取模型」列的是平台中转的模型");
     }
 
     private void saveAi() {
@@ -722,13 +724,11 @@ public class NativeMainWindow {
     }
 
     private void loadModels() {
-        if (!"custom".equals(choiceValue(aiMode))) {
-            message("平台中转模式由平台指定模型");
-            return;
-        }
-        String url = URLEncoder.encode(aiUrl.getText().trim(), StandardCharsets.UTF_8);
-        String key = URLEncoder.encode(new String(aiKey.getPassword()).trim(), StandardCharsets.UTF_8);
-        async(() -> api("GET", "/api/ai/models?baseUrl=" + url + "&apiKey=" + key, null), data -> {
+        boolean platform = !"custom".equals(choiceValue(aiMode));
+        // 平台模式下地址和 key 都在卡密服务端，页面上一格没填也能拉
+        String query = platform ? "" : customModelQuery();
+        String note = platform ? "平台没开这个分组，选了调不通" : "需把令牌分组改成它";
+        async(() -> api("GET", "/api/ai/models" + query, null), data -> {
             if (!data.path("ok").asBoolean()) {
                 message(data.path("error").asText("拉取模型失败"));
                 return;
@@ -747,7 +747,7 @@ public class NativeMainWindow {
                     labels.add(name);
                 } else {
                     otherGroup++;
-                    labels.add(name + "   —— 分组 " + String.join("/", groups) + "，需把令牌分组改成它");
+                    labels.add(name + "   —— 分组 " + String.join("/", groups) + "，" + note);
                 }
             }
             String title = otherGroup > 0
@@ -760,6 +760,13 @@ public class NativeMainWindow {
                 if (index >= 0) aiModel.setText(names.get(index));
             }
         });
+    }
+
+    /** 自有接口模式下把页面上填的地址和 key 带过去问中转 */
+    private String customModelQuery() {
+        String url = URLEncoder.encode(aiUrl.getText().trim(), StandardCharsets.UTF_8);
+        String key = URLEncoder.encode(new String(aiKey.getPassword()).trim(), StandardCharsets.UTF_8);
+        return "?baseUrl=" + url + "&apiKey=" + key;
     }
 
     private void testAi() {

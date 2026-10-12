@@ -230,6 +230,12 @@ public class AiService {
         return AiResult.fail(lastError);
     }
 
+    /** 平台话术，模型用平台后台那个默认值 */
+    public AiResult chatPlatform(String apiBase, String token, String deviceId,
+                                 String systemPrompt, String userPrompt, double temperature) {
+        return chatPlatform(apiBase, token, deviceId, systemPrompt, userPrompt, temperature, "");
+    }
+
     /**
      * 走平台中转：把提示词发给卡密服务端，由服务端拿自己存的 key 去调中转。
      *
@@ -237,11 +243,16 @@ public class AiService {
      * 把平台的额度搬去自用。这是"平台提供话术"和"把 key 发给客户端自己调"
      * 的本质区别，后者等于把 key 白送。
      *
+     * <p>{@code model} 传空串表示"用平台默认那个"；非空时服务端会先核对这个名字
+     * 在平台的中转里列不列得出来，列不出来才拒（客户端从「拉取模型」的列表里选
+     * 的就是这个中转的清单，所以正常选择都能对上）。
+     *
      * <p>失败语义和 {@link #chat} 一致：返回 {@link AiResult#fail} 不抛异常，
      * 4xx 不重试（429 除外），调用方退回固定话术。
      */
     public AiResult chatPlatform(String apiBase, String token, String deviceId,
-                                 String systemPrompt, String userPrompt, double temperature) {
+                                 String systemPrompt, String userPrompt, double temperature,
+                                 String model) {
         String base = apiBase == null ? "" : apiBase.trim().replaceAll("/+$", "");
         if (base.isEmpty()) {
             return AiResult.fail("卡密服务端地址没配");
@@ -258,6 +269,9 @@ public class AiService {
             payload.put("system", systemPrompt == null ? "" : systemPrompt);
             payload.put("user", userPrompt == null ? "" : userPrompt);
             payload.put("temperature", temperature);
+            if (!isBlank(model)) {
+                payload.put("model", model.trim());
+            }
             body = objectMapper.writeValueAsString(payload);
         } catch (Exception e) {
             return AiResult.fail("请求体构造失败: " + e.getMessage());

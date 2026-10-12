@@ -77,6 +77,7 @@ interface AiChatBody extends AuthBody {
   system?: string
   user?: string
   temperature?: number
+  model?: string
 }
 interface AiRelay {
   base_url: string
@@ -243,10 +244,11 @@ async function callRelay(
   relay: AiRelay,
   system: string,
   user: string,
-  temperature: number
+  temperature: number,
+  model = relay.model
 ): Promise<{ text: string } | { error: string }> {
   const payload = {
-    model: relay.model,
+    model,
     stream: false,
     temperature,
     messages: [
@@ -374,6 +376,48 @@ async function fetchPricingGroups(baseUrl: string): Promise<Record<string, strin
   } catch {
     return {}
   }
+}
+
+// ------------------------------------------------------------ 平台模型清单缓存
+// 客户端选完模型后每次生成话术都要校验这个名字，不能每次都打中转站。
+// 清单本身变得很慢（后台加渠道才变），缓存 10 分钟足够。
+
+const RELAY_MODELS_TTL_SEC = 600
+
+function relayModelsCacheKey(relay: AiRelay): string {
+  return 'ai:models:' + relay.base_url
+}
+
+async function cacheRelayModels(kv: KVNamespace, relay: AiRelay, models: string[]): Promise<void> {
+  if (models.length === 0) return
+  try {
+    await kv.put(relayModelsCacheKey(relay), JSON.stringify(models), {
+      expirationTtl: RELAY_MODELS_TTL_SEC
+    })
+  } catch {
+    // 缓存写不进去不影响本次响应，下次校验回源重拉就行
+  }
+}
+
+/**
+ * 校验用的模型清单。命中缓存就不打中转；缓存没有时回源拉一次并写回。
+ * 拉不到返回 null，由调用方决定退回默认模型——这里不抛。
+ */
+async function cachedRelayModels(kv: KVNamespace, relay: AiRelay): Promise<string[] | null> {
+  const key = relayModelsCacheKey(relay)
+  try {
+    const hit = await kv.get(key)
+    if (hit) {
+      const parsed = JSON.parse(hit) as unknown
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed as string[]
+    }
+  } catch {
+    // 缓存内容坏了当没有，回源
+  }
+  const listed = await listRelayModels(relay.base_url, relay.api_key)
+  if ('error' in listed || listed.models.length === 0) return null
+  await cacheRelayModels(kv, relay, listed.models)
+  return listed.models
 }
 
 /** 非 2xx 的中转响应翻成人话。和 callRelay 里的判断保持一套说法 */
@@ -694,11 +738,66 @@ app.post('/api/ai/chat', async (c) => {
   const rawTemp = Number(body?.temperature)
   const temperature = Number.isFinite(rawTemp) ? Math.min(2, Math.max(0, rawTemp)) : 0.9
 
-  const result = await callRelay(relay, body?.system ?? '', user, temperature)
+  // 客户端可以指定模型，但名字必须是这台中转列得出来的——不然一张卡报个任意模型名
+  // 就能让平台买单。清单拉不出来（中转抽风、Key 换了）时退回平台默认模型：
+  // 没把握的名字不替客户转给中转，选模型的功能也不该把整批话术卡死。
+  const requested = (body?.model ?? '').trim().slice(0, 80)
+  let model = relay.model
+  if (requested && requested !== relay.model) {
+    const allowed = await cachedRelayModels(c.env.RATE_LIMIT, relay)
+    if (allowed && !allowed.includes(requested)) {
+      return fail(400, 'MODEL_NOT_ALLOWED', '平台的中转里没有这个模型：' + requested)
+    }
+    // 清单拉不到（allowed 为 null）时不替客户转一个没把握的名字，用平台默认模型继续生成
+    if (allowed) model = requested
+  }
+
+  const result = await callRelay(relay, body?.system ?? '', user, temperature, model)
   if ('error' in result) {
     return fail(502, 'RELAY_FAILED', result.error)
   }
-  return ok({ text: result.text, model: relay.model })
+  return ok({ text: result.text, model })
+})
+
+/**
+ * 平台模式下客户端的「拉取模型」按钮。
+ *
+ * 发请求用的是平台自己那把中转 key，地址和 key 一个字都不回传——买卡的人
+ * 只看得到模型名。限到每分钟 10 次：够配置页点几下，又不至于被人拿这个接口刷中转。
+ * 拉到的清单同时写进缓存，/api/ai/chat 校验客户端指定的模型时就不用再打一次中转。
+ */
+app.post('/api/ai/models', async (c) => {
+  const body = await c.req.json<AuthBody>().catch(() => null)
+  const token = body?.token?.trim() ?? ''
+  const deviceId = body?.device_id?.trim() ?? ''
+  if (!token || !deviceId) {
+    return fail(400, 'BAD_REQUEST', '缺少 token 或 device_id')
+  }
+
+  const auth = await authenticate(c.env.DB, token, deviceId)
+  if (auth instanceof Response) return auth
+  const unusable = checkCardUsable(auth.card)
+  if (unusable) return unusable
+
+  if (!(await rateLimit(c.env.RATE_LIMIT, `rl:ai:models:${auth.card.card_key}`, 10, 60))) {
+    return fail(429, 'RATE_LIMITED', '拉取太频繁，稍后再试')
+  }
+
+  const relay = await getAiRelay(c.env.DB)
+  if (!relay) {
+    return fail(503, 'AI_NOT_CONFIGURED', '平台没配 AI 中转，请在客户端改用"我自己的接口"')
+  }
+  const listed = await listRelayModels(relay.base_url, relay.api_key)
+  if ('error' in listed) {
+    return fail(502, 'RELAY_FAILED', listed.error)
+  }
+  await cacheRelayModels(c.env.RATE_LIMIT, relay, listed.models)
+  return ok({
+    models: listed.models,
+    model_groups: listed.details,
+    available_count: Object.values(listed.details).filter(d => d.available).length,
+    model: relay.model
+  })
 })
 
 // ---------------------------------------------------------------- 管理接口

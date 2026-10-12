@@ -8,7 +8,9 @@ import com.jobpilot.license.LicenseService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -110,10 +112,12 @@ public class AiController {
                 data.put("error", "卡密未激活，先激活才能用平台话术");
                 return ApiResponse.ok(data);
             }
-            data.put("model", platformInfo().model());
+            // 客户在平台上选了模型就用他选的，没选过（空）就是平台后台那个默认值
+            String platformModel = firstNonBlank(saved.getModel(), platformInfo().model());
+            data.put("model", platformModel);
             result = aiService.chatPlatform(licenseProperties.getApiBase(),
                     credentials.get("token"), credentials.get("device_id"),
-                    TEST_SYSTEM, TEST_USER, 0.3);
+                    TEST_SYSTEM, TEST_USER, 0.3, saved.getModel());
         } else {
             String baseUrl = firstNonBlank(body != null ? body.baseUrl() : null, saved.getBaseUrl());
             String apiKey = firstNonBlank(body != null ? body.apiKey() : null, saved.getApiKey());
@@ -135,8 +139,9 @@ public class AiController {
     /**
      * 拉取模型列表：中转站后台常见的"获取模型"按钮。
      *
-     * <p>平台模式下模型由平台定，客户端没有 /models 可拉，直接说明白，
-     * 别让用户对着一个没反应的按钮发呆。
+     * <p>自有接口模式下直接拿客户填的地址和 key 去问中转；平台模式下客户端
+     * 一个字符的接口信息都没有，改走卡密服务端的 {@code /api/ai/models}——
+     * 由服务端用它自己那把中转 key 去拉，回来的只有模型名和分组名。
      */
     @GetMapping("/models")
     public ApiResponse<Map<String, Object>> models(@RequestParam(required = false) String baseUrl,
@@ -147,9 +152,7 @@ public class AiController {
         data.put("mode", platform ? AiProperties.MODE_PLATFORM : AiProperties.MODE_CUSTOM);
 
         if (platform) {
-            data.put("ok", false);
-            data.put("error", "模型由平台统一指定，不能自己拉取");
-            return ApiResponse.ok(data);
+            return ApiResponse.ok(platformModels(data));
         }
 
         String url = firstNonBlank(baseUrl, saved.getBaseUrl());
@@ -169,6 +172,55 @@ public class AiController {
             data.put("error", result.error());
         }
         return ApiResponse.ok(data);
+    }
+
+    /**
+     * 平台模式下的拉取：让卡密服务端用它自己那把中转 key 去问，客户端只接模型名。
+     *
+     * <p>服务端那台中转的地址和 key 一个字都不往客户端传——和 {@code /api/ai/chat}
+     * 同一个道理，翻安装目录的人拿不到平台的额度。
+     */
+    private Map<String, Object> platformModels(Map<String, Object> data) {
+        Map<String, String> credentials = licenseService.proxyCredentials();
+        if (credentials == null) {
+            data.put("ok", false);
+            data.put("error", "卡密未激活，先激活才能拉平台的模型列表");
+            return data;
+        }
+        JsonNode node;
+        try {
+            node = licenseClient.post(licenseProperties.getApiBase(), "/api/ai/models",
+                    Map.of("token", credentials.get("token"),
+                            "device_id", credentials.get("device_id")));
+        } catch (LicenseClient.LicenseServerException e) {
+            // 服务端的话已经是给人看的（平台没配中转 / 中转挂了 / 拉得太频繁），原样带上
+            data.put("ok", false);
+            data.put("error", e.getMessage());
+            return data;
+        }
+        if (node == null) {
+            data.put("ok", false);
+            data.put("error", "连不上卡密服务端，暂时拉不了平台的模型列表");
+            return data;
+        }
+        JsonNode payload = node.path("data");
+        List<String> names = new ArrayList<>();
+        payload.path("models").forEach(item -> names.add(item.asText("")));
+        if (names.isEmpty()) {
+            data.put("ok", false);
+            data.put("error", "平台的中转没有返回模型");
+            return data;
+        }
+        data.put("ok", true);
+        data.put("models", names);
+        data.put("platformModel", payload.path("model").asText(""));
+        JsonNode groups = payload.path("model_groups");
+        // 键名换成客户端认的样子，两种模式下 NativeMainWindow 走同一段渲染
+        if (groups.isObject() && groups.size() > 0) {
+            data.put("modelGroups", groups);
+            data.put("availableCount", payload.path("available_count").asInt(names.size()));
+        }
+        return data;
     }
 
     /**

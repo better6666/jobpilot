@@ -455,6 +455,23 @@ class AiServiceTest {
     }
 
     @Test
+    void 平台代理带上客户选的模型() throws Exception {
+        AiService.AiResult r = aiService.chatPlatform(baseUrl(), "t", "d", "s", "u", 0.7, "step-5-preview");
+
+        assertTrue(r.isOk(), r.error());
+        assertEquals("step-5-preview", objectMapper.readTree(bodies.get(0)).path("model").asText());
+    }
+
+    @Test
+    void 平台代理模型留空时不带这个字段() throws Exception {
+        AiService.AiResult r = aiService.chatPlatform(baseUrl(), "t", "d", "s", "u", 0.7, "  ");
+
+        assertTrue(r.isOk(), r.error());
+        // 不带 model = 服务端用它自己后台那个默认模型，客户端不越权指定
+        assertFalse(objectMapper.readTree(bodies.get(0)).has("model"));
+    }
+
+    @Test
     void 平台代理从data里取话术文本() throws Exception {
         responder = (path, body) -> new Reply(200,
                 "{\"success\":true,\"data\":{\"text\":\"您好，看到贵司在招人\",\"model\":\"step-5-preview\"}}");

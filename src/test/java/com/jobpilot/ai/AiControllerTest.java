@@ -20,14 +20,18 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.not;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -275,7 +279,7 @@ class AiControllerTest {
         switchToPlatform();
         doReturn(Map.of("token", "tok-1", "device_id", "dev-1")).when(licenseService).proxyCredentials();
         doReturn(AiService.AiResult.ok("我能正常工作")).when(aiService)
-                .chatPlatform(anyString(), anyString(), anyString(), anyString(), anyString(), eq(0.3));
+                .chatPlatform(anyString(), anyString(), anyString(), anyString(), anyString(), eq(0.3), anyString());
 
         mockMvc.perform(post("/api/ai/test").content("{}").contentType(MediaType.APPLICATION_JSON))
                 .andExpect(status().isOk())
@@ -284,7 +288,7 @@ class AiControllerTest {
                 .andExpect(jsonPath("$.data.reply").value("我能正常工作"));
 
         verify(aiService).chatPlatform("https://license.example.com", "tok-1", "dev-1",
-                "你是连通性测试助手。", "请用一句中文回答：你能正常工作吗？", 0.3);
+                "你是连通性测试助手。", "请用一句中文回答：你能正常工作吗？", 0.3, "");
         // 不能顺手去直连——那会把请求发到客户没配的地址上
         org.mockito.Mockito.verify(aiService, org.mockito.Mockito.never())
                 .chat(anyString(), anyString(), anyString(), anyString(), anyString(), eq(0.3));
@@ -302,15 +306,71 @@ class AiControllerTest {
     }
 
     @Test
-    void 平台模式下不提供拉取模型() throws Exception {
+    void 平台模式拉取模型走卡密服务端且不回传接口信息() throws Exception {
         switchToPlatform();
+        doReturn(Map.of("token", "tok-1", "device_id", "dev-1")).when(licenseService).proxyCredentials();
+        // 服务端就算多给了 base_url / api_key，客户端这一层也只挑白名单字段
+        doReturn(new com.fasterxml.jackson.databind.ObjectMapper().readTree(
+                "{\"success\":true,\"data\":{\"models\":[\"step-5-preview\",\"gpt-4o-mini\"],"
+                        + "\"model_groups\":{\"step-5-preview\":{\"groups\":[\"default\"],\"available\":true},"
+                        + "\"gpt-4o-mini\":{\"groups\":[\"vip\"],\"available\":false}},"
+                        + "\"available_count\":1,\"model\":\"step-5-preview\","
+                        + "\"base_url\":\"https://platform-relay.example.net\",\"api_key\":\"sk-platform-secret\"}}"))
+                .when(licenseClient).post(anyString(), eq("/api/ai/models"), any());
+
+        mockMvc.perform(get("/api/ai/models"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.mode").value("platform"))
+                .andExpect(jsonPath("$.data.ok").value(true))
+                .andExpect(jsonPath("$.data.models.length()").value(2))
+                .andExpect(jsonPath("$.data.modelGroups['gpt-4o-mini'].available").value(false))
+                .andExpect(jsonPath("$.data.availableCount").value(1))
+                .andExpect(jsonPath("$.data.platformModel").value("step-5-preview"))
+                .andExpect(content().string(not(containsString("platform-relay.example.net"))))
+                .andExpect(content().string(not(containsString("sk-platform-secret"))));
+
+        org.mockito.Mockito.verify(aiService, org.mockito.Mockito.never()).models(anyString(), anyString());
+    }
+
+    @Test
+    void 平台模式拉取模型带上卡密凭证() throws Exception {
+        switchToPlatform();
+        doReturn(Map.of("token", "tok-1", "device_id", "dev-1")).when(licenseService).proxyCredentials();
+        doReturn(new com.fasterxml.jackson.databind.ObjectMapper().readTree(
+                "{\"success\":true,\"data\":{\"models\":[\"step-5-preview\"],\"model\":\"step-5-preview\"}}"))
+                .when(licenseClient).post(anyString(), eq("/api/ai/models"), any());
+
+        mockMvc.perform(get("/api/ai/models")).andExpect(status().isOk());
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> body = ArgumentCaptor.forClass(Map.class);
+        verify(licenseClient).post(eq("https://license.example.com"), eq("/api/ai/models"), body.capture());
+        assertEquals("tok-1", body.getValue().get("token"));
+        assertEquals("dev-1", body.getValue().get("device_id"));
+    }
+
+    @Test
+    void 平台模式卡密没激活时拉取模型说清楚原因() throws Exception {
+        switchToPlatform();
+        doReturn(null).when(licenseService).proxyCredentials();
 
         mockMvc.perform(get("/api/ai/models"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.ok").value(false))
-                .andExpect(jsonPath("$.data.error").value("模型由平台统一指定，不能自己拉取"));
+                .andExpect(jsonPath("$.data.error").value("卡密未激活，先激活才能拉平台的模型列表"));
+    }
 
-        org.mockito.Mockito.verify(aiService, org.mockito.Mockito.never()).models(anyString(), anyString());
+    @Test
+    void 平台模式服务端报错时原样带上原因() throws Exception {
+        switchToPlatform();
+        doReturn(Map.of("token", "tok-1", "device_id", "dev-1")).when(licenseService).proxyCredentials();
+        doThrow(new LicenseClient.LicenseServerException(503, "AI_NOT_CONFIGURED", "平台没开 AI 中转"))
+                .when(licenseClient).post(anyString(), eq("/api/ai/models"), any());
+
+        mockMvc.perform(get("/api/ai/models"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.ok").value(false))
+                .andExpect(jsonPath("$.data.error").value("平台没开 AI 中转"));
     }
 
     @Test
