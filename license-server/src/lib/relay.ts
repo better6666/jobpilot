@@ -123,3 +123,32 @@ export function parseModelList(body: unknown): string[] {
   }
   return []
 }
+
+/**
+ * 解析 NewAPI 的分组模型清单（{@code GET {站点根}/api/pricing}）。
+ *
+ * <p>为什么还要这个：`/v1/models` 只返回令牌所属分组下的那几个模型，其他分组
+ * （例如 kiro / cpa 这类反代分组）的模型名列表里根本没有，管理页看着就像
+ * "拉不全"。这个接口挂在站点根上、不要 Key，data[].model_name 覆盖全部分组，
+ * enable_groups 说明每个模型挂在哪些分组下。
+ *
+ * 认不出形状（不是 NewAPI、要鉴权、字段缺失）一律返回空表——拉不到分组清单
+ * 只该让列表退回 /models 的结果，不该让整个「拉取模型」报错。
+ */
+export function parsePricingModels(body: unknown): Record<string, string[]> {
+  const items = (body as { data?: unknown } | null)?.data
+  if (!Array.isArray(items)) return {}
+  const result: Record<string, string[]> = {}
+  for (const raw of items) {
+    if (!raw || typeof raw !== 'object') continue
+    const node = raw as Record<string, unknown>
+    const name = typeof node.model_name === 'string' ? node.model_name.trim() : ''
+    if (!name || result[name]) continue
+    const groups = Array.isArray(node.enable_groups)
+      ? [...new Set(node.enable_groups.map(g => (typeof g === 'string' ? g.trim() : '')))]
+          .filter(g => g.length > 0)
+      : []
+    result[name] = groups
+  }
+  return result
+}

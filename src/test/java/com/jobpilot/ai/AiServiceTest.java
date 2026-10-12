@@ -312,6 +312,40 @@ class AiServiceTest {
         assertFalse(r.error().contains("sk-x"));
     }
 
+    @Test
+    void 模型列表会补上其他分组的模型() {
+        // NewAPI 的 /v1/models 只列令牌分组那几个，全量清单在站点的 /api/pricing
+        responder = (path, body) -> switch (path) {
+            case MODELS_PATH -> new Reply(200, "{\"data\":[{\"id\":\"gpt-4o-mini\"}]}");
+            case "/api/pricing" -> new Reply(200, "{\"data\":["
+                    + "{\"model_name\":\"claude-opus-5\",\"enable_groups\":[\"kiro\"]},"
+                    + "{\"model_name\":\"gpt-4o-mini\",\"enable_groups\":[\"default\"]}]}");
+            default -> new Reply(200, "{}");
+        };
+
+        AiService.ModelResult r = aiService.models(baseUrl(), "sk-x");
+
+        assertTrue(r.isOk());
+        assertEquals(List.of("gpt-4o-mini", "claude-opus-5"), r.models());
+        assertTrue(r.details().get("gpt-4o-mini").available());
+        assertEquals(List.of("default"), r.details().get("gpt-4o-mini").groups());
+        assertFalse(r.details().get("claude-opus-5").available());
+        assertEquals(List.of("kiro"), r.details().get("claude-opus-5").groups());
+    }
+
+    @Test
+    void 站点没有分组接口时模型列表退回原样() {
+        responder = (path, body) -> "/api/pricing".equals(path)
+                ? new Reply(404, "not found")
+                : new Reply(200, "{\"data\":[{\"id\":\"a\"},{\"id\":\"b\"}]}");
+
+        AiService.ModelResult r = aiService.models(baseUrl(), "sk-x");
+
+        assertTrue(r.isOk());
+        assertEquals(List.of("a", "b"), r.models());
+        assertTrue(r.details().isEmpty());
+    }
+
     // ------------------------------------------------------------------
     // 输出清洗
     // ------------------------------------------------------------------

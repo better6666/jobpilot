@@ -159,6 +159,12 @@ public class AiController {
         data.put("baseUrl", AiService.normalizeBaseUrl(url));
         if (result.isOk()) {
             data.put("models", result.models());
+            // 站点不暴露分组接口时这两个字段干脆不给，桌面端就按老样子只显示模型名
+            if (!result.details().isEmpty()) {
+                data.put("modelGroups", result.details());
+                data.put("availableCount", (int) result.details().values().stream()
+                        .filter(AiService.ModelInfo::available).count());
+            }
         } else {
             data.put("error", result.error());
         }

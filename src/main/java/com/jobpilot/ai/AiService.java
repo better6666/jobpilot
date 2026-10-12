@@ -72,14 +72,27 @@ public class AiService {
         }
     }
 
-    /** 拉模型列表的结果 */
-    public record ModelResult(List<String> models, String error) {
+    /** 一个模型的分组归属：挂在哪些分组下、当前 Key 能不能直接调用 */
+    public record ModelInfo(List<String> groups, boolean available) {
+    }
+
+    /**
+     * 拉模型列表的结果。
+     *
+     * @param models  模型名，当前 Key 可调用的排前面
+     * @param details 模型名 -> 分组归属；中转站不暴露分组接口时为空表
+     */
+    public record ModelResult(List<String> models, Map<String, ModelInfo> details, String error) {
         public static ModelResult ok(List<String> models) {
-            return new ModelResult(models, null);
+            return new ModelResult(models, Map.of(), null);
+        }
+
+        public static ModelResult ok(List<String> models, Map<String, ModelInfo> details) {
+            return new ModelResult(models, details, null);
         }
 
         public static ModelResult fail(String error) {
-            return new ModelResult(List.of(), error);
+            return new ModelResult(List.of(), Map.of(), error);
         }
 
         public boolean isOk() {
@@ -360,13 +373,93 @@ public class AiService {
                 return ModelResult.fail("接口没返回任何模型（/models 为空）");
             }
             ids.sort(String::compareTo);
-            return ModelResult.ok(ids);
+
+            // NewAPI 一类中转站的 /models 只列令牌所属分组那几个模型，其他分组的
+            // 模型要问公开的 /api/pricing。认不出这个接口就当没这回事，退回 /models 的结果。
+            Map<String, List<String>> grouped = fetchPricingGroups(base);
+            if (grouped.isEmpty()) {
+                // 认不出分组接口的站点就按老样子只回 /models 的结果
+                return ModelResult.ok(ids);
+            }
+            List<String> extras = new ArrayList<>();
+            for (String name : grouped.keySet()) {
+                if (!ids.contains(name)) {
+                    extras.add(name);
+                }
+            }
+            extras.sort(String::compareTo);
+
+            Map<String, ModelInfo> details = new LinkedHashMap<>();
+            for (String name : ids) {
+                details.put(name, new ModelInfo(grouped.getOrDefault(name, List.of()), true));
+            }
+            for (String name : extras) {
+                details.put(name, new ModelInfo(grouped.getOrDefault(name, List.of()), false));
+            }
+            List<String> all = new ArrayList<>(ids);
+            all.addAll(extras);
+            return ModelResult.ok(all, details);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return ModelResult.fail("调用被中断");
         } catch (Exception e) {
             return ModelResult.fail("连接失败或超时: " + e.getClass().getSimpleName());
         }
+    }
+
+    /**
+     * 读中转站的分组模型清单（NewAPI：{@code GET {站点根}/api/pricing}）。
+     *
+     * <p>这个接口不需要 API Key，返回的 {@code data[].model_name} 覆盖全部分组，
+     * {@code enable_groups} 说明每个模型挂在哪些分组下。非 NewAPI 站点、接口要
+     * 鉴权、形状不认识一律返回空表——拿不到分组信息不该让"拉取模型"整个失败。
+     *
+     * @return 模型名 -> 它所在的分组列表，保持中转站返回的顺序
+     */
+    private Map<String, List<String>> fetchPricingGroups(String base) {
+        Map<String, List<String>> result = new LinkedHashMap<>();
+        try {
+            String origin = URI.create(base).resolve("/").toString();
+            while (origin.endsWith("/")) {
+                origin = origin.substring(0, origin.length() - 1);
+            }
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(origin + "/api/pricing"))
+                    .timeout(Duration.ofMillis(READ_TIMEOUT_MS))
+                    .GET()
+                    .build();
+            HttpResponse<String> response = httpClient.send(request,
+                    HttpResponse.BodyHandlers.ofString());
+            int code = response.statusCode();
+            if (code < 200 || code >= 300) {
+                return Map.of();
+            }
+            JsonNode data = objectMapper.readTree(response.body()).path("data");
+            if (!data.isArray()) {
+                return Map.of();
+            }
+            for (JsonNode item : data) {
+                String name = item.path("model_name").asText("").trim();
+                if (name.isEmpty() || result.containsKey(name)) {
+                    continue;
+                }
+                List<String> groups = new ArrayList<>();
+                for (JsonNode g : item.path("enable_groups")) {
+                    String group = g.asText("").trim();
+                    if (!group.isEmpty() && !groups.contains(group)) {
+                        groups.add(group);
+                    }
+                }
+                result.put(name, groups);
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return Map.of();
+        } catch (Exception e) {
+            log.debug("读不到中转站分组清单，只用 /models 的结果: {}", e.getClass().getSimpleName());
+            return Map.of();
+        }
+        return result;
     }
 
     // ------------------------------------------------------------------

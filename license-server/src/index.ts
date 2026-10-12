@@ -13,7 +13,8 @@ import {
   normalizeRelayBaseUrl,
   maskKey,
   modelListPaths,
-  parseModelList
+  parseModelList,
+  parsePricingModels
 } from './lib/relay'
 
 export interface Env {
@@ -289,11 +290,16 @@ async function callRelay(
  * <p>逐个路径试（见 {@link modelListPaths}）：各家中转站挂 /models 的位置
  * 不统一，只试标准那条的话，一半的站会 404 然后用户以为 key 错了。
  * 有一个路径返回得了非空列表就收工。
+ *
+ * <p>拿到列表后再问一次 {@link fetchPricingGroups}：NewAPI 一类站点的
+ * `/v1/models` 只列令牌所属分组的模型，其他分组的模型要靠 `/api/pricing`
+ * 才列得全。合并后 available=false 的那些属于其他分组——名字列得出来，
+ * 令牌分组不改过去还是调不通，所以一并回传分组名给页面标注。
  */
 async function listRelayModels(
   baseUrl: string,
   apiKey: string
-): Promise<{ models: string[] } | { error: string }> {
+): Promise<{ models: string[]; details: Record<string, { groups: string[]; available: boolean }> } | { error: string }> {
   const paths = modelListPaths(baseUrl)
   if (paths.length === 0) return { error: '中转地址没配或不是 http(s) 地址' }
   if (!apiKey) return { error: 'API Key 没配' }
@@ -328,10 +334,46 @@ async function listRelayModels(
     } catch {
       return { error: '中转响应不是合法 JSON' }
     }
-    if (models.length > 0) return { models }
+    if (models.length > 0) {
+      const grouped = await fetchPricingGroups(baseUrl)
+      if (Object.keys(grouped).length === 0) {
+        // 认不出分组接口的站点就按老样子只回 /models 的结果
+        return { models, details: {} }
+      }
+      const names = Object.keys(grouped)
+      const extras = names.filter(name => !models.includes(name)).sort()
+      const details: Record<string, { groups: string[]; available: boolean }> = {}
+      for (const name of models) details[name] = { groups: grouped[name] ?? [], available: true }
+      for (const name of extras) details[name] = { groups: grouped[name] ?? [], available: false }
+      return { models: [...models, ...extras], details }
+    }
     lastError = '中转没返回任何模型'
   }
   return { error: lastError || '没找到模型列表接口' }
+}
+
+/**
+ * 站点根上的分组模型清单（NewAPI：GET {origin}/api/pricing，不需要 Key）。
+ * 任何失败都返回空表，让调用方退回 /models 的结果。
+ */
+async function fetchPricingGroups(baseUrl: string): Promise<Record<string, string[]>> {
+  let origin = ''
+  try {
+    origin = new URL(baseUrl).origin
+  } catch {
+    return {}
+  }
+  if (!origin) return {}
+  try {
+    const response = await fetch(origin + '/api/pricing', {
+      method: 'GET',
+      signal: AbortSignal.timeout(15000)
+    })
+    if (response.status < 200 || response.status >= 300) return {}
+    return parsePricingModels(JSON.parse(await response.text()))
+  } catch {
+    return {}
+  }
 }
 
 /** 非 2xx 的中转响应翻成人话。和 callRelay 里的判断保持一套说法 */
@@ -928,7 +970,13 @@ app.post('/admin/ai/models', async (c) => {
   if ('error' in result) {
     return ok({ ok: false, error: result.error, base_url: baseUrl })
   }
-  return ok({ ok: true, models: result.models, base_url: baseUrl })
+  return ok({
+    ok: true,
+    models: result.models,
+    base_url: baseUrl,
+    model_groups: result.details,
+    available_count: Object.values(result.details).filter(d => d.available).length
+  })
 })
 
 export default app

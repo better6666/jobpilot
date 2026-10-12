@@ -736,9 +736,29 @@ public class NativeMainWindow {
             List<String> names = new ArrayList<>();
             data.path("models").forEach(node -> names.add(node.asText("")));
             if (names.isEmpty()) { message("接口没有返回模型"); return; }
-            Object choice = JOptionPane.showInputDialog(frame, "选择模型", "模型列表",
-                    JOptionPane.PLAIN_MESSAGE, null, names.toArray(), names.get(0));
-            if (choice != null) aiModel.setText(choice.toString());
+            JsonNode groupInfo = data.path("modelGroups");
+            List<String> labels = new ArrayList<>();
+            int otherGroup = 0;
+            for (String name : names) {
+                JsonNode info = groupInfo.path(name);
+                List<String> groups = new ArrayList<>();
+                info.path("groups").forEach(node -> groups.add(node.asText("")));
+                if (info.isMissingNode() || info.path("available").asBoolean(true) || groups.isEmpty()) {
+                    labels.add(name);
+                } else {
+                    otherGroup++;
+                    labels.add(name + "   —— 分组 " + String.join("/", groups) + "，需把令牌分组改成它");
+                }
+            }
+            String title = otherGroup > 0
+                    ? "选择模型（" + names.size() + " 个，其中 " + otherGroup + " 个在其他分组）"
+                    : "选择模型";
+            Object choice = JOptionPane.showInputDialog(frame, title, "模型列表",
+                    JOptionPane.PLAIN_MESSAGE, null, labels.toArray(), labels.get(0));
+            if (choice != null) {
+                int index = labels.indexOf(choice.toString());
+                if (index >= 0) aiModel.setText(names.get(index));
+            }
         });
     }
 

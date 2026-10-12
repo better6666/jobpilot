@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { normalizeRelayBaseUrl, maskKey, modelListPaths, parseModelList } from '../src/lib/relay.ts'
+import { normalizeRelayBaseUrl, maskKey, modelListPaths, parseModelList, parsePricingModels } from '../src/lib/relay.ts'
 
 // ---------------------------------------------------------------- 地址归一
 // 下面每一组用例都和客户端 AiServiceTest#normalizeBaseUrl 一一对应。
@@ -95,5 +95,23 @@ assert.deepEqual(parseModelList(undefined), [])
 assert.deepEqual(parseModelList('not json'), [])
 // 元素既不是字符串也没有可认的键
 assert.deepEqual(parseModelList({ data: [{ foo: 'x' }, 42] }), [])
+
+// ------------------------------------------------------------ 分组模型清单
+// NewAPI 的 /v1/models 只列令牌分组那几个，全量清单在 /api/pricing 的 model_name
+
+assert.deepEqual(parsePricingModels({
+  data: [
+    { model_name: 'claude-opus-5', enable_groups: ['kiro'] },
+    { model_name: 'gpt-4o-mini', enable_groups: ['default', 'cpa'] }
+  ]
+}), { 'claude-opus-5': ['kiro'], 'gpt-4o-mini': ['default', 'cpa'] })
+// 没有 enable_groups 也给空表，调用方要的是"名字全"而不是"分组全"
+assert.deepEqual(parsePricingModels({ data: [{ model_name: 'deepseek-chat' }] }),
+  { 'deepseek-chat': [] })
+// 形状不认识（不是 NewAPI、要鉴权、字段缺失）一律空表，退回 /models 的结果
+assert.deepEqual(parsePricingModels({ data: {} }), {})
+assert.deepEqual(parsePricingModels({ data: [{ id: 'gpt-4o' }] }), {})
+assert.deepEqual(parsePricingModels({}), {})
+assert.deepEqual(parsePricingModels(null), {})
 
 console.log('relay.test.ts 全部通过')
