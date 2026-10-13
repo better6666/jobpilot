@@ -1,0 +1,16 @@
+name = "getjobs-site"
+main = "src/index.ts"
+compatibility_date = "2025-01-09"
+
+# 安装包放 R2：dmg 113MB、Windows 包也上百 MB，
+# 放 Workers 静态资源会撞体积上限，放 R2 由 Worker 转发还能统一域名
+[[r2_buckets]]
+bucket_name = "getjobs-downloads"
+binding = "DOWNLOADS"
+
+[[unsafe.no-bundle]]
+
+# 自定义域名：下载站入口
+[[routes]]
+pattern = "getjobs.dpdns.org"
+custom_domain = true
