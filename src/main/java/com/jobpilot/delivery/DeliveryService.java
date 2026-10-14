@@ -61,6 +61,10 @@ public abstract class DeliveryService<C extends JobCard> {
     private volatile int consecutiveFailures;
     /** 连续失败到这个数就停：偶发失败（弹窗、超时）很少连着出现这么多次 */
     public static final int MAX_CONSECUTIVE_FAILURES = 8;
+    /** 低于这个间隔只提醒不拦：要不要冒险是用户自己的事 */
+    static final int MIN_SAFE_WAIT_SECONDS = 8;
+    /** 各平台驱动在收到停止指令、还没动手投时返回的失败原因 */
+    private static final String STOPPED = "已停止";
     private Future<?> currentRun;
 
     protected DeliveryService(DeliveryMapper mapper, BrowserManager browserManager,
@@ -184,6 +188,10 @@ public abstract class DeliveryService<C extends JobCard> {
         status = RunStatus.running(keywords.size(), config.isDryRun(), displayName());
         appendLog("投递任务启动：" + String.join("、", keywords)
                 + (config.isDryRun() ? "（预演模式，不会真发消息）" : ""));
+        if (!config.isDryRun() && config.getWaitSeconds() < MIN_SAFE_WAIT_SECONDS) {
+            appendLog("提醒：岗位间隔只有 " + config.getWaitSeconds() + " 秒，节奏太快容易被平台风控、"
+                    + "提前触发每日上限，建议设到 " + MIN_SAFE_WAIT_SECONDS + " 秒以上");
+        }
         try {
             currentRun = browserManager.submitAsync(() -> {
                 try {
@@ -405,13 +413,27 @@ public abstract class DeliveryService<C extends JobCard> {
                 case LIMIT -> {
                     record(card, keyword, "投递失败", "触发每日投递上限", score, null, existing);
                     status.setFailed(status.getFailed() + 1);
-                    appendLog("触发每日投递上限，任务停止");
+                    appendLog("触发每日投递上限，任务停止"
+                            + (outcome.failReason() != null ? "（" + outcome.failReason() + "）" : "")
+                            + "。明天再跑，或先切到别的平台");
                     stopRequested = true;
                 }
                 case FAILED -> {
-                    record(card, keyword, "投递失败", outcome.failReason(), score, null, existing);
+                    if (stopRequested && STOPPED.equals(outcome.failReason())) {
+                        // 用户点了停止、这个岗位压根没投：记成"投递失败"会污染统计，还会误触发熔断
+                        appendLog("已停止，未投 | " + target);
+                        return;
+                    }
+                    String reason = FailReasons.clean(outcome.failReason());
+                    record(card, keyword, "投递失败", reason, score, null, existing);
                     status.setFailed(status.getFailed() + 1);
-                    appendLog("投递失败 | " + target + " | " + outcome.failReason());
+                    appendLog("投递失败 | " + target + " | " + reason);
+                    // 这个钩子以前定义了却从没调用过：平台在列表页提示上限时，接着点只会全量失败
+                    if (listPage != null && limitReachedOnPage(listPage)) {
+                        appendLog("页面提示已达今日上限，任务停止");
+                        stopRequested = true;
+                        return;
+                    }
                     if (++consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
                         appendLog("连续 " + consecutiveFailures + " 个岗位投递失败，任务停止。"
                                 + "多半是登录失效、被平台限制或页面改版，请检查浏览器窗口后重新登录");

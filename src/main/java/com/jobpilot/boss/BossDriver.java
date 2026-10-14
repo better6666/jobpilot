@@ -372,18 +372,33 @@ public class BossDriver {
                 if (input != null) {
                     break;
                 }
+                // 今日沟通上限的提示就弹在这一页上。以前只在列表页找（而且那个检查从没被调用过），
+                // 2026-10-12 晚上触发上限后连续 60 多个岗位全记成"未找到聊天输入框"，空跑了两个半小时
+                String notice = visibleDialogText(detailPage);
+                if (isLimitNotice(notice)) {
+                    return DeliveryOutcome.limit("Boss 提示：" + notice);
+                }
                 clickContinueChat(detailPage);
                 sleep(1000);
             }
             if (input == null) {
-                return new DeliveryOutcome(DeliveryStatus.FAILED, "未找到聊天输入框", greeting);
+                String notice = visibleDialogText(detailPage);
+                if (isLimitNotice(notice)) {
+                    return DeliveryOutcome.limit("Boss 提示：" + notice);
+                }
+                // 把挡路的弹窗原话带上：不然只知道"没找到输入框"，不知道是被什么拦了
+                return new DeliveryOutcome(DeliveryStatus.FAILED, notice != null
+                        ? "未找到聊天输入框（页面提示：" + notice + "）" : "未找到聊天输入框", greeting);
             }
 
             // 7. 输入话术并发送
             input.first().click();
             sleep(300);
-            input.first().pressSequentially(greeting,
-                    new Locator.PressSequentiallyOptions().setDelay(60));
+            // 超时要按字数放宽：逐字 60ms，一百来字的话术光打字就要 6~8 秒，
+            // 套默认 10 秒超时时长话术会被打到一半判超时（10-13 实测 14 次）
+            input.first().pressSequentially(greeting, new Locator.PressSequentiallyOptions()
+                    .setDelay(TYPE_DELAY_MS)
+                    .setTimeout(typingTimeoutMs(greeting)));
             sleep(800);
 
             boolean sent = false;
@@ -430,6 +445,48 @@ public class BossDriver {
         } catch (Exception e) {
             return false;
         }
+    }
+
+    /** 逐字输入的间隔，模拟真人打字 */
+    private static final int TYPE_DELAY_MS = 60;
+
+    static double typingTimeoutMs(String text) {
+        int len = text == null ? 0 : text.length();
+        return len * (TYPE_DELAY_MS + 40.0) + 15_000;
+    }
+
+    /**
+     * 当前页面上可见弹窗/提示条里的文字，没有就 null。
+     * 点"立即沟通"之后 Boss 的各种拦截（今日上限、需要完善简历、对方不接收消息）都是这么弹的
+     */
+    String visibleDialogText(Page page) {
+        try {
+            Object text = page.evaluate("() => {"
+                    + "  const sels = ['.dialog-container', '.dialog-wrap', '.boss-dialog', '.boss-popup__wrapper',"
+                    + "    '[class*=\"dialog\"]', '[class*=\"popup\"]', '[class*=\"toast\"]', '[role=\"dialog\"]'];"
+                    + "  for (const sel of sels) {"
+                    + "    for (const el of document.querySelectorAll(sel)) {"
+                    + "      if (el.offsetParent === null) continue;"
+                    + "      const t = (el.innerText || '').replace(/\\s+/g, ' ').trim();"
+                    + "      if (t.length >= 4 && t.length <= 200) return t;"
+                    + "    }"
+                    + "  }"
+                    + "  return null;"
+                    + "}");
+            return text == null ? null : String.valueOf(text);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** 弹窗文字是不是"今天聊够了"那一类 */
+    static boolean isLimitNotice(String text) {
+        if (text == null) {
+            return false;
+        }
+        boolean today = text.contains("今日") || text.contains("今天") || text.contains("明天") || text.contains("明日");
+        return (text.contains("上限") && today) || text.contains("明天再来") || text.contains("明日再来")
+                || (text.contains("沟通") && text.contains("休息一下"));
     }
 
     private Locator findChatInput(Page page) {
