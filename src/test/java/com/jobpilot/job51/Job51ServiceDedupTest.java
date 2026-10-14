@@ -80,8 +80,8 @@ class Job51ServiceDedupTest {
         Job51JobCard card = new Job51JobCard();
         card.setJobId("152847391");
         card.setRecruiterId("8821345");
-        card.setJobName("陈列设计");
-        card.setBrandName("苏州某某服饰有限公司");
+        card.setJobName("新媒体运营");
+        card.setBrandName("苏州某某科技有限公司");
         return card;
     }
 
@@ -96,7 +96,7 @@ class Job51ServiceDedupTest {
     void 已投递的岗位直接跳过不再点投递按钮() {
         when(deliveryMapper.selectOne(any())).thenReturn(existing("已投递"));
 
-        service.processCardForTest(card(), "陈列设计", properties.get(), null);
+        service.processCardForTest(card(), "新媒体运营", properties.get(), null);
 
         verify(driver, never()).deliver(any(), any(), any(), any(), any());
         verify(deliveryMapper, never()).insert(any(Delivery.class));
@@ -109,7 +109,7 @@ class Job51ServiceDedupTest {
         when(driver.deliver(any(), any(), any(), any(), any()))
                 .thenReturn(DeliveryOutcome.delivered("简历已投递"));
 
-        service.processCardForTest(card(), "陈列设计", properties.get(), null);
+        service.processCardForTest(card(), "新媒体运营", properties.get(), null);
 
         ArgumentCaptor<Delivery> captor = ArgumentCaptor.forClass(Delivery.class);
         verify(deliveryMapper).insert(captor.capture());
@@ -118,8 +118,8 @@ class Job51ServiceDedupTest {
         assertEquals("job51", saved.getPlatform());
         assertEquals("152847391", saved.getEncryptId());
         assertEquals("8821345", saved.getEncryptUserId());
-        assertEquals("苏州某某服饰有限公司", saved.getBrandName());
-        assertEquals("陈列设计", saved.getKeyword());
+        assertEquals("苏州某某科技有限公司", saved.getBrandName());
+        assertEquals("新媒体运营", saved.getKeyword());
     }
 
     @Test
@@ -130,7 +130,7 @@ class Job51ServiceDedupTest {
         when(driver.deliver(any(), any(), any(), any(), any()))
                 .thenReturn(DeliveryOutcome.preview("预演"));
 
-        service.processCardForTest(card(), "陈列设计", config, null);
+        service.processCardForTest(card(), "新媒体运营", config, null);
 
         ArgumentCaptor<Job51Properties.Job51Config> captor =
                 ArgumentCaptor.forClass(Job51Properties.Job51Config.class);
@@ -149,7 +149,7 @@ class Job51ServiceDedupTest {
         when(driver.deliver(any(), any(), any(), any(), any()))
                 .thenReturn(new DeliveryOutcome(DeliveryStatus.LIMIT, "今日投递已达上限", null));
 
-        service.processCardForTest(card(), "陈列设计", properties.get(), null);
+        service.processCardForTest(card(), "新媒体运营", properties.get(), null);
 
         ArgumentCaptor<Delivery> captor = ArgumentCaptor.forClass(Delivery.class);
         verify(deliveryMapper).insert(captor.capture());
@@ -163,10 +163,10 @@ class Job51ServiceDedupTest {
         Job51Properties.Job51Config config = properties.get();
         com.jobpilot.delivery.ScoreRules rules = new com.jobpilot.delivery.ScoreRules();
         rules.setThreshold(50);
-        rules.setJobRules(List.of(newRule("陈列设计", 1)));
+        rules.setJobRules(List.of(newRule("新媒体运营", 1)));
         config.setScoreRules(rules);
 
-        service.processCardForTest(card(), "陈列设计", config, null);
+        service.processCardForTest(card(), "新媒体运营", config, null);
 
         ArgumentCaptor<Delivery> captor = ArgumentCaptor.forClass(Delivery.class);
         verify(deliveryMapper).insert(captor.capture());

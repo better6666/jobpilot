@@ -12,7 +12,7 @@ class ZhilianJobCardTest {
                 ZhilianJobCard.extractJobId("https://jobs.zhaopin.com/company/1234567/jobdetail/1234567.htm"));
         assertEquals("CC120812345J00382567890",
                 ZhilianJobCard.extractJobId(
-                        "https://sou.zhaopin.com/?jl=639&kw=%E9%99%88%E5%88%97#jobdetail/CC120812345J00382567890.htm"));
+                        "https://sou.zhaopin.com/?jl=639&kw=%E8%BF%90%E8%90%A5#jobdetail/CC120812345J00382567890.htm"));
     }
 
     @Test

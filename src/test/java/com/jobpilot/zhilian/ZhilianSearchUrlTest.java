@@ -21,26 +21,26 @@ class ZhilianSearchUrlTest {
 
     @Test
     void 城市码走query参数jl且页码也在query里() {
-        String url = ZhilianSearchUrl.build("639", "陈列设计", config(), 1);
-        assertEquals("https://www.zhaopin.com/jobs?pageMode=search&jl=639&kw=" + encoded("陈列设计"), url);
+        String url = ZhilianSearchUrl.build("639", "新媒体运营", config(), 1);
+        assertEquals("https://www.zhaopin.com/jobs?pageMode=search&jl=639&kw=" + encoded("新媒体运营"), url);
     }
 
     @Test
     void 城市码为空时是全国不是jl0() {
         // 智联没有全国这个码，jl0 会搜出空结果，必须整个省掉 jl
-        String url = ZhilianSearchUrl.build("", "陈列设计", config(), 3);
-        assertEquals("https://www.zhaopin.com/jobs?pageMode=search&kw=" + encoded("陈列设计")
+        String url = ZhilianSearchUrl.build("", "新媒体运营", config(), 3);
+        assertEquals("https://www.zhaopin.com/jobs?pageMode=search&kw=" + encoded("新媒体运营")
                 + "&page=3", url);
 
-        url = ZhilianSearchUrl.build(null, "陈列设计", config(), 1);
-        assertEquals("https://www.zhaopin.com/jobs?pageMode=search&kw=" + encoded("陈列设计"), url);
+        url = ZhilianSearchUrl.build(null, "新媒体运营", config(), 1);
+        assertEquals("https://www.zhaopin.com/jobs?pageMode=search&kw=" + encoded("新媒体运营"), url);
     }
 
     @Test
     void 关键词必须走query() {
         // 旧版靠输入框触发，SPA 一跳就把 sl 丢了；现在关键词也拼在 query 上，服务端渲染
-        String url = ZhilianSearchUrl.build("639", "陈列设计", config(), 1);
-        assertTrue(url.contains("kw=" + encoded("陈列设计")), url);
+        String url = ZhilianSearchUrl.build("639", "新媒体运营", config(), 1);
+        assertTrue(url.contains("kw=" + encoded("新媒体运营")), url);
 
         // 有空格和 & 也不能把 URL 打断
         String weird = ZhilianSearchUrl.build("639", "AI 运营&增长 #1", config(), 1);
@@ -70,18 +70,18 @@ class ZhilianSearchUrlTest {
     void 薪资是原始金额区间且逗号被编码() {
         ZhilianProperties.ZhilianConfig config = config();
         config.setSalary("12000, 20000");
-        assertEquals("https://www.zhaopin.com/jobs?pageMode=search&jl=639&kw=" + encoded("陈列设计")
+        assertEquals("https://www.zhaopin.com/jobs?pageMode=search&jl=639&kw=" + encoded("新媒体运营")
                 + "&sl=12000%2C20000",
-                ZhilianSearchUrl.build("639", "陈列设计", config, 1));
+                ZhilianSearchUrl.build("639", "新媒体运营", config, 1));
     }
 
     @Test
     void 中文逗号和万元单位都被归一() {
         ZhilianProperties.ZhilianConfig config = config();
         config.setSalary("1.2万，2万");
-        assertEquals("https://www.zhaopin.com/jobs?pageMode=search&jl=639&kw=" + encoded("陈列设计")
+        assertEquals("https://www.zhaopin.com/jobs?pageMode=search&jl=639&kw=" + encoded("新媒体运营")
                 + "&sl=12000%2C20000",
-                ZhilianSearchUrl.build("639", "陈列设计", config, 1));
+                ZhilianSearchUrl.build("639", "新媒体运营", config, 1));
     }
 
     @Test
@@ -98,20 +98,20 @@ class ZhilianSearchUrlTest {
     void 薪资为不限或空时省略sl() {
         ZhilianProperties.ZhilianConfig config = config();
         config.setSalary("不限");
-        assertEquals("https://www.zhaopin.com/jobs?pageMode=search&jl=639&kw=" + encoded("陈列设计"),
-                ZhilianSearchUrl.build("639", "陈列设计", config, 1));
+        assertEquals("https://www.zhaopin.com/jobs?pageMode=search&jl=639&kw=" + encoded("新媒体运营"),
+                ZhilianSearchUrl.build("639", "新媒体运营", config, 1));
 
         config.setSalary("");
-        assertEquals("https://www.zhaopin.com/jobs?pageMode=search&jl=639&kw=" + encoded("陈列设计"),
-                ZhilianSearchUrl.build("639", "陈列设计", config, 1));
+        assertEquals("https://www.zhaopin.com/jobs?pageMode=search&jl=639&kw=" + encoded("新媒体运营"),
+                ZhilianSearchUrl.build("639", "新媒体运营", config, 1));
 
         config.setSalary("面议");
-        assertEquals("https://www.zhaopin.com/jobs?pageMode=search&jl=639&kw=" + encoded("陈列设计"),
-                ZhilianSearchUrl.build("639", "陈列设计", config, 1));
+        assertEquals("https://www.zhaopin.com/jobs?pageMode=search&jl=639&kw=" + encoded("新媒体运营"),
+                ZhilianSearchUrl.build("639", "新媒体运营", config, 1));
 
         config.setSalary(null);
-        assertEquals("https://www.zhaopin.com/jobs?pageMode=search&jl=639&kw=" + encoded("陈列设计"),
-                ZhilianSearchUrl.build("639", "陈列设计", config, 1));
+        assertEquals("https://www.zhaopin.com/jobs?pageMode=search&jl=639&kw=" + encoded("新媒体运营"),
+                ZhilianSearchUrl.build("639", "新媒体运营", config, 1));
     }
 
     private static String encoded(String value) {

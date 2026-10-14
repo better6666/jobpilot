@@ -72,7 +72,7 @@ public class ZhilianService extends DeliveryService<ZhilianJobCard> {
         String city = config.getCity();
         if (city != null && !city.isBlank()
                 && ZhilianSearchUrl.resolveCityCode(options, city) == null) {
-            return "城市「" + city + "」无法识别，请填城市名（如：苏州）或智联城市码";
+            return "城市「" + city + "」无法识别，请填城市名（如：杭州）或智联城市码";
         }
         return null;
     }

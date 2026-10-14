@@ -9,7 +9,7 @@ import java.util.List;
 /**
  * Boss 搜索页 URL 构造。
  * <p>
- * 形如 https://www.zhipin.com/web/geek/jobs?city=101020100&query=%E9%99%88...
+ * 形如 https://www.zhipin.com/web/geek/jobs?city=101020100&query=%E6%96%B0...
  * query 是关键词；其余是筛选项，空值一律不带（带上空值 Boss 会当成"不限"，
  * 但会让落地 URL 和配置对不上，排查时误判）。
  */

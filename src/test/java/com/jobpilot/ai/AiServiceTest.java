@@ -352,15 +352,15 @@ class AiServiceTest {
 
     @Test
     void 去掉代码围栏() {
-        assertEquals("您好，看到贵司在招陈列设计", AiService.cleanGreeting("```text\n您好，看到贵司在招陈列设计\n```"));
+        assertEquals("您好，看到贵司在招新媒体运营", AiService.cleanGreeting("```text\n您好，看到贵司在招新媒体运营\n```"));
     }
 
     @Test
     void 围栏后面还跟着解释时围栏也要剥干净() {
         // 实测踩过：围栏不在整串末尾，第一遍剥不掉，留着会随第一段一起发出去
-        String raw = "```text\n话术：您好，看到贵司在招陈列设计助理，我做过两季橱窗陈列，想聊聊这个岗位。\n```\n\n解释：这里结合了 JD。";
+        String raw = "```text\n话术：您好，看到贵司在招运营助理，我做过两段新媒体运营，想聊聊这个岗位。\n```\n\n解释：这里结合了 JD。";
         String cleaned = AiService.cleanGreeting(raw);
-        assertEquals("您好，看到贵司在招陈列设计助理，我做过两季橱窗陈列，想聊聊这个岗位。", cleaned);
+        assertEquals("您好，看到贵司在招运营助理，我做过两段新媒体运营，想聊聊这个岗位。", cleaned);
     }
 
     @Test
@@ -377,7 +377,7 @@ class AiServiceTest {
 
     @Test
     void 多段输出只留第一段() {
-        assertEquals("您好，想聊聊陈列设计。", AiService.cleanGreeting("您好，想聊聊陈列设计。\n\n解释：这里结合了JD……"));
+        assertEquals("您好，想聊聊新媒体运营。", AiService.cleanGreeting("您好，想聊聊新媒体运营。\n\n解释：这里结合了JD……"));
     }
 
     @Test
@@ -408,9 +408,9 @@ class AiServiceTest {
 
     @Test
     void 超长时优先截在句号上() {
-        String raw = "我做过两季橱窗陈列。".repeat(12) + "后面这句太长了被砍掉也没关系，";
+        String raw = "我做过两段新媒体运营。".repeat(12) + "后面这句太长了被砍掉也没关系，";
         String cleaned = AiService.cleanGreeting(raw);
-        assertTrue(cleaned.endsWith("陈列。"), cleaned);
+        assertTrue(cleaned.endsWith("运营。"), cleaned);
     }
 
     @Test

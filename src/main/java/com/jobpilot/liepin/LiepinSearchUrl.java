@@ -9,7 +9,7 @@ import java.util.List;
 /**
  * 猎聘搜索页 URL 构造。
  * <p>
- * 形如 https://www.liepin.com/zhaopin/?city=060080&dq=060080&salary=15&currentPage=0&key=%E9%99%88...
+ * 形如 https://www.liepin.com/zhaopin/?city=060080&dq=060080&salary=15&currentPage=0&key=%E6%96%B0...
  * <p>
  * 两条硬约束（都是实测出来的，改之前先读）：
  * <ul>

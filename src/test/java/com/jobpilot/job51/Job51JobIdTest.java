@@ -24,7 +24,7 @@ class Job51JobIdTest {
                     + ",&quot;companyId&quot;:&quot;10192136&quot;,&quot;jobTime&quot;:&quot;2026-09-18 14:08:34&quot;"
                     + ",&quot;isPromote&quot;:&quot;否&quot;,&quot;advId&quot;:&quot;&quot;,&quot;jobLabel&quot;:&quot;&quot;"
                     + ",&quot;pageCode&quot;:&quot;sou|sou|soulb&quot;,&quot;requestId&quot;:&quot;31a828140ab348fa44f37b7a57e72f64&quot;"
-                    + ",&quot;searchType&quot;:2,&quot;keyword&quot;:&quot;陈列设计&quot;,&quot;pageNum&quot;:3,&quot;jobRank&quot;:0"
+                    + ",&quot;searchType&quot;:2,&quot;keyword&quot;:&quot;新媒体运营&quot;,&quot;pageNum&quot;:3,&quot;jobRank&quot;:0"
                     + ",&quot;exrInfo&quot;:&quot;{\\&quot;isHrLabel\\&quot;:\\&quot;否\\&quot;}&quot;}";
 
     @Nested
@@ -145,9 +145,9 @@ class Job51JobIdTest {
         @DisplayName("键名缺失时不报错，其余字段照填")
         void missingKeys() {
             Job51JobCard card = new Job51JobCard();
-            Job51Driver.fillFromSensorsData(card, "{\"jobId\":\"1\",\"jobTitle\":\"陈列设计助理\"}");
+            Job51Driver.fillFromSensorsData(card, "{\"jobId\":\"1\",\"jobTitle\":\"运营助理\"}");
 
-            assertThat(card.getJobName()).isEqualTo("陈列设计助理");
+            assertThat(card.getJobName()).isEqualTo("运营助理");
             assertThat(card.getSalaryDesc()).isNull();
             assertThat(card.getLocationRaw()).isNull();
             assertThat(card.getCityName()).isNull();

@@ -8,7 +8,7 @@ import java.util.regex.Pattern;
  *
  * <p>以前 Playwright 的异常原样进了 fail_reason，记录表里是一整段
  * {@code Error { message='Timeout 10000ms exceeded. name='TimeoutError stack=...}}，
- * 管理页上一行只显示 "Error {"，用户根本不知道发生了什么（本机库里有 14 条）。
+ * 管理页上一行只显示 "Error {"，用户根本不知道发生了什么。
  */
 public final class FailReasons {
 

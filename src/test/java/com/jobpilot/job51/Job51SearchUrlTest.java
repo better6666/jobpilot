@@ -21,9 +21,9 @@ class Job51SearchUrlTest {
 
     @Test
     void 基本URL带地区和关键词() {
-        String url = Job51SearchUrl.build("070300", "陈列设计", config());
+        String url = Job51SearchUrl.build("070300", "新媒体运营", config());
         assertEquals("https://we.51job.com/pc/search?jobArea=070300"
-                + "&keyword=%E9%99%88%E5%88%97%E8%AE%BE%E8%AE%A1", url);
+                + "&keyword=%E6%96%B0%E5%AA%92%E4%BD%93%E8%BF%90%E8%90%A5", url);
     }
 
     @Test
@@ -60,18 +60,18 @@ class Job51SearchUrlTest {
     void 薪资有值时带上且保留前导零() {
         Job51Properties.Job51Config config = config();
         config.setSalary("05");
-        String url = Job51SearchUrl.build("070300", "陈列设计", config);
+        String url = Job51SearchUrl.build("070300", "新媒体运营", config);
         assertEquals("https://we.51job.com/pc/search?jobArea=070300&salary=05"
-                + "&keyword=%E9%99%88%E5%88%97%E8%AE%BE%E8%AE%A1", url);
+                + "&keyword=%E6%96%B0%E5%AA%92%E4%BD%93%E8%BF%90%E8%90%A5", url);
     }
 
     @Test
     void 参数顺序固定为地区薪资关键词() {
         Job51Properties.Job51Config config = config();
         config.setSalary("08");
-        String url = Job51SearchUrl.build("080200", "陈列设计", config);
+        String url = Job51SearchUrl.build("080200", "新媒体运营", config);
         assertEquals("https://we.51job.com/pc/search?jobArea=080200&salary=08"
-                + "&keyword=%E9%99%88%E5%88%97%E8%AE%BE%E8%AE%A1", url);
+                + "&keyword=%E6%96%B0%E5%AA%92%E4%BD%93%E8%BF%90%E8%90%A5", url);
     }
 
     /**

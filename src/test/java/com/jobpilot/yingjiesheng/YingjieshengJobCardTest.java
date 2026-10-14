@@ -9,7 +9,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-/** 夹具字段取自 2026-10-14 在 q.yingjiesheng.com 拦到的 /open/noauth/job/search 真实响应 */
+/** 夹具的字段结构取自 q.yingjiesheng.com /open/noauth/job/search 的真实响应，HR 姓名等个人字段已换成虚构值 */
 class YingjieshengJobCardTest {
 
     private List<YingjieshengJobCard> cards() throws Exception {
@@ -31,7 +31,7 @@ class YingjieshengJobCardTest {
         assertEquals("在线生活服务(O2O)", c.getIndustryName());
         assertEquals("10000人以上", c.getBrandScaleName());
         assertEquals("1588397", c.getBossId());
-        assertEquals("赵琦", c.getBossName());
+        assertEquals("李女士", c.getBossName());
         assertEquals("2分钟前回复", c.getBossActiveTimeDesc());
         assertNull(c.getPostDescription());
         assertFalse(c.isReprint());

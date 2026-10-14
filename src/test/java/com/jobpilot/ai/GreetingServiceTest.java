@@ -66,7 +66,7 @@ class GreetingServiceTest {
         cfg.setBaseUrl("https://relay.example.com/v1");
         cfg.setApiKey("sk-relay-123456");
         cfg.setModel("deepseek-chat");
-        cfg.setPersona("服装陈列设计专业，做过橱窗陈列实习");
+        cfg.setPersona("市场营销专业，做过新媒体运营实习");
         cfg.setTemperature(0.7);
     }
 
@@ -77,7 +77,7 @@ class GreetingServiceTest {
     private void platformConfigured() {
         cfg.setEnabled(true);
         cfg.setMode(AiProperties.MODE_PLATFORM);
-        cfg.setPersona("服装陈列设计专业，做过橱窗陈列实习");
+        cfg.setPersona("市场营销专业，做过新媒体运营实习");
         cfg.setTemperature(0.7);
         when(licenseService.proxyCredentials())
                 .thenReturn(Map.of("token", "tok-123", "device_id", "dev-456"));
@@ -88,11 +88,11 @@ class GreetingServiceTest {
      * 不再发那一句固定话术；没背景才退回固定话术（按岗位点名，见 FallbackGreeting）
      */
     private static void assertFallback(GreetingService.Greeting g) {
-        assertTrue(g.text().contains("陈列设计助理"), "兜底也得点到岗位名：" + g.text());
+        assertTrue(g.text().contains("运营助理"), "兜底也得点到岗位名：" + g.text());
         if (g.text().endsWith("固定话术")) {
             return;
         }
-        assertTrue(g.text().contains("橱窗陈列实习") || g.text().contains("服装陈列设计专业"),
+        assertTrue(g.text().contains("新媒体运营实习") || g.text().contains("市场营销专业"),
                 "现拼的话术要用上求职者背景：" + g.text());
         assertTrue(g.note() == null || g.note().contains("现拼"), g.note());
     }
@@ -123,12 +123,12 @@ class GreetingServiceTest {
 
             @Override
             public String getJobName() {
-                return "陈列设计助理";
+                return "运营助理";
             }
 
             @Override
             public String getBrandName() {
-                return "某某服饰";
+                return "某某科技";
             }
 
             @Override
@@ -178,12 +178,12 @@ class GreetingServiceTest {
 
             @Override
             public String getPostDescription() {
-                return "负责门店橱窗陈列与换季调整";
+                return "负责门店账号运营与换季调整";
             }
 
             @Override
             public String getIndustryName() {
-                return "服装纺织";
+                return "电子商务";
             }
 
             @Override
@@ -201,7 +201,7 @@ class GreetingServiceTest {
     void AI关着时用固定话术且不发起请求() {
         GreetingService.Greeting g = service.compose(card(), "您好，看到贵司在招人");
         // 「贵司」换成卡片上的公司名：AI 关着时也不该几百条一模一样
-        assertEquals("您好，看到某某服饰在招人", g.text());
+        assertEquals("您好，看到某某科技在招人", g.text());
         assertNull(g.note(), "本来就用固定话术，不需要解释");
         verifyNoInteractions(aiService);
     }
@@ -223,7 +223,7 @@ class GreetingServiceTest {
     @Test
     void 接口三要素没配全时退回固定话术并说明原因() {
         cfg.setEnabled(true);
-        cfg.setPersona("服装陈列设计专业");
+        cfg.setPersona("市场营销专业");
         cfg.setBaseUrl("https://relay.example.com/v1");
         cfg.setApiKey("sk-x");
         // model 空着
@@ -269,12 +269,12 @@ class GreetingServiceTest {
     void 生成成功时用模型输出并清洗() {
         fullyConfigured();
         recentGreetings();
-        doReturn(AiService.AiResult.ok("```text\n话术：您好，看到贵司在招陈列设计助理，我做过橱窗陈列实习。\n```"))
+        doReturn(AiService.AiResult.ok("```text\n话术：您好，看到贵司在招运营助理，我做过新媒体运营实习。\n```"))
                 .when(aiService).chat(anyString(), anyString(), anyString(), anyString(), anyString(), eq(0.7));
 
         GreetingService.Greeting g = service.compose(card(), "固定话术");
 
-        assertEquals("您好，看到贵司在招陈列设计助理，我做过橱窗陈列实习。", g.text());
+        assertEquals("您好，看到贵司在招运营助理，我做过新媒体运营实习。", g.text());
         assertNull(g.note());
     }
 
@@ -292,8 +292,8 @@ class GreetingServiceTest {
         org.mockito.Mockito.verify(aiService).chat(eq("https://relay.example.com/v1"), eq("sk-relay-123456"),
                 eq("deepseek-chat"), system.capture(), user.capture(), eq(0.7));
         // 人设在系统提示词里，不在用户提示词里
-        assertTrue(system.getValue().contains("服装陈列设计专业，做过橱窗陈列实习"), system.getValue());
-        assertFalse(user.getValue().contains("服装陈列设计专业，做过橱窗陈列实习"));
+        assertTrue(system.getValue().contains("市场营销专业，做过新媒体运营实习"), system.getValue());
+        assertFalse(user.getValue().contains("市场营销专业，做过新媒体运营实习"));
     }
 
     @Test
@@ -311,13 +311,13 @@ class GreetingServiceTest {
                 user.capture(), eq(0.7));
         String prompt = user.getValue();
         assertTrue(prompt.contains("【岗位信息】"), prompt);
-        assertTrue(prompt.contains("岗位：陈列设计助理"), prompt);
-        assertTrue(prompt.contains("公司：某某服饰"), prompt);
+        assertTrue(prompt.contains("岗位：运营助理"), prompt);
+        assertTrue(prompt.contains("公司：某某科技"), prompt);
         assertTrue(prompt.contains("薪资：8-12K"), prompt);
         assertTrue(prompt.contains("地点：苏州"), prompt);
         assertTrue(prompt.contains("经验要求：1-3年"), prompt);
         assertTrue(prompt.contains("学历要求：大专"), prompt);
-        assertTrue(prompt.contains("职位描述：负责门店橱窗陈列与换季调整"), prompt);
+        assertTrue(prompt.contains("职位描述：负责门店账号运营与换季调整"), prompt);
         assertTrue(prompt.contains("【本次要求】"), prompt);
     }
 
@@ -340,12 +340,12 @@ class GreetingServiceTest {
 
             @Override
             public String getJobName() {
-                return "陈列设计助理";
+                return "运营助理";
             }
 
             @Override
             public String getBrandName() {
-                return "某某服饰";
+                return "某某科技";
             }
 
             @Override
@@ -425,14 +425,14 @@ class GreetingServiceTest {
     @Test
     void 和最近投递重复时换一种说法重来一次() {
         fullyConfigured();
-        recentGreetings("您好，看到贵司在招陈列设计，想聊聊");
-        String used = "您好，看到贵司在招陈列设计，想聊聊";
-        doReturn(AiService.AiResult.ok(used), AiService.AiResult.ok("贵司这个岗位看重换季陈列，我正好实习时整过两季橱窗"))
+        recentGreetings("您好，看到贵司在招新媒体运营，想聊聊");
+        String used = "您好，看到贵司在招新媒体运营，想聊聊";
+        doReturn(AiService.AiResult.ok(used), AiService.AiResult.ok("贵司这个岗位看重活动策划，我正好实习时做过两场线上活动"))
                 .when(aiService).chat(anyString(), anyString(), anyString(), anyString(), anyString(), eq(0.7));
 
         GreetingService.Greeting g = service.compose(card(), "固定话术");
 
-        assertEquals("贵司这个岗位看重换季陈列，我正好实习时整过两季橱窗", g.text());
+        assertEquals("贵司这个岗位看重活动策划，我正好实习时做过两场线上活动", g.text());
         assertNull(g.note());
         org.mockito.Mockito.verify(aiService, org.mockito.Mockito.times(2))
                 .chat(anyString(), anyString(), anyString(), anyString(), anyString(), eq(0.7));
@@ -441,7 +441,7 @@ class GreetingServiceTest {
     @Test
     void 重试时把上一句带给模型要求换切入点() {
         fullyConfigured();
-        String used = "您好，看到贵司在招陈列设计，想聊聊";
+        String used = "您好，看到贵司在招新媒体运营，想聊聊";
         recentGreetings(used);
         doReturn(AiService.AiResult.ok(used), AiService.AiResult.ok("换了个完全不同的说法"))
                 .when(aiService).chat(anyString(), anyString(), anyString(), anyString(), anyString(), eq(0.7));
@@ -459,7 +459,7 @@ class GreetingServiceTest {
     @Test
     void 重试后还是重复就退回固定话术() {
         fullyConfigured();
-        String used = "您好，看到贵司在招陈列设计，想聊聊";
+        String used = "您好，看到贵司在招新媒体运营，想聊聊";
         recentGreetings(used);
         doReturn(AiService.AiResult.ok(used), AiService.AiResult.ok(used))
                 .when(aiService).chat(anyString(), anyString(), anyString(), anyString(), anyString(), eq(0.7));
@@ -528,7 +528,7 @@ class GreetingServiceTest {
     void 提示词里要带上避开的开头() {
         fullyConfigured();
         recentGreetings("您好，请问A岗位还招吗", "您好，请问B岗位进展如何", "您好，请问C岗位要什么人");
-        doReturn(AiService.AiResult.ok("贵司看重换季陈列，我做过两季橱窗")).when(aiService)
+        doReturn(AiService.AiResult.ok("贵司看重活动策划，我做过两场线上活动")).when(aiService)
                 .chat(anyString(), anyString(), anyString(), anyString(), anyString(), eq(0.7));
 
         service.compose(card(), "固定话术");
@@ -562,7 +562,7 @@ class GreetingServiceTest {
         assertTrue(java.util.Arrays.stream(new String[]{"问进展", "问要求", "问团队和日常", "问落地条件",
                         "先说自己哪段经历", "提简历"}).anyMatch(prompt::contains),
                 "没带角度、发出去还是清一色「您好，请问该岗位是否…」: " + prompt);
-        assertTrue(prompt.contains("服装陈列设计专业，做过橱窗陈列实习"), prompt);
+        assertTrue(prompt.contains("市场营销专业，做过新媒体运营实习"), prompt);
     }
 
     @Test
@@ -583,7 +583,7 @@ class GreetingServiceTest {
     @Test
     void 追问在AI关着时直接用固定话术() {
         GreetingService.Greeting g = service.composeFollowUp(card(), "方便看下我的简历吗");
-        assertTrue(g.text().endsWith("方便看下我的简历吗") && g.text().contains("陈列设计助理"), g.text());
+        assertTrue(g.text().endsWith("方便看下我的简历吗") && g.text().contains("运营助理"), g.text());
         assertNull(g.note());
         verifyNoInteractions(aiService);
     }
@@ -621,12 +621,12 @@ class GreetingServiceTest {
     void 平台模式下不填接口也能生成() {
         platformConfigured();
         recentGreetings();
-        doReturn(AiService.AiResult.ok("您好，看到贵司在招陈列设计助理，我做过两季橱窗陈列")).when(aiService)
+        doReturn(AiService.AiResult.ok("您好，看到贵司在招运营助理，我做过两段新媒体运营")).when(aiService)
                 .chatPlatform(anyString(), anyString(), anyString(), anyString(), anyString(), eq(0.7), anyString());
 
         GreetingService.Greeting g = service.compose(card(), "固定话术");
 
-        assertEquals("您好，看到贵司在招陈列设计助理，我做过两季橱窗陈列", g.text());
+        assertEquals("您好，看到贵司在招运营助理，我做过两段新媒体运营", g.text());
         assertNull(g.note());
     }
 
@@ -650,7 +650,7 @@ class GreetingServiceTest {
     void 平台模式下卡密没激活就退回固定话术并说明原因() {
         cfg.setEnabled(true);
         cfg.setMode(AiProperties.MODE_PLATFORM);
-        cfg.setPersona("服装陈列设计专业");
+        cfg.setPersona("市场营销专业");
         // 没激活：拿不到 token
         when(licenseService.proxyCredentials()).thenReturn(null);
 
@@ -708,10 +708,10 @@ class GreetingServiceTest {
     @Test
     void 提示词要求只挑相关背景_报出反复说的短语_带上渠道() {
         fullyConfigured();
-        recentGreetings("我做过两季橱窗陈列实习，会PS和CAD，想试试美团运营",
-                "我做过两季橱窗陈列实习，会PS和CAD，想试试华昕设计",
-                "我做过两季橱窗陈列实习，会PS和CAD，想试试海悦美工",
-                "我做过两季橱窗陈列实习，会PS和CAD，想试试吾刻视觉");
+        recentGreetings("我做过两段新媒体运营实习，会剪映和Excel，想试试美团运营",
+                "我做过两段新媒体运营实习，会剪映和Excel，想试试华昕设计",
+                "我做过两段新媒体运营实习，会剪映和Excel，想试试海悦美工",
+                "我做过两段新媒体运营实习，会剪映和Excel，想试试吾刻视觉");
         when(aiService.chat(anyString(), anyString(), anyString(), anyString(), anyString(), anyDouble()))
                 .thenReturn(AiService.AiResult.ok("看到贵司在做电商主图，我可以直接上手。"));
 
@@ -723,7 +723,7 @@ class GreetingServiceTest {
         assertTrue(system.getValue().contains("只挑一两点和它最相关的"), system.getValue());
         assertTrue(system.getValue().contains("不要否定自己"));
         assertTrue(user.getValue().contains("反复出现这些说法"), user.getValue());
-        assertTrue(user.getValue().contains("两季橱窗陈列实习"), user.getValue());
+        assertTrue(user.getValue().contains("两段新媒体运营实习"), user.getValue());
         assertTrue(user.getValue().contains("【发送渠道】Boss 直聘"), user.getValue());
     }
 
@@ -762,7 +762,7 @@ class GreetingServiceTest {
 
         // 平台模式：只填人设就绪，接口三要素整个不用管
         cfg.setMode(AiProperties.MODE_PLATFORM);
-        cfg.setPersona("服装陈列设计专业");
+        cfg.setPersona("市场营销专业");
         assertEquals("AI 话术已启用（平台提供），生成失败会自动退回固定话术", service.describe());
 
         // 自有接口模式：三要素没齐才说没配全

@@ -4,7 +4,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-/** 样本是本机库 fail_reason 列里的原文 */
+/** 样本是 Playwright 异常真实落库时的原文格式 */
 class FailReasonsTest {
 
     @Test

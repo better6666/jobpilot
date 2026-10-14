@@ -9,7 +9,7 @@ import java.util.List;
 /**
  * 51job 搜索页 URL 构造。
  * <p>
- * 形如 https://we.51job.com/pc/search?jobArea=070300&salary=05&degree=04%2C05&keyword=%E9%99%88...
+ * 形如 https://we.51job.com/pc/search?jobArea=070300&salary=05&degree=04%2C05&keyword=%E6%96%B0...
  * <p>
  * 四条约束（都来自实测，改之前先读）：
  * <ul>

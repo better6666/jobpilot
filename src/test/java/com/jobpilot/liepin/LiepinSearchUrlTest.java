@@ -21,19 +21,19 @@ class LiepinSearchUrlTest {
 
     @Test
     void 城市和dq双写() {
-        String url = LiepinSearchUrl.build("060080", "陈列设计", config());
+        String url = LiepinSearchUrl.build("060080", "新媒体运营", config());
         // 只写 city 大区筛选不生效，两个参数必须同值
         assertEquals("https://www.liepin.com/zhaopin/?city=060080&dq=060080&currentPage=0"
-                + "&key=%E9%99%88%E5%88%97%E8%AE%BE%E8%AE%A1", url);
+                + "&key=%E6%96%B0%E5%AA%92%E4%BD%93%E8%BF%90%E8%90%A5", url);
     }
 
     @Test
     void 城市留空时两个参数整个省略() {
-        String url = LiepinSearchUrl.build("", "陈列设计", config());
+        String url = LiepinSearchUrl.build("", "新媒体运营", config());
         assertFalse(url.contains("city"), url);
         assertFalse(url.contains("dq"), url);
         assertEquals("https://www.liepin.com/zhaopin/?currentPage=0"
-                + "&key=%E9%99%88%E5%88%97%E8%AE%BE%E8%AE%A1", url);
+                + "&key=%E6%96%B0%E5%AA%92%E4%BD%93%E8%BF%90%E8%90%A5", url);
     }
 
     @Test
@@ -71,11 +71,11 @@ class LiepinSearchUrlTest {
     void 薪资有值时带上() {
         LiepinProperties.LiepinConfig config = config();
         config.setSalary("15");
-        String url = LiepinSearchUrl.build("070020", "陈列设计", config);
+        String url = LiepinSearchUrl.build("070020", "新媒体运营", config);
         assertTrue(url.contains("salary=15"), url);
         // 参数顺序固定：city, dq, salary, currentPage, key
         assertEquals("https://www.liepin.com/zhaopin/?city=070020&dq=070020&salary=15&currentPage=0"
-                + "&key=%E9%99%88%E5%88%97%E8%AE%BE%E8%AE%A1", url);
+                + "&key=%E6%96%B0%E5%AA%92%E4%BD%93%E8%BF%90%E8%90%A5", url);
     }
 
     @Test

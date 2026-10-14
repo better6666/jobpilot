@@ -83,7 +83,7 @@ class BossServiceDedupTest {
         BossJobCard card = new BossJobCard();
         card.setEncryptId("enc-1");
         card.setEncryptUserId("boss-1");
-        card.setJobName("陈列设计");
+        card.setJobName("新媒体运营");
         card.setBrandName("某品牌");
         return card;
     }
@@ -99,7 +99,7 @@ class BossServiceDedupTest {
     void 已投递的岗位直接跳过不再碰浏览器() {
         when(deliveryMapper.selectOne(any())).thenReturn(existing("已投递"));
 
-        service.processCardForTest(card(), "陈列设计", properties.get(), null);
+        service.processCardForTest(card(), "新媒体运营", properties.get(), null);
 
         verify(driver, never()).deliver(any(), any(), any(), anyBoolean(), any(), any());
         verify(deliveryMapper, never()).insert(any(Delivery.class));
@@ -113,7 +113,7 @@ class BossServiceDedupTest {
         when(driver.deliver(any(), any(), any(), anyBoolean(), any(), any()))
                 .thenReturn(DeliveryOutcome.delivered("您好"));
 
-        service.processCardForTest(card(), "陈列设计", properties.get(), null);
+        service.processCardForTest(card(), "新媒体运营", properties.get(), null);
 
         verify(driver).deliver(any(), any(), any(), anyBoolean(), any(), any());
         verify(deliveryMapper).updateById(any(Delivery.class));
@@ -128,7 +128,7 @@ class BossServiceDedupTest {
         when(driver.deliver(any(), any(), any(), anyBoolean(), any(), any()))
                 .thenReturn(DeliveryOutcome.delivered("您好"));
 
-        service.processCardForTest(card(), "陈列设计", properties.get(), null);
+        service.processCardForTest(card(), "新媒体运营", properties.get(), null);
 
         ArgumentCaptor<Delivery> captor = ArgumentCaptor.forClass(Delivery.class);
         verify(deliveryMapper).insert(captor.capture());
@@ -136,7 +136,7 @@ class BossServiceDedupTest {
         assertEquals("已投递", saved.getDeliveryStatus());
         assertEquals("您好", saved.getGreeting());
         assertEquals("某品牌", saved.getBrandName());
-        assertEquals("陈列设计", saved.getKeyword());
+        assertEquals("新媒体运营", saved.getKeyword());
         assertEquals("boss", saved.getPlatform());
         assertEquals("enc-1", saved.getEncryptId());
         assertEquals("boss-1", saved.getEncryptUserId());
@@ -148,7 +148,7 @@ class BossServiceDedupTest {
         when(driver.deliver(any(), any(), any(), anyBoolean(), any(), any()))
                 .thenReturn(DeliveryOutcome.failed("未找到聊天输入框"));
 
-        service.processCardForTest(card(), "陈列设计", properties.get(), null);
+        service.processCardForTest(card(), "新媒体运营", properties.get(), null);
 
         verify(deliveryMapper).updateById(any(Delivery.class));
         assertEquals(1, service.status().getFailed());
@@ -160,10 +160,10 @@ class BossServiceDedupTest {
         BossProperties.BossConfig config = properties.get();
         com.jobpilot.delivery.ScoreRules rules = new com.jobpilot.delivery.ScoreRules();
         rules.setThreshold(50);
-        rules.setJobRules(List.of(newScoreRule("陈列设计", 1)));
+        rules.setJobRules(List.of(newScoreRule("新媒体运营", 1)));
         config.setScoreRules(rules);
 
-        service.processCardForTest(card(), "陈列设计", config, null);
+        service.processCardForTest(card(), "新媒体运营", config, null);
 
         ArgumentCaptor<Delivery> captor = ArgumentCaptor.forClass(Delivery.class);
         verify(deliveryMapper).insert(captor.capture());
@@ -186,7 +186,7 @@ class BossServiceDedupTest {
         when(driver.deliver(any(), any(), any(), anyBoolean(), any(), any()))
                 .thenReturn(new DeliveryOutcome(DeliveryStatus.LIMIT, "今日沟通已达上限", null));
 
-        service.processCardForTest(card(), "陈列设计", properties.get(), null);
+        service.processCardForTest(card(), "新媒体运营", properties.get(), null);
 
         ArgumentCaptor<Delivery> captor = ArgumentCaptor.forClass(Delivery.class);
         verify(deliveryMapper).insert(captor.capture());
@@ -201,7 +201,7 @@ class BossServiceDedupTest {
         when(driver.deliver(any(), any(), any(), anyBoolean(), any(), any()))
                 .thenReturn(DeliveryOutcome.delivered("您好"));
 
-        service.processCardForTest(card(), "陈列设计", properties.get(), null);
+        service.processCardForTest(card(), "新媒体运营", properties.get(), null);
 
         verify(licenseService).reportUsage(1);
     }
@@ -212,7 +212,7 @@ class BossServiceDedupTest {
         when(driver.deliver(any(), any(), any(), anyBoolean(), any(), any()))
                 .thenReturn(DeliveryOutcome.failed("未找到聊天输入框"));
 
-        service.processCardForTest(card(), "陈列设计", properties.get(), null);
+        service.processCardForTest(card(), "新媒体运营", properties.get(), null);
 
         verify(licenseService, never()).reportUsage(anyInt());
     }
@@ -222,7 +222,7 @@ class BossServiceDedupTest {
         when(licenseService.exhausted()).thenReturn(true);
         when(deliveryMapper.selectOne(any())).thenReturn(null);
 
-        service.processCardForTest(card(), "陈列设计", properties.get(), null);
+        service.processCardForTest(card(), "新媒体运营", properties.get(), null);
 
         verify(driver, never()).deliver(any(), any(), any(), anyBoolean(), any(), any());
         verify(deliveryMapper, never()).insert(any(Delivery.class));

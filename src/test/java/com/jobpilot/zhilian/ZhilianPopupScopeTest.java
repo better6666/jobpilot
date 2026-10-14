@@ -75,7 +75,7 @@ class ZhilianPopupScopeTest {
     /** 每个关键词开一个新页面、注册关门器、跑完关掉——照 processKeyword 的形状来 */
     private List<String> runKeywords() {
         List<String> finished = new ArrayList<>();
-        for (String keyword : List.of("陈列设计", "视觉设计")) {
+        for (String keyword : List.of("新媒体运营", "视觉设计")) {
             Page page = context.newPage();
             // 直接调产品代码：这一行的作用域选错就是第二个关键词崩掉的原因
             ZhilianDriver.installPopupCloser(page);
@@ -88,7 +88,7 @@ class ZhilianPopupScopeTest {
     /** 旧写法：挂 context 上，连 newPage 自建的列表页一起关 */
     private List<String> runKeywordsWithContextScopedCloser() {
         List<String> finished = new ArrayList<>();
-        for (String keyword : List.of("陈列设计", "视觉设计")) {
+        for (String keyword : List.of("新媒体运营", "视觉设计")) {
             Page page = context.newPage();
             context.onPage(ZhilianPopupScopeTest::closeQuietly);
             finished.add(keyword);
@@ -107,7 +107,7 @@ class ZhilianPopupScopeTest {
     @Test
     void 关门器挂page上时每个关键词都能拿到自己的列表页() {
         assertThatNoException()
-                .isThrownBy(() -> assertThat(runKeywords()).containsExactly("陈列设计", "视觉设计"));
+                .isThrownBy(() -> assertThat(runKeywords()).containsExactly("新媒体运营", "视觉设计"));
     }
 
     @Test

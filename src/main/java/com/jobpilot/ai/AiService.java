@@ -584,7 +584,7 @@ public class AiService {
     /**
      * 超长时截到句子边界。优先句号/问号/感叹号；只能截在逗号上时把逗号换成句号——
      * 以前直接留着逗号，HR 收到的是"……为贵司带来创意价值，期待能加入团队共同推动广告项目，"
-     * 这种明显被砍了一半的话（本机库里实测十几条）。
+     * 这种明显被砍了一半的话（实测十几条）。
      */
     static String clipAtSentence(String text, int max) {
         if (text == null) {

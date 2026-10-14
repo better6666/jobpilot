@@ -71,7 +71,7 @@ class AiControllerTest {
         stored.setBaseUrl("https://relay.example.com/v1");
         stored.setApiKey("sk-relay-abcdef1234567890");
         stored.setModel("deepseek-chat");
-        stored.setPersona("服装陈列设计专业");
+        stored.setPersona("市场营销专业");
         stored.setTemperature(0.8);
         // 让 mock 的配置表真的能存能取：setJson 之后 getJson 要看到新值，
         // 否则保存接口回显的永远是旧配置，断言就失去意义
@@ -92,7 +92,7 @@ class AiControllerTest {
                 .andExpect(jsonPath("$.data.baseUrl").value("https://relay.example.com/v1"))
                 .andExpect(jsonPath("$.data.apiKeySet").value(true))
                 .andExpect(jsonPath("$.data.model").value("deepseek-chat"))
-                .andExpect(jsonPath("$.data.persona").value("服装陈列设计专业"))
+                .andExpect(jsonPath("$.data.persona").value("市场营销专业"))
                 .andExpect(jsonPath("$.data.temperature").value(0.8))
                 .andExpect(jsonPath("$.data.apiKeyMasked").value("sk-rela…7890"));
 

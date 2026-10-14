@@ -18,7 +18,7 @@ class LiepinJobCardTest {
                     {
                       "job": {
                         "jobId": "12345678",
-                        "title": "陈列设计实习生",
+                        "title": "运营实习生",
                         "salary": "6-8K",
                         "dq": "苏州-姑苏区",
                         "requireWorkYears": "1-3年",
@@ -27,8 +27,8 @@ class LiepinJobCardTest {
                         "refreshTime": "20241210175950"
                       },
                       "comp": {
-                        "compName": "某某服饰有限公司",
-                        "compIndustry": "服装纺织",
+                        "compName": "某某科技有限公司",
+                        "compIndustry": "电子商务",
                         "compScale": "100-499人"
                       },
                       "recruiter": {
@@ -50,14 +50,14 @@ class LiepinJobCardTest {
         LiepinJobCard card = cards.get(0);
         assertEquals("12345678", card.getJobId());
         assertEquals("998877", card.getBossId());
-        assertEquals("陈列设计实习生", card.getJobName());
+        assertEquals("运营实习生", card.getJobName());
         assertEquals("6-8K", card.getSalaryDesc());
         assertEquals("苏州", card.getCityName());
         assertEquals("姑苏区", card.getAreaDistrict());
         assertEquals("1-3年", card.getJobExperience());
         assertEquals("大专", card.getJobDegree());
-        assertEquals("某某服饰有限公司", card.getBrandName());
-        assertEquals("服装纺织", card.getIndustryName());
+        assertEquals("某某科技有限公司", card.getBrandName());
+        assertEquals("电子商务", card.getIndustryName());
         assertEquals("100-499人", card.getBrandScaleName());
         assertEquals("王女士", card.getBossName());
         assertEquals("HR", card.getBossTitle());

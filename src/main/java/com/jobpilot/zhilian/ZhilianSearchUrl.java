@@ -9,7 +9,7 @@ import java.util.List;
 /**
  * 智联招聘搜索页 URL 构造。
  * <p>
- * 形如 https://www.zhaopin.com/jobs?pageMode=search&jl=639&kw=陈列设计&sl=12000%2C20000
+ * 形如 https://www.zhaopin.com/jobs?pageMode=search&jl=639&kw=新媒体运营&sl=12000%2C20000
  * <p>
  * 三条硬约束（都来自实测，改之前先读）：
  * <ul>

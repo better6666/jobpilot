@@ -21,8 +21,8 @@ class BossSearchUrlTest {
 
     @Test
     void 基本URL带城市和关键词() {
-        String url = BossSearchUrl.build("101020100", "陈列设计", config());
-        assertEquals("https://www.zhipin.com/web/geek/jobs?city=101020100&query=%E9%99%88%E5%88%97%E8%AE%BE%E8%AE%A1", url);
+        String url = BossSearchUrl.build("101020100", "新媒体运营", config());
+        assertEquals("https://www.zhipin.com/web/geek/jobs?city=101020100&query=%E6%96%B0%E5%AA%92%E4%BD%93%E8%BF%90%E8%90%A5", url);
     }
 
     @Test
@@ -60,7 +60,7 @@ class BossSearchUrlTest {
         config.setScale("303");
         config.setStage("803");
 
-        String url = BossSearchUrl.build("101280600", "陈列师", config);
+        String url = BossSearchUrl.build("101280600", "运营专员", config);
         assertTrue(url.contains("jobType=1901"), url);
         assertTrue(url.contains("salary=405"), url);
         assertTrue(url.contains("experience=104"), url);

@@ -89,7 +89,7 @@ public class GreetingService {
     private static final int OPENER_LEN = 4;
     /**
      * 相似度阈值（去掉空白标点后的字符二元重合率）。0.6 是拿真实话术量出来的：
-     * 「…在苏州的实际工作地点及主要职责是什么」和「…在苏州的实际工作地点主要在
+     * 「…在X市的实际工作地点及主要职责是什么」和「…在X市的实际工作地点主要在
      * 哪里」这种一眼同款的落在 0.65，正常不同角度的两条在 0.5 以下。
      */
     private static final double SIMILAR_MAX = 0.6;

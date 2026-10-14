@@ -22,10 +22,10 @@ class ShixisengSearchUrlTest {
 
     @Test
     void 关键词和城市都走query且关键词参数名必须是keyword() {
-        String url = ShixisengSearchUrl.build("%E8%8B%8F%E5%B7%9E", "陈列设计", 1);
+        String url = ShixisengSearchUrl.build("%E8%8B%8F%E5%B7%9E", "新媒体运营", 1);
 
         assertThat(url).isEqualTo(
-                "https://www.shixiseng.com/interns?keyword=%E9%99%88%E5%88%97%E8%AE%BE%E8%AE%A1&city=%E8%8B%8F%E5%B7%9E");
+                "https://www.shixiseng.com/interns?keyword=%E6%96%B0%E5%AA%92%E4%BD%93%E8%BF%90%E8%90%A5&city=%E8%8B%8F%E5%B7%9E");
     }
 
     @Test

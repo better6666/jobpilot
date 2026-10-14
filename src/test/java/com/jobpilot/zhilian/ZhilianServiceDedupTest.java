@@ -76,8 +76,8 @@ class ZhilianServiceDedupTest {
     private ZhilianJobCard card() {
         ZhilianJobCard card = new ZhilianJobCard();
         card.setJobId("CC120812345J00382567890");
-        card.setJobName("陈列设计");
-        card.setBrandName("苏州某某服饰有限公司");
+        card.setJobName("新媒体运营");
+        card.setBrandName("苏州某某科技有限公司");
         return card;
     }
 
@@ -92,7 +92,7 @@ class ZhilianServiceDedupTest {
     void 已投递的岗位直接跳过不再点立即投递() {
         when(deliveryMapper.selectOne(any())).thenReturn(existing("已投递"));
 
-        service.processCardForTest(card(), "陈列设计", properties.get(), null);
+        service.processCardForTest(card(), "新媒体运营", properties.get(), null);
 
         verify(driver, never()).deliver(any(), any(), any(), any(), any());
         verify(deliveryMapper, never()).insert(any(Delivery.class));
@@ -105,7 +105,7 @@ class ZhilianServiceDedupTest {
         when(driver.deliver(any(), any(), any(), any(), any()))
                 .thenReturn(DeliveryOutcome.delivered("简历已投递"));
 
-        service.processCardForTest(card(), "陈列设计", properties.get(), null);
+        service.processCardForTest(card(), "新媒体运营", properties.get(), null);
 
         ArgumentCaptor<Delivery> captor = ArgumentCaptor.forClass(Delivery.class);
         verify(deliveryMapper).insert(captor.capture());
@@ -113,8 +113,8 @@ class ZhilianServiceDedupTest {
         assertEquals("已投递", saved.getDeliveryStatus());
         assertEquals("zhilian", saved.getPlatform());
         assertEquals("CC120812345J00382567890", saved.getEncryptId());
-        assertEquals("苏州某某服饰有限公司", saved.getBrandName());
-        assertEquals("陈列设计", saved.getKeyword());
+        assertEquals("苏州某某科技有限公司", saved.getBrandName());
+        assertEquals("新媒体运营", saved.getKeyword());
         // 智联没有 HR id，这一列就是空的
         assertNull(saved.getEncryptUserId());
     }
@@ -127,7 +127,7 @@ class ZhilianServiceDedupTest {
         when(driver.deliver(any(), any(), any(), any(), any()))
                 .thenReturn(DeliveryOutcome.preview("预演"));
 
-        service.processCardForTest(card(), "陈列设计", config, null);
+        service.processCardForTest(card(), "新媒体运营", config, null);
 
         ArgumentCaptor<ZhilianProperties.ZhilianConfig> captor =
                 ArgumentCaptor.forClass(ZhilianProperties.ZhilianConfig.class);
@@ -146,7 +146,7 @@ class ZhilianServiceDedupTest {
         when(driver.deliver(any(), any(), any(), any(), any()))
                 .thenReturn(new DeliveryOutcome(DeliveryStatus.LIMIT, "今日投递已达上限", null));
 
-        service.processCardForTest(card(), "陈列设计", properties.get(), null);
+        service.processCardForTest(card(), "新媒体运营", properties.get(), null);
 
         ArgumentCaptor<Delivery> captor = ArgumentCaptor.forClass(Delivery.class);
         verify(deliveryMapper).insert(captor.capture());
@@ -160,17 +160,17 @@ class ZhilianServiceDedupTest {
         ZhilianProperties.ZhilianConfig config = properties.get();
         com.jobpilot.delivery.ScoreRules rules = new com.jobpilot.delivery.ScoreRules();
         rules.setThreshold(10);
-        rules.setJobRules(java.util.List.of(newRule("陈列", 60)));
+        rules.setJobRules(java.util.List.of(newRule("运营", 60)));
         // 学历/行业/JD 字段全是 null，这三组规则一条都不该命中
         rules.setDegreeRules(java.util.List.of(newRule("大专", 100)));
-        rules.setIndustryRules(java.util.List.of(newRule("服装", 100)));
-        rules.setJdRules(java.util.List.of(newRule("陈列", 100)));
+        rules.setIndustryRules(java.util.List.of(newRule("电子商务", 100)));
+        rules.setJdRules(java.util.List.of(newRule("运营", 100)));
         config.setScoreRules(rules);
         when(deliveryMapper.selectOne(any())).thenReturn(null);
         when(driver.deliver(any(), any(), any(), any(), any()))
                 .thenReturn(DeliveryOutcome.delivered("简历已投递"));
 
-        service.processCardForTest(card(), "陈列设计", config, null);
+        service.processCardForTest(card(), "新媒体运营", config, null);
 
         ArgumentCaptor<Delivery> captor = ArgumentCaptor.forClass(Delivery.class);
         verify(deliveryMapper).insert(captor.capture());

@@ -73,7 +73,7 @@ public class LiepinService extends DeliveryService<LiepinJobCard> {
         String city = config.getCity();
         if (city != null && !city.isBlank()
                 && LiepinSearchUrl.resolveCityCode(options, city) == null) {
-            return "城市「" + city + "」无法识别，请填城市名（如：苏州）或猎聘城市码";
+            return "城市「" + city + "」无法识别，请填城市名（如：杭州）或猎聘城市码";
         }
         return null;
     }

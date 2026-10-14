@@ -88,10 +88,10 @@ class JobScorerTest {
     void 规则加分超过阈值才通过() {
         ScoreRules rules = new ScoreRules();
         rules.setThreshold(20);
-        rules.setJobRules(List.of(rule("陈列", 25), rule("设计", 10)));
+        rules.setJobRules(List.of(rule("运营", 25), rule("设计", 10)));
         JobScorer scorer = new JobScorer(rules);
 
-        assertTrue(scorer.score(card("陈列设计实习生", "大专", "应届", "", "")).isPass());
+        assertTrue(scorer.score(card("运营实习生", "大专", "应届", "", "")).isPass());
         // 只命中"设计"（+10），到不了 20
         assertFalse(scorer.score(card("平面设计", "大专", "应届", "", "")).isPass());
     }
@@ -137,18 +137,18 @@ class JobScorerTest {
         rules.setThreshold(30);
         rules.setDegreeRules(List.of(rule("大专", 10)));
         rules.setExperienceRules(List.of(rule("应届", 10)));
-        rules.setIndustryRules(List.of(rule("服装", 10)));
-        rules.setJobRules(List.of(rule("陈列", 10)));
+        rules.setIndustryRules(List.of(rule("电子商务", 10)));
+        rules.setJobRules(List.of(rule("运营", 10)));
         JobScorer scorer = new JobScorer(rules);
 
-        ScoreResult result = scorer.score(card("陈列设计", "大专", "应届毕业生", "服装纺织", ""));
+        ScoreResult result = scorer.score(card("新媒体运营", "大专", "应届毕业生", "电子商务", ""));
         assertTrue(result.isPass());
         assertEquals(40, result.getScore());
         // reason 里能看到每组命中记录，方便用户复盘
-        assertTrue(result.getReason().contains("职位[陈列]+10"));
+        assertTrue(result.getReason().contains("职位[运营]+10"));
         assertTrue(result.getReason().contains("学历[大专]+10"));
         assertTrue(result.getReason().contains("经验[应届]+10"));
-        assertTrue(result.getReason().contains("行业[服装]+10"));
+        assertTrue(result.getReason().contains("行业[电子商务]+10"));
     }
 
     @Test

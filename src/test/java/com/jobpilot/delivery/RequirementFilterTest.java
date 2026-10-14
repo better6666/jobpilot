@@ -14,7 +14,7 @@ class RequirementFilterTest {
 
     private static JobCard card(String degree, String experience) {
         Job51JobCard card = new Job51JobCard();
-        card.setJobName("陈列设计");
+        card.setJobName("新媒体运营");
         card.setJobDegree(degree);
         card.setJobExperience(experience);
         return card;

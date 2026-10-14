@@ -103,7 +103,7 @@ class LiepinQuotaPrecheckTest {
         boss.setDryRun(false);
         boss.setCity("");
         boss.setSayHi("您好");
-        boss.setKeywords(List.of("陈列设计"));
+        boss.setKeywords(List.of("新媒体运营"));
         when(bossProperties.get()).thenReturn(boss);
 
         // mock 的 getJson 默认返回 null（不是 defaultValue），AI 配置显式给一份关闭态的
@@ -132,7 +132,7 @@ class LiepinQuotaPrecheckTest {
         LiepinJobCard card = new LiepinJobCard();
         card.setJobId("9001");
         card.setRecruiterId("hr-1");
-        card.setJobName("陈列设计");
+        card.setJobName("新媒体运营");
         card.setBrandName("某服饰");
         return card;
     }
@@ -148,7 +148,7 @@ class LiepinQuotaPrecheckTest {
                 .thenReturn(DeliveryOutcome.delivered("已沟通"));
         LiepinService service = liepinService();
 
-        service.processCardForTest(card(), "陈列设计", liepinProperties.get(), null);
+        service.processCardForTest(card(), "新媒体运营", liepinProperties.get(), null);
 
         verify(entitlementService).recordUse("apply:liepin");
         verify(entitlementService, never()).recordUse("apply");
@@ -226,7 +226,7 @@ class LiepinQuotaPrecheckTest {
         when(liepinDriver.deliver(any(), any(), any(), any(), any(), any()))
                 .thenReturn(DeliveryOutcome.delivered("已沟通"));
 
-        liepinService().processCardForTest(card(), "陈列设计", liepinProperties.get(), null);
+        liepinService().processCardForTest(card(), "新媒体运营", liepinProperties.get(), null);
 
         verify(liepinDriver).deliver(any(), any(), any(), any(), any(), any());
     }
@@ -238,7 +238,7 @@ class LiepinQuotaPrecheckTest {
         when(liepinDriver.deliver(any(), any(), any(), any(), any(), any()))
                 .thenReturn(DeliveryOutcome.delivered("已沟通"));
 
-        liepinService().processCardForTest(card(), "陈列设计", liepinProperties.get(), null);
+        liepinService().processCardForTest(card(), "新媒体运营", liepinProperties.get(), null);
 
         verify(entitlementService).recordUse("apply:liepin");
         verify(entitlementService, never()).recordUse(startsWith("apply:liepin:2026"));

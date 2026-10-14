@@ -18,13 +18,13 @@ class Job51JobCardTest {
                   {
                     "jobId": "152847391",
                     "hrUid": "8821345",
-                    "jobName": "陈列设计",
+                    "jobName": "新媒体运营",
                     "provideSalaryString": "8-13K",
                     "jobAreaString": "苏州-姑苏区",
                     "workYearString": "3-5年",
                     "degreeString": "大专",
-                    "fullCompanyName": "苏州某某服饰有限公司",
-                    "industryType1Str": "服装/纺织",
+                    "fullCompanyName": "苏州某某科技有限公司",
+                    "industryType1Str": "互联网/电子商务",
                     "companySizeString": "50-150人",
                     "hrName": "王女士",
                     "hrPosition": "招聘主管",
@@ -48,15 +48,15 @@ class Job51JobCardTest {
         Job51JobCard card = cards.get(0);
         assertEquals("152847391", card.getJobId());
         assertEquals("8821345", card.getRecruiterId());
-        assertEquals("陈列设计", card.getJobName());
+        assertEquals("新媒体运营", card.getJobName());
         assertEquals("8-13K", card.getSalaryDesc());
         assertEquals("苏州-姑苏区", card.getLocationRaw());
         assertEquals("苏州", card.getCityName());
         assertEquals("姑苏区", card.getAreaDistrict());
         assertEquals("3-5年", card.getJobExperience());
         assertEquals("大专", card.getJobDegree());
-        assertEquals("苏州某某服饰有限公司", card.getBrandName());
-        assertEquals("服装/纺织", card.getIndustryName());
+        assertEquals("苏州某某科技有限公司", card.getBrandName());
+        assertEquals("互联网/电子商务", card.getIndustryName());
         assertEquals("50-150人", card.getBrandScaleName());
         assertEquals("王女士", card.getBossName());
         assertEquals("招聘主管", card.getBossTitle());
@@ -83,7 +83,7 @@ class Job51JobCardTest {
     void 移动端键名走兜底分支() {
         String json = """
                 {"resultbody": {"job": {"items": [
-                  {"jobid": "77", "jobTitle": "陈列师",
+                  {"jobid": "77", "jobTitle": "运营专员",
                    "salary": "10-15K", "cityName": "上海",
                    "ctmName": "某公司", "hrName": "李女士"}
                 ]}}}
@@ -92,7 +92,7 @@ class Job51JobCardTest {
         assertEquals(1, cards.size());
         Job51JobCard card = cards.get(0);
         assertEquals("77", card.getJobId());
-        assertEquals("陈列师", card.getJobName());
+        assertEquals("运营专员", card.getJobName());
         assertEquals("10-15K", card.getSalaryDesc());
         assertEquals("上海", card.getCityName());
         assertEquals("某公司", card.getBrandName());

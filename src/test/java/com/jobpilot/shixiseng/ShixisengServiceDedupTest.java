@@ -154,7 +154,7 @@ class ShixisengServiceDedupTest {
         rules.setThreshold(10);
         rules.setJobRules(List.of(newRule("平面", 60)));
         // 列表页拿不到 JD，jdRules 命中不了——只有驱动层开详情页回填后才可能
-        rules.setJdRules(List.of(newRule("陈列", 100)));
+        rules.setJdRules(List.of(newRule("运营", 100)));
         config.setScoreRules(rules);
         when(deliveryMapper.selectOne(any())).thenReturn(null);
         when(driver.deliver(any(), any(), any(), any(), any()))

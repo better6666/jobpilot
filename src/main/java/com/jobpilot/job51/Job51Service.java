@@ -72,7 +72,7 @@ public class Job51Service extends DeliveryService<Job51JobCard> {
         String city = config.getCity();
         if (city != null && !city.isBlank()
                 && Job51SearchUrl.resolveCityCode(options, city) == null) {
-            return "城市「" + city + "」无法识别，请填城市名（如：苏州）或 51job 地区码";
+            return "城市「" + city + "」无法识别，请填城市名（如：杭州）或 51job 地区码";
         }
         return null;
     }

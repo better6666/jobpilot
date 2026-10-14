@@ -83,7 +83,7 @@ class LiepinServiceDedupTest {
         LiepinJobCard card = new LiepinJobCard();
         card.setJobId("12345678");
         card.setRecruiterId("998877");
-        card.setJobName("陈列设计");
+        card.setJobName("新媒体运营");
         card.setBrandName("某品牌");
         return card;
     }
@@ -99,7 +99,7 @@ class LiepinServiceDedupTest {
     void 已投递的岗位直接跳过不再碰浏览器() {
         when(deliveryMapper.selectOne(any())).thenReturn(existing("已投递"));
 
-        service.processCardForTest(card(), "陈列设计", properties.get(), null);
+        service.processCardForTest(card(), "新媒体运营", properties.get(), null);
 
         verify(driver, never()).deliver(any(), any(), any(), any(), any(), any());
         verify(deliveryMapper, never()).insert(any(Delivery.class));
@@ -112,7 +112,7 @@ class LiepinServiceDedupTest {
         when(driver.deliver(any(), any(), any(), any(), any(), any()))
                 .thenReturn(DeliveryOutcome.delivered("您好"));
 
-        service.processCardForTest(card(), "陈列设计", properties.get(), null);
+        service.processCardForTest(card(), "新媒体运营", properties.get(), null);
 
         verify(driver).deliver(any(), any(), any(), any(), any(), any());
         verify(deliveryMapper).updateById(any(Delivery.class));
@@ -127,7 +127,7 @@ class LiepinServiceDedupTest {
         when(driver.deliver(any(), any(), any(), any(), any(), any()))
                 .thenReturn(DeliveryOutcome.delivered("您好"));
 
-        service.processCardForTest(card(), "陈列设计", properties.get(), null);
+        service.processCardForTest(card(), "新媒体运营", properties.get(), null);
 
         ArgumentCaptor<Delivery> captor = ArgumentCaptor.forClass(Delivery.class);
         verify(deliveryMapper).insert(captor.capture());
@@ -136,7 +136,7 @@ class LiepinServiceDedupTest {
         assertEquals("已投递", saved.getDeliveryStatus());
         assertEquals("12345678", saved.getEncryptId());
         assertEquals("998877", saved.getEncryptUserId());
-        assertEquals("陈列设计", saved.getJobName());
+        assertEquals("新媒体运营", saved.getJobName());
         assertEquals("某品牌", saved.getBrandName());
     }
 
@@ -146,7 +146,7 @@ class LiepinServiceDedupTest {
         when(driver.deliver(any(), any(), any(), any(), any(), any()))
                 .thenReturn(DeliveryOutcome.failed("未找到沟通按钮"));
 
-        service.processCardForTest(card(), "陈列设计", properties.get(), null);
+        service.processCardForTest(card(), "新媒体运营", properties.get(), null);
 
         verify(deliveryMapper).updateById(any(Delivery.class));
         assertEquals(1, service.status().getFailed());
@@ -166,7 +166,7 @@ class LiepinServiceDedupTest {
         when(driver.deliver(any(), any(), any(), any(), any(), any()))
                 .thenReturn(DeliveryOutcome.failed("点击后聊天窗没有出现，沟通未确认（可能被弹窗挡住或平台限制）"));
 
-        service.processCardForTest(card(), "陈列设计", properties.get(), null);
+        service.processCardForTest(card(), "新媒体运营", properties.get(), null);
 
         ArgumentCaptor<Delivery> captor = ArgumentCaptor.forClass(Delivery.class);
         verify(deliveryMapper).insert(captor.capture());
@@ -181,10 +181,10 @@ class LiepinServiceDedupTest {
         LiepinProperties.LiepinConfig config = properties.get();
         com.jobpilot.delivery.ScoreRules rules = new com.jobpilot.delivery.ScoreRules();
         rules.setThreshold(50);
-        rules.setJobRules(List.of(newScoreRule("陈列设计", 1)));
+        rules.setJobRules(List.of(newScoreRule("新媒体运营", 1)));
         config.setScoreRules(rules);
 
-        service.processCardForTest(card(), "陈列设计", config, null);
+        service.processCardForTest(card(), "新媒体运营", config, null);
 
         ArgumentCaptor<Delivery> captor = ArgumentCaptor.forClass(Delivery.class);
         verify(deliveryMapper).insert(captor.capture());
@@ -199,7 +199,7 @@ class LiepinServiceDedupTest {
         when(driver.deliver(any(), any(), any(), any(), any(), any()))
                 .thenReturn(new DeliveryOutcome(DeliveryStatus.LIMIT, "今日沟通已达上限", null));
 
-        service.processCardForTest(card(), "陈列设计", properties.get(), null);
+        service.processCardForTest(card(), "新媒体运营", properties.get(), null);
 
         ArgumentCaptor<Delivery> captor = ArgumentCaptor.forClass(Delivery.class);
         verify(deliveryMapper).insert(captor.capture());
@@ -215,22 +215,22 @@ class LiepinServiceDedupTest {
         int limit = com.jobpilot.delivery.DeliveryService.MAX_CONSECUTIVE_FAILURES;
 
         for (int i = 0; i < limit - 1; i++) {
-            service.processCardForTest(card(), "陈列设计", properties.get(), null);
+            service.processCardForTest(card(), "新媒体运营", properties.get(), null);
         }
         assertTrue(service.status().getLogs().stream().noneMatch(l -> l.contains("任务停止")));
 
         // 成功一次清零：再失败 limit-1 次也不该停
         when(driver.deliver(any(), any(), any(), any(), any(), any()))
                 .thenReturn(DeliveryOutcome.delivered("您好"));
-        service.processCardForTest(card(), "陈列设计", properties.get(), null);
+        service.processCardForTest(card(), "新媒体运营", properties.get(), null);
         when(driver.deliver(any(), any(), any(), any(), any(), any()))
                 .thenReturn(DeliveryOutcome.failed("点击后聊天窗没有出现"));
         for (int i = 0; i < limit - 1; i++) {
-            service.processCardForTest(card(), "陈列设计", properties.get(), null);
+            service.processCardForTest(card(), "新媒体运营", properties.get(), null);
         }
         assertTrue(service.status().getLogs().stream().noneMatch(l -> l.contains("任务停止")));
 
-        service.processCardForTest(card(), "陈列设计", properties.get(), null);
+        service.processCardForTest(card(), "新媒体运营", properties.get(), null);
         assertTrue(service.status().getLogs().stream().anyMatch(l -> l.contains("连续 " + limit + " 个岗位投递失败")));
     }
 

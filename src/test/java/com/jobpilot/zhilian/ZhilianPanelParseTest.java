@@ -97,15 +97,15 @@ class ZhilianPanelParseTest {
     @Test
     void 公司meta用竖线分隔也行() {
         ZhilianJobCard card = new ZhilianJobCard();
-        ZhilianDriver.splitCompanyMeta(card, "1000-9999人|服装/纺织");
+        ZhilianDriver.splitCompanyMeta(card, "1000-9999人|互联网/电子商务");
         assertEquals("1000-9999人", card.getBrandScaleName());
-        assertEquals("服装/纺织", card.getIndustryName());
+        assertEquals("互联网/电子商务", card.getIndustryName());
     }
 
     @Test
     void 公司meta第一段不是规模时也能取到行业() {
         ZhilianJobCard card = new ZhilianJobCard();
-        ZhilianDriver.splitCompanyMeta(card, "民营公司 · 服装/纺织 · 100-299人");
+        ZhilianDriver.splitCompanyMeta(card, "民营公司 · 互联网/电子商务 · 100-299人");
         assertEquals("100-299人", card.getBrandScaleName());
         // 末段是规模，不能当行业
         assertNull(card.getIndustryName());
@@ -119,6 +119,6 @@ class ZhilianPanelParseTest {
         assertNull(card.getBrandScaleName());
         assertNull(card.getIndustryName());
 
-        ZhilianDriver.splitCompanyMeta(null, "100-299人 · 服装");
+        ZhilianDriver.splitCompanyMeta(null, "100-299人 · 电子商务");
     }
 }
