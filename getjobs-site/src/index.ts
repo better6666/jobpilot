@@ -51,21 +51,21 @@ async function loadPlans(env: Env): Promise<Plan[]> {
 
 /** 各平台安装包。available=false 时页面显示"即将提供"而不是死链 */
 const RELEASES: Release[] = [
-  { file: 'JobPilot-1.0.14.dmg', label: 'macOS 版', platform: 'mac',
-    arch: 'Apple Silicon（arm64）', size: '115 MB', available: true },
-  { file: 'JobPilot-1.0.14-windows.zip', label: 'Windows 版', platform: 'win',
-    arch: 'Windows 10 / 11 64 位', size: '110 MB', available: true },
+  { file: 'JobPilot-1.0.15.dmg', label: 'macOS 版', platform: 'mac',
+    arch: 'Apple Silicon（arm64）', size: '120 MB', available: true },
+  { file: 'JobPilot-1.0.15-windows.zip', label: 'Windows 版', platform: 'win',
+    arch: 'Windows 10 / 11 64 位', size: '115 MB', available: true },
 ]
 
-const VERSION = '1.0.14'
-const UPDATED = '2026-10-13'
+const VERSION = '1.0.15'
+const UPDATED = '2026-10-14'
 
 /**
  * 安装包的 SHA-256，页面上给用户校验用。
  * 必须声明在 page() 之前：const 不提升，模板字符串里引用了它们
  */
-const SHA_MAC = '18f9ab68d39c3e3e28ac01e533d888854d426f2f45c343b7309c39f391c33bbf'
-const SHA_WIN = '297738f8eab09ac638d7d74d9505795abf793b0e3f104c6e8b93f9dd26891026'
+const SHA_MAC = 'c694d9e1f3d65b69cc765f1ab84932313e9a6e11d7581b92feaaff47fb1528a7'
+const SHA_WIN = 'c524db176c25d1b1a6d3357336ba958c3a61c5033422dfb16d160f93a32719c2'
 
 function page(env: Env, plans: Plan[]): string {
   const pricingCards = plans.map(plan => {
