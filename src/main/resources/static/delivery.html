@@ -155,7 +155,7 @@
       <div class="full" id="sayHiWrap">
         <label>打招呼话术（一行一条，轮换着发）</label>
         <textarea id="sayHi" rows="3" placeholder="您好，看到{公司}在招{岗位}，我做过……&#10;您好，我对{岗位}很感兴趣……"></textarea>
-        <div class="hint">AI 话术启用时这里是兜底：AI 生成失败时才发。写 {公司} {岗位} 会换成真实的公司名和岗位名；不写也会自动点名，不会每条都一模一样。去 <a href="/ai.html" style="color:#3370ff">AI 话术</a> 页配置接口。</div>
+        <div class="hint">AI 话术启用时，AI 调不通会先用「求职者背景」按岗位现拼一句，每条都不一样；只有这里写了多行时才改为轮换你写的这几条。写 {公司} {岗位} 会换成真实的公司名和岗位名。去 <a href="/ai.html" style="color:#3370ff">AI 话术</a> 页配置接口。</div>
       </div>
       <div class="full">
         <label>打分规则（JSON：threshold 阈值；titleReject/degreeReject 一票否决；jobRules/degreeRules/experienceRules/industryRules/jdRules 为 {match, score} 加减分列表）</label>

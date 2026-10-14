@@ -527,7 +527,7 @@ class AiServiceTest {
 
         assertFalse(r.isOk());
         assertTrue(r.error().contains("过于频繁"), r.error());
-        assertEquals(3, hitsOf(PLATFORM_PATH), "429 要按 3 次尝试打满");
+        assertEquals(4, hitsOf(PLATFORM_PATH), "平台中转按 4 次尝试打满（网络抖动是一阵一阵的）");
     }
 
     @Test

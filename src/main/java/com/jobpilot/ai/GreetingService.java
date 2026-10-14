@@ -145,7 +145,7 @@ public class GreetingService {
             return Greeting.fallback(vary(fallback, card, null), "AI 话术开着但没填求职者背景，用固定话术");
         }
         if (!isConfigured(cfg)) {
-            return Greeting.fallback(vary(fallback, card, null), configGapReason(cfg));
+            return whenAiFails(fallback, card, null, cfg, configGapReason(cfg));
         }
 
         List<String> recent = recentGreetings();
@@ -159,7 +159,7 @@ public class GreetingService {
         }
         if (!first.retryable()) {
             // 接口本身报错/超时：再调一次大概率同样失败，还让这张卡多等一整轮
-            return Greeting.fallback(vary(fallback, card, recent), "AI 生成失败（" + first.problem() + "），用固定话术");
+            return whenAiFails(fallback, card, recent, cfg, "AI 生成失败（" + first.problem() + "）");
         }
         // 只在真的不合格时才重跑一次。用"开头撞了"这种软条件触发重试等于每条都调
         // 两次接口，AI 额度会被这一条规则吃光，所以软条件只写进提示词、不触发重试
@@ -168,7 +168,28 @@ public class GreetingService {
         if (retry.problem() == null) {
             return Greeting.ai(retry.text());
         }
-        return Greeting.fallback(vary(fallback, card, recent), "AI 生成失败（" + retry.problem() + "），用固定话术");
+        return whenAiFails(fallback, card, recent, cfg, "AI 生成失败（" + retry.problem() + "）");
+    }
+
+    /**
+     * AI 开着却拿不到结果时发什么。
+     *
+     * <p>用户自己写了多条固定话术，说明想自己掌控说法，就轮换着用；否则按岗位和求职者
+     * 背景在本地现拼一句（{@link LocalGreetingComposer}），保证每条都不一样。
+     * 两条路都走不通才退回那一句固定话术。
+     */
+    private Greeting whenAiFails(String fallback, JobCard card, List<String> recent, AiConfig cfg,
+                                 String reason) {
+        List<String> history = recent != null ? recent : recentGreetings();
+        if (!isBlank(fallback) && FallbackGreeting.variants(fallback).size() > 1) {
+            return Greeting.fallback(vary(fallback, card, history), reason + "，轮换固定话术");
+        }
+        String local = LocalGreetingComposer.compose(card, cfg.getPersona(), history,
+                ThreadLocalRandom.current());
+        if (local != null) {
+            return Greeting.fallback(local, reason + "，改用按岗位现拼的话术");
+        }
+        return Greeting.fallback(vary(fallback, card, history), reason + "，用固定话术");
     }
 
     /** 固定话术按岗位活用。recent 没现成的就现查一次（只在走兜底时才花这次查询） */
@@ -269,9 +290,9 @@ public class GreetingService {
 
     private static String configGapReason(AiConfig cfg) {
         if (AiProperties.MODE_CUSTOM.equals(cfg.getMode())) {
-            return "AI 接口地址/Key/模型没配全，用固定话术";
+            return "AI 接口地址/Key/模型没配全";
         }
-        return "平台没开 AI 中转，请在 AI 话术页改用「我自己的接口」，用固定话术";
+        return "平台没开 AI 中转，请在 AI 话术页改用「我自己的接口」";
     }
 
     /**

@@ -83,10 +83,18 @@ class GreetingServiceTest {
                 .thenReturn(Map.of("token", "tok-123", "device_id", "dev-456"));
     }
 
-    /** 兜底话术会按岗位点名（见 FallbackGreeting），原文要还在、且点到了这张卡的岗位 */
+    /**
+     * AI 开着却拿不到结果：有求职者背景时按岗位现拼一句（LocalGreetingComposer），
+     * 不再发那一句固定话术；没背景才退回固定话术（按岗位点名，见 FallbackGreeting）
+     */
     private static void assertFallback(GreetingService.Greeting g) {
-        assertTrue(g.text().endsWith("固定话术"), g.text());
         assertTrue(g.text().contains("陈列设计助理"), "兜底也得点到岗位名：" + g.text());
+        if (g.text().endsWith("固定话术")) {
+            return;
+        }
+        assertTrue(g.text().contains("橱窗陈列实习") || g.text().contains("服装陈列设计专业"),
+                "现拼的话术要用上求职者背景：" + g.text());
+        assertTrue(g.note() == null || g.note().contains("现拼"), g.note());
     }
 
     private void recentGreetings(String... greetings) {
@@ -717,6 +725,32 @@ class GreetingServiceTest {
         assertTrue(user.getValue().contains("反复出现这些说法"), user.getValue());
         assertTrue(user.getValue().contains("两季橱窗陈列实习"), user.getValue());
         assertTrue(user.getValue().contains("【发送渠道】Boss 直聘"), user.getValue());
+    }
+
+    @Test
+    void AI一直失败时连发十条也各不相同() {
+        fullyConfigured();
+        when(aiService.chat(anyString(), anyString(), anyString(), anyString(), anyString(), anyDouble()))
+                .thenReturn(AiService.AiResult.fail("连接卡密服务端失败或超时: SSLHandshakeException"));
+        java.util.List<String> sent = new java.util.ArrayList<>();
+        for (int i = 0; i < 10; i++) {
+            // 每发一条都进历史：和真实跑批一样，下一条要避开前面发过的
+            recentGreetings(sent.toArray(new String[0]));
+            GreetingService.Greeting g = service.compose(card(), "您好！我对这个岗位很感兴趣，期待您的回复。");
+            assertFalse(sent.contains(g.text()), "第 " + (i + 1) + " 条和之前的重复了：" + g.text());
+            assertTrue(g.note().contains("现拼"), g.note());
+            sent.add(0, g.text());
+        }
+    }
+
+    @Test
+    void 用户写了多条固定话术就轮换用户自己的() {
+        fullyConfigured();
+        when(aiService.chat(anyString(), anyString(), anyString(), anyString(), anyString(), anyDouble()))
+                .thenReturn(AiService.AiResult.fail("接口拒绝了"));
+        GreetingService.Greeting g = service.compose(card(), "第一条：{岗位}我很想试试\n第二条：想应聘{公司}");
+        assertTrue(g.text().startsWith("第一条") || g.text().startsWith("第二条"), g.text());
+        assertTrue(g.note().contains("轮换固定话术"), g.note());
     }
 
     @Test

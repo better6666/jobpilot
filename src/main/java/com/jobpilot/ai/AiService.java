@@ -44,6 +44,12 @@ public class AiService {
     private static final int READ_TIMEOUT_MS = 45_000;
     private static final int MAX_ATTEMPTS = 3;
     private static final long[] BACKOFF_MS = {600, 1800};
+    /**
+     * 平台中转多试一次、间隔拉长：2026-10-14 实测国内直连卡密服务端约三成请求 SSL 握手失败，
+     * 而且是一阵一阵的，600ms 后重试往往还在同一阵里
+     */
+    private static final int PLATFORM_ATTEMPTS = 4;
+    private static final long[] PLATFORM_BACKOFF_MS = {800, 2000, 4000};
     /** 打招呼语长度上限：超了截到最后一个标点，避免半句话发出去 */
     static final int GREETING_MAX_LEN = 120;
 
@@ -278,7 +284,8 @@ public class AiService {
         }
 
         String lastError = "未知错误";
-        for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+        int timeouts = 0;
+        for (int attempt = 1; attempt <= PLATFORM_ATTEMPTS; attempt++) {
             HttpRequest request;
             try {
                 request = HttpRequest.newBuilder()
@@ -322,9 +329,14 @@ public class AiService {
                 return AiResult.fail("调用被中断");
             } catch (Exception e) {
                 lastError = "连接卡密服务端失败或超时: " + e.getClass().getSimpleName();
+                // 读超时一次就是 45 秒，连着两次就别再等了；握手失败、连接被重置是秒回的，
+                // 多试几次不费时间，正好扛过一阵网络抖动
+                if (e instanceof java.net.http.HttpTimeoutException && ++timeouts >= 2) {
+                    break;
+                }
             }
-            if (attempt < MAX_ATTEMPTS) {
-                sleep(BACKOFF_MS[Math.min(attempt - 1, BACKOFF_MS.length - 1)]);
+            if (attempt < PLATFORM_ATTEMPTS) {
+                sleep(PLATFORM_BACKOFF_MS[Math.min(attempt - 1, PLATFORM_BACKOFF_MS.length - 1)]);
             }
         }
         return AiResult.fail(lastError);
