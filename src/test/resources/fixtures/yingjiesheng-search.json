@@ -1,0 +1,5 @@
+{"status":"1","message":"成功","resultbody":{"searchData":{"cityCode":"","maxapplynum":"50","joblist":{"totalCount":"1000","items":[
+{"jobid":"173666568","jobname":"美团-工具运营","providesalary":"1.5-2.5万","jobarea":"北京","degree":"","workyear":"无需经验","coname":"美团","cosize":"10000人以上","coIndustryText":"在线生活服务(O2O)","indtype":"互联网/电子商务","hrUid":"1588397","hrName":"赵琦","hrPosition":"人事招聘","hrActiveStatus":"2分钟前回复","jobDescribe":"","isReprintJob":"0","reprintFromUrl":"","isapply":"0","jobterm":"全职"},
+{"jobid":"173895519","jobname":"自媒体运营","providesalary":"6千-1.2万","jobarea":"哈尔滨-南岗区","degree":"本科","workyear":"1年及以上","coname":"江苏凯亚环保科技","cosize":"少于50人","coIndustryText":"","indtype":"环保","hrUid":"","isReprintJob":"1","reprintFromUrl":"https://example.com/job/1","isapply":"1"},
+{"jobid":"0","jobname":"坏数据"}
+]}}}}

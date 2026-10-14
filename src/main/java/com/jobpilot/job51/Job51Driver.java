@@ -1,6 +1,7 @@
 package com.jobpilot.job51;
 
 import com.jobpilot.browser.BrowserManager;
+import com.jobpilot.browser.HumanVerification;
 import com.jobpilot.delivery.CardConsumer;
 import com.jobpilot.delivery.DeliveryOutcome;
 import com.jobpilot.delivery.DeliveryStatus;
@@ -100,6 +101,8 @@ public class Job51Driver {
     private static final int ACTION_TIMEOUT_MS = 10_000;
     private static final int RESPONSE_TIMEOUT_MS = 20_000;
     private static final int MAX_PAGE = 50;
+    /** 采集中撞到滑块时等用户手动过的分钟数（采集这层拿不到配置里的登录等待时长） */
+    private static final int VERIFY_WAIT_MINUTES = 5;
 
     /** 命中这些字样的外链一律不碰：应届生/校招跳转会劫持主页 */
     private static final String[] HIJACK_MARKERS = {"yingjiesheng", "xyz.51job", "partner=51wspcjoblist"};
@@ -271,8 +274,10 @@ public class Job51Driver {
         });
         try {
             navigate(page, searchUrl, listener);
-            if (isAccessVerification(page)) {
-                listener.onProgress("【" + keyword + "】触发访问验证（阿里 WAF），跳过该关键词");
+            // 以前一见验证就跳过当前关键词，下一个关键词进来还是验证页，整轮空跑。
+            // 改成原地等用户手动拖滑块，过了接着跑
+            if (isAccessVerification(page) && !HumanVerification.waitIfShowing(
+                    page, "51job", VERIFY_WAIT_MINUTES, listener, stop)) {
                 return;
             }
             waitForNewResponse(responseSeq, RESPONSE_TIMEOUT_MS, stop);
@@ -299,8 +304,8 @@ public class Job51Driver {
                     waitForNewResponse(responseSeq, RESPONSE_TIMEOUT_MS, stop);
                 }
                 closeAnyModalOverlays(page);
-                if (isAccessVerification(page)) {
-                    listener.onProgress("【" + keyword + "】触发访问验证（阿里 WAF），跳过该关键词");
+                if (isAccessVerification(page) && !HumanVerification.waitIfShowing(
+                        page, "51job", VERIFY_WAIT_MINUTES, listener, stop)) {
                     return;
                 }
                 int count = applyButtonCount(page);
@@ -872,8 +877,9 @@ public class Job51Driver {
             if (page.locator("script[name^='aliyunwaf_']").count() > 0) {
                 return true;
             }
-            Locator text = page.locator("text=访问验证, text=请按住滑块");
-            return text.count() > 0 && text.first().isVisible();
+            // 以前写成 "text=访问验证, text=请按住滑块"：text= 引擎不认逗号分支，
+            // 整串被当成一段要匹配的字面文字，这条兜底从来没命中过
+            return HumanVerification.isShowing(page);
         } catch (Exception e) {
             return false;
         }

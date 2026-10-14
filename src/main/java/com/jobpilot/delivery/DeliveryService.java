@@ -54,6 +54,13 @@ public abstract class DeliveryService<C extends JobCard> {
     private volatile boolean stoppedForLicense;
     /** 已经因为"当日投递额度用完"停过一次 */
     private volatile boolean stoppedForQuota;
+    /**
+     * 连着失败了几次。登录态掉了、被风控、页面改版时每张卡都会失败，
+     * 不拦的话会一路失败到跑完，日志刷满还白白暴露机器特征
+     */
+    private volatile int consecutiveFailures;
+    /** 连续失败到这个数就停：偶发失败（弹窗、超时）很少连着出现这么多次 */
+    public static final int MAX_CONSECUTIVE_FAILURES = 8;
     private Future<?> currentRun;
 
     protected DeliveryService(DeliveryMapper mapper, BrowserManager browserManager,
@@ -122,7 +129,7 @@ public abstract class DeliveryService<C extends JobCard> {
      * 现在只有 Boss（打招呼语）和猎聘（IM 追问）真会用到。
      */
     protected GreetingService.Greeting greetingFor(C card, PlatformConfig config) {
-        return greetingService.compose(card, config.getSayHi());
+        return greetingService.compose(card, config.getSayHi(), displayName());
     }
 
     /** 猎聘 IM 里的追问句 */
@@ -173,6 +180,7 @@ public abstract class DeliveryService<C extends JobCard> {
         stopRequested = false;
         stoppedForLicense = false;
         stoppedForQuota = false;
+        consecutiveFailures = 0;
         status = RunStatus.running(keywords.size(), config.isDryRun(), displayName());
         appendLog("投递任务启动：" + String.join("、", keywords)
                 + (config.isDryRun() ? "（预演模式，不会真发消息）" : ""));
@@ -383,6 +391,7 @@ public abstract class DeliveryService<C extends JobCard> {
                 case DELIVERED -> {
                     record(card, keyword, "已投递", null, score, outcome.greeting(), existing);
                     status.setDelivered(status.getDelivered() + 1);
+                    consecutiveFailures = 0;
                     if (entitlementService != null) {
                         entitlementService.recordUse(applyCounterKey());
                     }
@@ -403,6 +412,11 @@ public abstract class DeliveryService<C extends JobCard> {
                     record(card, keyword, "投递失败", outcome.failReason(), score, null, existing);
                     status.setFailed(status.getFailed() + 1);
                     appendLog("投递失败 | " + target + " | " + outcome.failReason());
+                    if (++consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+                        appendLog("连续 " + consecutiveFailures + " 个岗位投递失败，任务停止。"
+                                + "多半是登录失效、被平台限制或页面改版，请检查浏览器窗口后重新登录");
+                        stopRequested = true;
+                    }
                 }
             }
         } catch (Exception e) {

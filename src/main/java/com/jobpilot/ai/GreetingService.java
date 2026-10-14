@@ -9,8 +9,12 @@ import com.jobpilot.license.LicenseService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 
 /**
@@ -21,10 +25,12 @@ import java.util.concurrent.ThreadLocalRandom;
  *   <li><b>提示词</b>：求职者背景（AI 人设）+ 岗位关键字段 + JD 片段 +
  *       随机风格要求。人设没配就直接用固定话术——没有人设生成出来的
  *       是空话，不如不发</li>
- *   <li><b>风格轮换</b>：同一个风格连发十条，HR 一眼就知道是群发。
- *       每次从 {@link #STYLES} 里随机挑一个塞进提示词</li>
- *   <li><b>去重</b>：和最近 30 条已用话术做归一化比对，撞了就让模型
- *       "换个说法"重来一次；还撞就退回固定话术</li>
+ *   <li><b>多样化</b>：招呼语换语气（{@link #STYLES}），猎聘追问换问什么
+ *       （{@link #FOLLOW_UP_ANGLES}）。只换语气换不出差别——问句换个语气还是同一个问句</li>
+ *   <li><b>去重</b>：和最近 30 条已用话术比"像不像"（字符二元组重合度 ≥ 0.6 就算撞），
+ *       撞了就换个说法重来一次；同时把最近用得滥的开头写进提示词要求换开场。
+ *       只比"完全相同"没用，实测同款不同字的两句重合度能到 0.65，
+ *       用户看到的就是"话术太同质化"</li>
  *   <li><b>兜底</b>：任何一步不行（没配、接口挂、输出是空的、超时）
  *       都退回固定话术，并带回原因供调用方记到运行日志里</li>
  * </ol>
@@ -55,10 +61,38 @@ public class GreetingService {
             "先认同公司和业务，再说明自己能补上哪块"
     };
 
+    /**
+     * 猎聘追问的角度轮换。<b>只换语气不换</b>：招呼语是一句自我介绍，追问则几乎
+     * 必然是个问句，光靠 {@link #STYLES} 换不出差别——实测 483 条话术里 388 条
+     * 以"您好"开头，追问清一色"您好，请问该岗位是否…"。所以这里换的是问什么。
+     */
+    private static final String[] FOLLOW_UP_ANGLES = {
+            "问进展：这个岗位还在招吗、大概什么时候安排面试",
+            "问要求：HR 最看重哪一块经验或技能",
+            "先说自己哪段经历和岗位对得上，再问合不合适",
+            "问团队和日常：进来先接手哪部分、团队怎么分工",
+            "问落地条件：工作地点、是否接受实习或应届、多久能到岗",
+            "提简历/作品集里有对应的东西，问要不要发过来看看"
+    };
+
+    /** 追问的长度上限 */
+    private static final int FOLLOW_UP_MAX_LEN = 60;
     /** JD 截断长度：提示词太长既慢又贵，关键信息在前 800 字里 */
     private static final int JD_MAX_LEN = 800;
     /** 固定话术兜底时也算去重：和最近这些条比对 */
     private static final int RECENT_GREETINGS = 30;
+    /** 算"开头用滥了"时只看最近这几条 */
+    private static final int OPENER_WINDOW = 10;
+    /** 开头在这几条里出现过这么多次，就要求模型换一个开场 */
+    private static final int OPENER_LIMIT = 3;
+    /** 开头的长度：去掉标点后取前四个字，"您好请问"和"您好想确"不算同一个开头 */
+    private static final int OPENER_LEN = 4;
+    /**
+     * 相似度阈值（去掉空白标点后的字符二元重合率）。0.6 是拿真实话术量出来的：
+     * 「…在苏州的实际工作地点及主要职责是什么」和「…在苏州的实际工作地点主要在
+     * 哪里」这种一眼同款的落在 0.65，正常不同角度的两条在 0.5 以下。
+     */
+    private static final double SIMILAR_MAX = 0.6;
 
     private final AiProperties properties;
     private final AiService aiService;
@@ -93,65 +127,108 @@ public class GreetingService {
     /**
      * 给一个岗位生成话术。
      *
-     * @param fallback 平台配置里的固定话术；AI 不可用时用它
+     * @param fallback 平台配置里的固定话术；AI 不可用时用它（会按岗位活用，见 {@link FallbackGreeting}）
      */
     public Greeting compose(JobCard card, String fallback) {
+        return compose(card, fallback, null);
+    }
+
+    /**
+     * @param channel 发到哪个平台（"Boss 直聘"之类），写进提示词让语气对得上渠道；null = 不提
+     */
+    public Greeting compose(JobCard card, String fallback, String channel) {
         AiConfig cfg = properties.get();
         if (!cfg.isEnabled()) {
-            return Greeting.fallback(fallback, null);
+            return Greeting.fallback(vary(fallback, card, null), null);
         }
         if (isBlank(cfg.getPersona())) {
-            return Greeting.fallback(fallback, "AI 话术开着但没填求职者背景，用固定话术");
+            return Greeting.fallback(vary(fallback, card, null), "AI 话术开着但没填求职者背景，用固定话术");
         }
         if (!isConfigured(cfg)) {
-            return Greeting.fallback(fallback, configGapReason(cfg));
+            return Greeting.fallback(vary(fallback, card, null), configGapReason(cfg));
         }
 
         List<String> recent = recentGreetings();
-        String style = STYLES[ThreadLocalRandom.current().nextInt(STYLES.length)];
-        String userPrompt = userPrompt(card, style, null);
+        String style = pick(STYLES);
+        Variety variety = new Variety(avoidOpeners(recent), OverusedPhrases.find(recent), channel);
         String systemPrompt = systemPrompt(cfg);
 
-        AiService.AiResult result = chat(cfg, systemPrompt, userPrompt);
-        String text = result.isOk() ? AiService.cleanGreeting(result.text()) : null;
+        Attempt first = generate(cfg, systemPrompt, userPrompt(card, style, null, variety), recent);
+        if (first.problem() == null) {
+            return Greeting.ai(first.text());
+        }
+        if (!first.retryable()) {
+            // 接口本身报错/超时：再调一次大概率同样失败，还让这张卡多等一整轮
+            return Greeting.fallback(vary(fallback, card, recent), "AI 生成失败（" + first.problem() + "），用固定话术");
+        }
+        // 只在真的不合格时才重跑一次。用"开头撞了"这种软条件触发重试等于每条都调
+        // 两次接口，AI 额度会被这一条规则吃光，所以软条件只写进提示词、不触发重试
+        Attempt retry = generate(cfg, systemPrompt,
+                userPrompt(card, style, recent.isEmpty() ? null : recent.get(0), variety), recent);
+        if (retry.problem() == null) {
+            return Greeting.ai(retry.text());
+        }
+        return Greeting.fallback(vary(fallback, card, recent), "AI 生成失败（" + retry.problem() + "），用固定话术");
+    }
 
-        // 撞了最近用过的：让模型换个说法再来一次，只重试一次
-        if (text != null && isDuplicate(text, recent)) {
-            log.debug("话术与最近的重复，换一种说法重试");
-            AiService.AiResult retry = chat(cfg, systemPrompt, userPrompt(card, style, recent.get(0)));
-            String retryText = retry.isOk() ? AiService.cleanGreeting(retry.text()) : null;
-            if (retryText != null && !isDuplicate(retryText, recent)) {
-                return Greeting.ai(retryText);
-            }
-            return Greeting.fallback(fallback, "AI 话术与最近投递的重复，改用固定话术");
+    /** 固定话术按岗位活用。recent 没现成的就现查一次（只在走兜底时才花这次查询） */
+    private String vary(String fallback, JobCard card, List<String> recent) {
+        if (isBlank(fallback)) {
+            return fallback;
         }
+        return FallbackGreeting.render(fallback, card, recent != null ? recent : recentGreetings());
+    }
+
+    /** 提示词里"别和最近的撞"那几条要求，打包传，免得参数越拉越长 */
+    record Variety(String avoidOpeners, List<String> overused, String channel) {
+    }
+
+    /** 一次生成的结果：要么有话术，要么有"为什么不能用"的原因 */
+    private record Attempt(String text, String problem, boolean retryable) {
+    }
+
+    private Attempt generate(AiConfig cfg, String systemPrompt, String userPrompt, List<String> recent) {
+        AiService.AiResult result = chat(cfg, systemPrompt, userPrompt);
+        if (!result.isOk()) {
+            return new Attempt(null, result.error() != null ? result.error() : "模型输出为空",
+                    result.error() == null);
+        }
+        String text = AiService.cleanGreeting(result.text());
         if (text == null) {
-            String reason = result.error() != null ? result.error() : "模型输出为空";
-            return Greeting.fallback(fallback, "AI 生成失败（" + reason + "），用固定话术");
+            return new Attempt(null, "模型输出为空", true);
         }
-        return Greeting.ai(text);
+        if (isDuplicate(text, recent)) {
+            return new Attempt(null, "和最近投递的话术重复", true);
+        }
+        return new Attempt(text, null, false);
     }
 
     /** 猎聘 IM 里补的那句追问：一句话的问题，不是招呼 */
     public Greeting composeFollowUp(JobCard card, String fallback) {
         AiConfig cfg = properties.get();
         if (!cfg.isEnabled() || isBlank(cfg.getPersona()) || !isConfigured(cfg)) {
-            return Greeting.fallback(fallback, null);
+            return Greeting.fallback(vary(fallback, card, null), null);
         }
-        String userPrompt = "基于下面这个岗位，用中文写一句向 HR 的追问（只输出这一句，"
-                + "不超过 40 字，不要解释，不要标题）：\n"
-                + "岗位：" + safe(card.getJobName()) + "｜公司：" + safe(card.getBrandName()) + "\n"
-                + "我的背景：" + cfg.getPersona().trim();
-        AiService.AiResult result = chat(cfg,
-                "你是求职助理，帮求职者写一句简短的求职追问。", userPrompt);
-        String text = result.isOk() ? AiService.cleanGreeting(result.text()) : null;
+        List<String> recent = recentGreetings();
+        String angle = pick(FOLLOW_UP_ANGLES);
+        String system = "你是求职助理，帮求职者写一句简短的求职追问。";
+        Variety variety = new Variety(avoidOpeners(recent), OverusedPhrases.find(recent), null);
+
+        Attempt first = generate(cfg, system, followUpPrompt(card, cfg, angle, null, variety), recent);
+        String text = first.problem() == null ? first.text() : null;
+        if (text == null && first.retryable()) {
+            Attempt retry = generate(cfg, system, followUpPrompt(card, cfg, angle,
+                    recent.isEmpty() ? null : recent.get(0), variety), recent);
+            text = retry.problem() == null ? retry.text() : null;
+        }
         if (text == null) {
-            return Greeting.fallback(fallback, null);
+            return Greeting.fallback(vary(fallback, card, recent), null);
         }
-        if (text.length() > 60) {
-            text = text.substring(0, 60);
-        }
-        return Greeting.ai(text);
+        return Greeting.ai(AiService.clipAtSentence(text, FOLLOW_UP_MAX_LEN));
+    }
+
+    private static String pick(String[] options) {
+        return options[ThreadLocalRandom.current().nextInt(options.length)];
     }
 
     /**
@@ -170,7 +247,7 @@ public class GreetingService {
             }
             result = aiService.chatPlatform(licenseProperties.getApiBase(),
                     credentials.get("token"), credentials.get("device_id"),
-                    systemPrompt, userPrompt, cfg.getTemperature());
+                    systemPrompt, userPrompt, cfg.getTemperature(), cfg.getModel());
         }
         if (result.isOk()) {
             // 配额按"真实发生的 AI 调用"计：失败重试不计数，用户只为拿到的话术付费
@@ -235,22 +312,28 @@ public class GreetingService {
     private String systemPrompt(AiConfig cfg) {
         return "你是求职者的求职助理，负责写投递时的第一句打招呼语。\n"
                 + "硬性要求：\n"
-                + "1. 只用中文，1-3 句话，总长不超过 100 字\n"
-                + "2. 必须结合下面的【岗位信息】和【我的背景】，提到岗位或公司的具体内容，"
-                + "不要放之四海皆可的套话\n"
-                + "3. 用\"我\"的口吻直接对 HR 说话，自然、礼貌、不卑不亢\n"
-                + "4. 只输出话术本身：不要标题、不要引号、不要解释、不要表情符号堆砌\n"
-                + "5. 不要编造背景里没有的经历或数据\n"
-                + "6. 不要出现\"您好\"以外的客套三段式（比如\"冒昧打扰...恳请...\"）\n"
+                + "1. 只用中文，1-3 句完整的话，总长不超过 90 字，最后一句必须说完\n"
+                + "2. 先读懂【岗位信息】这个岗位到底要干什么、看重什么，再从【我的背景】里"
+                + "只挑一两点和它最相关的来说。背景是素材库，不是要背的台词："
+                + "专业名称、学校、实习经历、软件技能不必每条都提，和这个岗位无关的就别提\n"
+                + "3. 必须点到这个岗位或公司的具体内容（做什么业务、要什么能力），不要放之四海皆可的套话\n"
+                + "4. 岗位和背景关联不大时，就说自己哪项能力能迁移过去、愿意学什么；"
+                + "不要否定自己，不要出现\"不符合\"\"有差距\"\"冒充\"这类话\n"
+                + "5. 用\"我\"的口吻直接对 HR 说话，自然、礼貌、不卑不亢\n"
+                + "6. 只输出话术本身：不要标题、不要引号、不要解释、不要表情符号堆砌\n"
+                + "7. 不要编造背景里没有的经历或数据\n"
+                + "8. 不要出现\"您好\"以外的客套三段式（比如\"冒昧打扰...恳请...\"）\n"
                 + "\n【我的背景】\n" + cfg.getPersona().trim();
     }
 
-    private String userPrompt(JobCard card, String style, String previous) {
+    private String userPrompt(JobCard card, String style, String previous, Variety variety) {
         StringBuilder sb = new StringBuilder();
         sb.append("【岗位信息】\n")
                 .append("岗位：").append(safe(card.getJobName())).append('\n')
-                .append("公司：").append(safe(card.getBrandName())).append('\n')
-                .append("薪资：").append(safe(card.getSalaryDesc())).append('\n')
+                .append("公司：").append(safe(card.getBrandName())).append('\n');
+        appendIfPresent(sb, "行业", card.getIndustryName());
+        appendIfPresent(sb, "公司规模", card.getBrandScaleName());
+        sb.append("薪资：").append(safe(card.getSalaryDesc())).append('\n')
                 .append("地点：").append(safe(card.getCityName())).append('\n')
                 .append("经验要求：").append(safe(card.getJobExperience())).append('\n')
                 .append("学历要求：").append(safe(card.getJobDegree())).append('\n');
@@ -262,12 +345,57 @@ public class GreetingService {
             }
             sb.append("职位描述：").append(clipped).append('\n');
         }
+        if (variety != null && !isBlank(variety.channel())) {
+            sb.append("\n【发送渠道】").append(channelHint(variety.channel()));
+        }
         sb.append("\n【本次要求】").append(style);
+        appendVariety(sb, previous, variety);
+        return sb.toString();
+    }
+
+    private static void appendIfPresent(StringBuilder sb, String label, String value) {
+        if (!isBlank(value)) {
+            sb.append(label).append('：').append(value.trim()).append('\n');
+        }
+    }
+
+    /** 不同平台的消息形态不一样：Boss 是聊天框里的第一句，别的平台是投递附言 */
+    static String channelHint(String channel) {
+        if (channel.contains("Boss")) {
+            return channel + "，这是在聊天窗口里发给 HR 的第一条消息，像真人打字一样口语、简短，一两句就够";
+        }
+        if (channel.contains("猎聘")) {
+            return channel + "，HR 多是猎头或招聘专员，说清自己能做什么，语气稍正式";
+        }
+        return channel + "，这条会附在简历投递里，说清自己为什么适合即可";
+    }
+
+    private String followUpPrompt(JobCard card, AiConfig cfg, String angle, String previous, Variety variety) {
+        return "基于下面这个岗位，用中文写一句投递之后追加给 HR 的话。\n"
+                + "硬性要求：只输出这一句，30~60 字，必须是完整的一句，不要解释、不要标题、不要引号。"
+                + "背景里只挑和岗位相关的一点说，不要把背景整段复述。\n"
+                + "【本次角度】" + angle + '\n'
+                + "岗位：" + safe(card.getJobName()) + "｜公司：" + safe(card.getBrandName())
+                + "｜地点：" + safe(card.getCityName()) + '\n'
+                + "我的背景：" + cfg.getPersona().trim() + '\n'
+                + appendVariety(new StringBuilder(), previous, variety);
+    }
+
+    /** 多样化要求：别连着重复开头、别反复说同一个短语、别用上一句的句式 */
+    private static StringBuilder appendVariety(StringBuilder sb, String previous, Variety variety) {
+        if (variety != null && !isBlank(variety.avoidOpeners())) {
+            sb.append("\n最近已经用过这些开头，请换一个完全不同的开场（可以直接说事）：")
+                    .append(variety.avoidOpeners());
+        }
+        if (variety != null && variety.overused() != null && !variety.overused().isEmpty()) {
+            sb.append("\n最近几条话术里反复出现这些说法，这次不要再用（实在要提就换个说法、换个角度）：「")
+                    .append(String.join("」「", variety.overused())).append("」");
+        }
         if (previous != null && !previous.isBlank()) {
-            sb.append("。注意：上一句已经写过「").append(previous)
+            sb.append("\n上一句已经写过「").append(previous)
                     .append("」，这次换一个完全不同的切入点和句式");
         }
-        return sb.toString();
+        return sb;
     }
 
     // ------------------------------------------------------------------
@@ -292,21 +420,76 @@ public class GreetingService {
     /** 归一化时视为噪声的字符：空白、ASCII 标点、中文标点与引号 */
     private static final String NOISE_CHARS = "\\s\\p{Punct}，。！？、；：“”‘’（）【】《》";
 
-    /** 归一化后完全相同才算重复（去掉空白和标点，只比文字） */
+    /**
+     * 字面不同但读起来同一句的也算撞——用户报的"话术太同质化"就是这个形态。
+     * 归一化后比字符二元组的 Jaccard，重合度到 {@link #SIMILAR_MAX} 以上判重。
+     */
     static boolean isDuplicate(String text, List<String> recent) {
         if (text == null || recent == null || recent.isEmpty()) {
             return false;
         }
-        String norm = normalize(text);
-        if (norm.isEmpty()) {
+        Set<String> mine = bigrams(normalize(text));
+        if (mine.isEmpty()) {
             return false;
         }
         for (String g : recent) {
-            if (norm.equals(normalize(g))) {
+            Set<String> other = bigrams(normalize(g));
+            if (other.isEmpty()) {
+                continue;
+            }
+            Set<String> smaller = mine.size() <= other.size() ? mine : other;
+            Set<String> bigger = mine.size() <= other.size() ? other : mine;
+            int shared = 0;
+            for (String gram : smaller) {
+                if (bigger.contains(gram)) {
+                    shared++;
+                }
+            }
+            if ((double) shared / (mine.size() + other.size() - shared) >= SIMILAR_MAX) {
                 return true;
             }
         }
         return false;
+    }
+
+    /** 提示词里要避开的开头：最近用得最多的那几个，最多报三个 */
+    static String avoidOpeners(List<String> recent) {
+        if (recent == null || recent.isEmpty()) {
+            return "";
+        }
+        Map<String, Integer> counted = new LinkedHashMap<>();
+        for (String g : recent.subList(0, Math.min(OPENER_WINDOW, recent.size()))) {
+            String opener = opener(g);
+            if (!opener.isEmpty()) {
+                counted.merge(opener, 1, Integer::sum);
+            }
+        }
+        List<String> hot = new ArrayList<>();
+        counted.forEach((opener, times) -> {
+            if (times >= OPENER_LIMIT) {
+                hot.add(opener + "…");
+            }
+        });
+        if (hot.isEmpty()) {
+            return "";
+        }
+        return String.join("、", hot.subList(0, Math.min(3, hot.size())));
+    }
+
+    private static String opener(String text) {
+        String normalized = normalize(text);
+        return normalized.length() < OPENER_LEN ? "" : normalized.substring(0, OPENER_LEN);
+    }
+
+    private static Set<String> bigrams(String normalized) {
+        Set<String> grams = new HashSet<>();
+        if (normalized.length() == 1) {
+            grams.add(normalized);
+        }
+        for (int i = 0; i + 1 < normalized.length(); i++) {
+            grams.add(normalized.substring(i, i + 2));
+        }
+        return grams;
     }
 
     static String normalize(String text) {

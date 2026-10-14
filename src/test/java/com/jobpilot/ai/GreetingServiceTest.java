@@ -83,6 +83,12 @@ class GreetingServiceTest {
                 .thenReturn(Map.of("token", "tok-123", "device_id", "dev-456"));
     }
 
+    /** 兜底话术会按岗位点名（见 FallbackGreeting），原文要还在、且点到了这张卡的岗位 */
+    private static void assertFallback(GreetingService.Greeting g) {
+        assertTrue(g.text().endsWith("固定话术"), g.text());
+        assertTrue(g.text().contains("陈列设计助理"), "兜底也得点到岗位名：" + g.text());
+    }
+
     private void recentGreetings(String... greetings) {
         List<Delivery> rows = new java.util.ArrayList<>();
         long id = greetings.length;
@@ -186,7 +192,8 @@ class GreetingServiceTest {
     @Test
     void AI关着时用固定话术且不发起请求() {
         GreetingService.Greeting g = service.compose(card(), "您好，看到贵司在招人");
-        assertEquals("您好，看到贵司在招人", g.text());
+        // 「贵司」换成卡片上的公司名：AI 关着时也不该几百条一模一样
+        assertEquals("您好，看到某某服饰在招人", g.text());
         assertNull(g.note(), "本来就用固定话术，不需要解释");
         verifyNoInteractions(aiService);
     }
@@ -200,7 +207,7 @@ class GreetingServiceTest {
 
         GreetingService.Greeting g = service.compose(card(), "固定话术");
 
-        assertEquals("固定话术", g.text());
+        assertFallback(g);
         assertTrue(g.note().contains("没填求职者背景"), g.note());
         verifyNoInteractions(aiService);
     }
@@ -215,7 +222,7 @@ class GreetingServiceTest {
 
         GreetingService.Greeting g = service.compose(card(), "固定话术");
 
-        assertEquals("固定话术", g.text());
+        assertFallback(g);
         assertTrue(g.note().contains("没配全"), g.note());
         verifyNoInteractions(aiService);
     }
@@ -229,7 +236,7 @@ class GreetingServiceTest {
 
         GreetingService.Greeting g = service.compose(card(), "固定话术");
 
-        assertEquals("固定话术", g.text());
+        assertFallback(g);
         assertTrue(g.note().contains("key 无效"), g.note());
     }
 
@@ -242,7 +249,7 @@ class GreetingServiceTest {
 
         GreetingService.Greeting g = service.compose(card(), "固定话术");
 
-        assertEquals("固定话术", g.text());
+        assertFallback(g);
         assertTrue(g.note().contains("模型输出为空"), g.note());
     }
 
@@ -451,7 +458,7 @@ class GreetingServiceTest {
 
         GreetingService.Greeting g = service.compose(card(), "固定话术");
 
-        assertEquals("固定话术", g.text());
+        assertFallback(g);
         assertTrue(g.note().contains("重复"), g.note());
     }
 
@@ -472,20 +479,103 @@ class GreetingServiceTest {
     void 标点空白不计入重复判定() {
         assertTrue(GreetingService.isDuplicate("您好，想聊聊这个岗位！", List.of("您好想聊聊这个岗位")));
         assertTrue(GreetingService.isDuplicate("您好 想聊聊", List.of("您好，想聊聊。")));
-        assertFalse(GreetingService.isDuplicate("您好，想聊聊这个岗位", List.of("您好，想聊聊那个岗位")));
         assertFalse(GreetingService.isDuplicate("您好", List.of()));
         assertFalse(GreetingService.isDuplicate(null, List.of("您好")));
         assertEquals("您好想聊聊", GreetingService.normalize("您好，想聊聊。"));
+    }
+
+    /**
+     * 字面不同、读起来同一句的也要判重——用户报的"话术太同质化"就是这个形态。
+     * 两句都是真实投递记录里的（同一个苏州工作地点，一个问职责一个问在哪），
+     * 二元组重合 0.65，老的"完全相同才算撞"放过它们。
+     */
+    @Test
+    void 近乎一样的两句也算撞车() {
+        List<String> recent = List.of("您好，请问该岗位在苏州的实际工作地点主要在哪里？");
+        assertTrue(GreetingService.isDuplicate("您好，请问该岗位在苏州的实际工作地点及主要职责是什么？", recent));
+        assertTrue(GreetingService.isDuplicate("您好，想聊聊这个岗位", List.of("您好，想聊聊那个岗位")));
+
+        assertFalse(GreetingService.isDuplicate("想请教下团队目前几个人、我进来先接哪一块？", recent),
+                "换了角度的新句子不该被拦，否则每条都要重试一次，白烧 AI 额度");
+    }
+
+    @Test
+    void 用滥的开头要报给模型换开场() {
+        List<String> recent = List.of("您好，请问A岗位还招吗", "您好，请问B岗位进展如何",
+                "您好，请问C岗位要什么人", "换一种说法的另一句话");
+        assertEquals("您好请问…", GreetingService.avoidOpeners(recent));
+        assertTrue(GreetingService.avoidOpeners(List.of("只出现过一次的开头啊")).isEmpty(),
+                "没连用三次就不该限制模型");
+
+        // 只数最近十条：那几句"您好"掉到窗口之外后，不该一直卡着新话术
+        List<String> staleOut = new java.util.ArrayList<>();
+        for (int i = 0; i < 12; i++) {
+            staleOut.add("这是第 " + i + " 句完全不同的话");
+        }
+        staleOut.addAll(recent);
+        assertTrue(GreetingService.avoidOpeners(staleOut).isEmpty(), GreetingService.avoidOpeners(staleOut));
+    }
+
+    @Test
+    void 提示词里要带上避开的开头() {
+        fullyConfigured();
+        recentGreetings("您好，请问A岗位还招吗", "您好，请问B岗位进展如何", "您好，请问C岗位要什么人");
+        doReturn(AiService.AiResult.ok("贵司看重换季陈列，我做过两季橱窗")).when(aiService)
+                .chat(anyString(), anyString(), anyString(), anyString(), anyString(), eq(0.7));
+
+        service.compose(card(), "固定话术");
+
+        org.mockito.ArgumentCaptor<String> user = org.mockito.ArgumentCaptor.forClass(String.class);
+        org.mockito.Mockito.verify(aiService).chat(anyString(), anyString(), anyString(), anyString(),
+                user.capture(), eq(0.7));
+        assertTrue(user.getValue().contains("最近已经用过这些开头"), user.getValue());
+        assertTrue(user.getValue().contains("您好请问"), "没把用滥的开头报给模型: " + user.getValue());
     }
 
     // ------------------------------------------------------------------
     // 猎聘追问
     // ------------------------------------------------------------------
 
+    /** 追问换的是"问什么"，不是语气：光换语气发出去还是同一句 */
+    @Test
+    void 追问提示词带本次角度和我的背景() {
+        fullyConfigured();
+        recentGreetings();
+        doReturn(AiService.AiResult.ok("想请教下这个岗位日常主要接哪一块？")).when(aiService)
+                .chat(anyString(), anyString(), anyString(), anyString(), anyString(), eq(0.7));
+
+        service.composeFollowUp(card(), "固定话术");
+
+        org.mockito.ArgumentCaptor<String> user = org.mockito.ArgumentCaptor.forClass(String.class);
+        org.mockito.Mockito.verify(aiService).chat(anyString(), anyString(), anyString(), anyString(),
+                user.capture(), eq(0.7));
+        String prompt = user.getValue();
+        assertTrue(prompt.contains("【本次角度】"), prompt);
+        assertTrue(java.util.Arrays.stream(new String[]{"问进展", "问要求", "问团队和日常", "问落地条件",
+                        "先说自己哪段经历", "提简历"}).anyMatch(prompt::contains),
+                "没带角度、发出去还是清一色「您好，请问该岗位是否…」: " + prompt);
+        assertTrue(prompt.contains("服装陈列设计专业，做过橱窗陈列实习"), prompt);
+    }
+
+    @Test
+    void 追问撞车时换一句而不是退回模板() {
+        fullyConfigured();
+        String used = "您好，请问该岗位在苏州的实际工作地点主要在哪里？";
+        recentGreetings(used);
+        doReturn(AiService.AiResult.ok(used), AiService.AiResult.ok("团队目前几个人、进来先接哪一块？"))
+                .when(aiService).chat(anyString(), anyString(), anyString(), anyString(), anyString(), eq(0.7));
+
+        GreetingService.Greeting g = service.composeFollowUp(card(), "固定话术");
+
+        assertEquals("团队目前几个人、进来先接哪一块？", g.text());
+        org.mockito.Mockito.verify(aiService, org.mockito.Mockito.times(2))
+                .chat(anyString(), anyString(), anyString(), anyString(), anyString(), eq(0.7));
+    }
+
     @Test
     void 追问在AI关着时直接用固定话术() {
         GreetingService.Greeting g = service.composeFollowUp(card(), "方便看下我的简历吗");
-        assertEquals("方便看下我的简历吗", g.text());
+        assertTrue(g.text().endsWith("方便看下我的简历吗") && g.text().contains("陈列设计助理"), g.text());
         assertNull(g.note());
         verifyNoInteractions(aiService);
     }
@@ -511,7 +601,7 @@ class GreetingServiceTest {
 
         GreetingService.Greeting g = service.composeFollowUp(card(), "固定话术");
 
-        assertEquals("固定话术", g.text());
+        assertFallback(g);
         assertNull(g.note(), "追问是锦上添花，失败不值得在日志里占一行");
     }
 
@@ -524,7 +614,7 @@ class GreetingServiceTest {
         platformConfigured();
         recentGreetings();
         doReturn(AiService.AiResult.ok("您好，看到贵司在招陈列设计助理，我做过两季橱窗陈列")).when(aiService)
-                .chatPlatform(anyString(), anyString(), anyString(), anyString(), anyString(), eq(0.7));
+                .chatPlatform(anyString(), anyString(), anyString(), anyString(), anyString(), eq(0.7), anyString());
 
         GreetingService.Greeting g = service.compose(card(), "固定话术");
 
@@ -537,12 +627,12 @@ class GreetingServiceTest {
         platformConfigured();
         recentGreetings();
         doReturn(AiService.AiResult.ok("您好")).when(aiService)
-                .chatPlatform(anyString(), anyString(), anyString(), anyString(), anyString(), eq(0.7));
+                .chatPlatform(anyString(), anyString(), anyString(), anyString(), anyString(), eq(0.7), anyString());
 
         service.compose(card(), "固定话术");
 
         verify(aiService).chatPlatform(eq("https://license.example.com"), eq("tok-123"), eq("dev-456"),
-                anyString(), anyString(), eq(0.7));
+                anyString(), anyString(), eq(0.7), eq(""));
         // 平台模式下绝不能去直连某个接口——那等于要客户自己承担 key
         org.mockito.Mockito.verify(aiService, org.mockito.Mockito.never())
                 .chat(anyString(), anyString(), anyString(), anyString(), anyString(), anyDouble());
@@ -558,7 +648,7 @@ class GreetingServiceTest {
 
         GreetingService.Greeting g = service.compose(card(), "固定话术");
 
-        assertEquals("固定话术", g.text());
+        assertFallback(g);
         assertTrue(g.note().contains("卡密未激活"), g.note());
     }
 
@@ -567,11 +657,11 @@ class GreetingServiceTest {
         platformConfigured();
         recentGreetings();
         doReturn(AiService.AiResult.fail("平台没配 AI 中转")).when(aiService)
-                .chatPlatform(anyString(), anyString(), anyString(), anyString(), anyString(), eq(0.7));
+                .chatPlatform(anyString(), anyString(), anyString(), anyString(), anyString(), eq(0.7), anyString());
 
         GreetingService.Greeting g = service.compose(card(), "固定话术");
 
-        assertEquals("固定话术", g.text());
+        assertFallback(g);
         assertTrue(g.note().contains("平台没配 AI 中转"), g.note());
     }
 
@@ -581,7 +671,7 @@ class GreetingServiceTest {
         platformConfigured();
         recentGreetings();
         doReturn(AiService.AiResult.ok("您好")).when(aiService)
-                .chatPlatform(anyString(), anyString(), anyString(), anyString(), anyString(), eq(0.7));
+                .chatPlatform(anyString(), anyString(), anyString(), anyString(), anyString(), eq(0.7), anyString());
 
         GreetingService.Greeting g = service.compose(card(), "固定话术");
 
@@ -594,18 +684,40 @@ class GreetingServiceTest {
         platformConfigured();
         recentGreetings();
         doReturn(AiService.AiResult.ok("方便看下我的简历吗")).when(aiService)
-                .chatPlatform(anyString(), anyString(), anyString(), anyString(), anyString(), eq(0.7));
+                .chatPlatform(anyString(), anyString(), anyString(), anyString(), anyString(), eq(0.7), anyString());
 
         GreetingService.Greeting g = service.composeFollowUp(card(), "固定追问");
 
         assertEquals("方便看下我的简历吗", g.text());
         verify(aiService).chatPlatform(eq("https://license.example.com"), eq("tok-123"), eq("dev-456"),
-                anyString(), anyString(), eq(0.7));
+                anyString(), anyString(), eq(0.7), eq(""));
     }
 
     // ------------------------------------------------------------------
     // 状态描述
     // ------------------------------------------------------------------
+
+    @Test
+    void 提示词要求只挑相关背景_报出反复说的短语_带上渠道() {
+        fullyConfigured();
+        recentGreetings("我做过两季橱窗陈列实习，会PS和CAD，想试试美团运营",
+                "我做过两季橱窗陈列实习，会PS和CAD，想试试华昕设计",
+                "我做过两季橱窗陈列实习，会PS和CAD，想试试海悦美工",
+                "我做过两季橱窗陈列实习，会PS和CAD，想试试吾刻视觉");
+        when(aiService.chat(anyString(), anyString(), anyString(), anyString(), anyString(), anyDouble()))
+                .thenReturn(AiService.AiResult.ok("看到贵司在做电商主图，我可以直接上手。"));
+
+        service.compose(card(), "固定话术", "Boss 直聘");
+
+        org.mockito.ArgumentCaptor<String> system = org.mockito.ArgumentCaptor.forClass(String.class);
+        org.mockito.ArgumentCaptor<String> user = org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(aiService).chat(anyString(), anyString(), anyString(), system.capture(), user.capture(), anyDouble());
+        assertTrue(system.getValue().contains("只挑一两点和它最相关的"), system.getValue());
+        assertTrue(system.getValue().contains("不要否定自己"));
+        assertTrue(user.getValue().contains("反复出现这些说法"), user.getValue());
+        assertTrue(user.getValue().contains("两季橱窗陈列实习"), user.getValue());
+        assertTrue(user.getValue().contains("【发送渠道】Boss 直聘"), user.getValue());
+    }
 
     @Test
     void 状态描述区分关闭半配置和就绪() {

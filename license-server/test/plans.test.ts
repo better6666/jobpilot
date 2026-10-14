@@ -16,7 +16,8 @@ assert.equal(fromSettings.durations.length, 3)
 
 const fromTable = toPublicPlan(DEFAULT_PLANS[1])
 assert.equal(fromTable.features.advanced_filter, true)
-assert.equal(fromTable.quotas.max_daily_apply, 60)
+// 标准版默认额度：每个平台各 120（4e08041 起按平台分桶）
+assert.equal(fromTable.quotas.max_daily_apply, 120)
 assert.deepEqual(parseJson(undefined, {}), {})
 
 console.log('plans.test.ts 全部通过')

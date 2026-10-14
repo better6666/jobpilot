@@ -153,9 +153,9 @@
         <input id="loginTimeout" type="number" min="1" max="30" value="5">
       </div>
       <div class="full" id="sayHiWrap">
-        <label>打招呼话术</label>
-        <textarea id="sayHi" rows="3"></textarea>
-        <div class="hint">AI 话术启用时这里是兜底：AI 生成失败或输出重复，就发这一条。去 <a href="/ai.html" style="color:#3370ff">AI 话术</a> 页配置接口。</div>
+        <label>打招呼话术（一行一条，轮换着发）</label>
+        <textarea id="sayHi" rows="3" placeholder="您好，看到{公司}在招{岗位}，我做过……&#10;您好，我对{岗位}很感兴趣……"></textarea>
+        <div class="hint">AI 话术启用时这里是兜底：AI 生成失败时才发。写 {公司} {岗位} 会换成真实的公司名和岗位名；不写也会自动点名，不会每条都一模一样。去 <a href="/ai.html" style="color:#3370ff">AI 话术</a> 页配置接口。</div>
       </div>
       <div class="full">
         <label>打分规则（JSON：threshold 阈值；titleReject/degreeReject 一票否决；jobRules/degreeRules/experienceRules/industryRules/jdRules 为 {match, score} 加减分列表）</label>
@@ -212,7 +212,7 @@
 const $ = (id) => document.getElementById(id);
 
 /**
- * 四个平台的差异全在这张表里：筛选项、薪资是下拉还是文本框、有没有话术和
+ * 各平台的差异全在这张表里：筛选项、薪资是下拉还是文本框、有没有话术和
  * HR 活跃度过滤。加平台只改这里 + 后端一个 /api/{platform} 控制器。
  */
 const PLATFORMS = {
@@ -242,7 +242,7 @@ const PLATFORMS = {
   },
   zhilian: {
     name: '智联招聘',
-    filters: [],
+    filters: ['salary'],
     salaryKind: 'text',
     sayHi: false,
     filterInactiveHr: false,
@@ -255,12 +255,28 @@ const PLATFORMS = {
     sayHi: false,
     filterInactiveHr: false,
     loginHint: '实习僧只能搜实习/校招岗，列表字段最少（没有经验/学历）。第一次用要在弹出的浏览器里登录。'
+  },
+  nowcoder: {
+    name: '牛客',
+    filters: ['recruitType'],
+    salaryKind: 'text',
+    sayHi: false,
+    filterInactiveHr: false,
+    loginHint: '牛客以互联网校招/实习为主。第一次用要在弹出的浏览器里登录；城市和招聘类型在本地筛，官网直投的岗位会自动跳过。'
+  },
+  yingjiesheng: {
+    name: '应届生求职网',
+    filters: [],
+    salaryKind: 'text',
+    sayHi: false,
+    filterInactiveHr: false,
+    loginHint: '应届生求职网未登录只能看 20 个岗位且投不了，请先在弹出的浏览器里登录。弹出滑块验证时手动拖一下，程序会等你。'
   }
 };
 
 const FILTER_LABELS = {
   jobType: '职位类型', salary: '薪资', experience: '经验',
-  degree: '学历', scale: '公司规模', stage: '融资阶段'
+  degree: '学历', scale: '公司规模', stage: '融资阶段', recruitType: '招聘类型'
 };
 
 const STATE_MAP = {
@@ -364,7 +380,8 @@ function readConfig() {
     dryRun: $('dryRun').checked,
     scoreRules
   };
-  if (meta.salaryKind === 'text') {
+  // 薪资框按 filters 渲染，salaryKind 只说它长什么样：没渲染出来就别读（以前智联/实习僧在这里抛 TypeError，保存和启动全挂）
+  if (meta.salaryKind === 'text' && $('salaryText')) {
     body.salary = $('salaryText').value.trim();
   } else if ($('salary')) {
     body.salary = $('salary').value;

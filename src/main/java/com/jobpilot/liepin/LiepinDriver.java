@@ -42,8 +42,12 @@ import java.util.function.BooleanSupplier;
  *   <li>沟通按钮要 hover HR 区才渲染，不 hover 就整张卡被静默跳过</li>
  *   <li>卡片里同时有收藏/分享等 round 按钮，<b>只能按自身文本"聊一聊"判定</b>；
  *       "继续聊"是已投递状态，点了只会重开旧会话</li>
- *   <li>点"聊一聊"后平台自动发出默认招呼语，聊天以页内 IM overlay 打开，
- *       <b>没有确认对话框、不开新标签页</b>——Boss 那套确认框逻辑这里不需要</li>
+ *   <li>点"聊一聊"后平台自动发出默认招呼语（"对这个岗位充满期待"），聊天以页内
+ *       IM 浮层打开，<b>没有确认对话框、不开新标签页</b>——Boss 那套确认框逻辑
+ *       这里不需要。同时还会开一个"我的沟通"抽屉，压在卡片右半边，两个都得关</li>
+ *   <li>IM 组件 2026-09 起是 ant-im/im-ui（{@code im-ui-basic-chat-wrapper} 等），
+ *       老前缀 {@code __im_basic__*} 整体失效。<b>选择器失配不会报错，只会静默
+ *       什么都发不出去</b>，所以追问是否落地必须按消息文本核对</li>
  *   <li>"完善简历"弹窗和订阅弹窗会遮罩吃掉所有点击，每张卡、每次翻页前都要关</li>
  *   <li>列表页在受控标签页会长时间转圈：每个 evaluate/locator 都显式超时，
  *       导航用 DOMCONTENTLOADED 而不是 LOAD/NETWORKIDLE</li>
@@ -70,8 +74,21 @@ public class LiepinDriver {
      *  选了它的话 card.locator("聊一聊按钮") 就找不到了 */
     private static final String CARD_SELECTOR = "[class*='jobCardPcContainer']";
     private static final String PAGINATION_BOX = ".list-pagination-box";
-    private static final String CHAT_HEADER = ".__im_basic__header-wrap";
-    private static final String CHAT_CLOSE = "div.__im_basic__contacts-title svg";
+    /**
+     * 聊天窗容器。2026-09 实测：猎聘把整套 IM 换成 ant-im/im-ui 组件，
+     * 老的 {@code __im_basic__*} 前缀一个都不剩（选择器留个兜底，平台回滚时不至于全瞎）。
+     * <b>这个选择器失配过一次，代价是当天 36 条投递全部无法核对。</b>
+     */
+    private static final String CHAT_WINDOW = ".im-ui-basic-chat-wrapper, .__im_basic__header-wrap";
+    /** 输入框：placeholder 是「请输入文字，按Enter键发送」的 textarea */
+    private static final String CHAT_INPUT = ".im-ui-chat-input textarea";
+    /** 自己这一方发出去的消息气泡，用来确认追问真的落地 */
+    private static final String SENT_MESSAGE = ".im-ui-message-item-send";
+    /** 聊天窗关闭按钮（ant-im 的 modal），老的 contacts-title svg 留作兜底 */
+    private static final String CHAT_CLOSE = ".ant-im-modal-close, div.__im_basic__contacts-title svg";
+    /** 点"聊一聊"后同时会开的"我的沟通"抽屉，不关掉会一直叠在页面上 */
+    private static final String CHAT_DRAWER = ".ant-im-drawer";
+    private static final String DRAWER_CLOSE = ".ant-im-drawer-close";
     private static final String SEARCH_API = "com.liepin.searchfront4c.pc-search-job";
     private static final int NAV_TIMEOUT_MS = 45_000;
     private static final int ACTION_TIMEOUT_MS = 10_000;
@@ -377,15 +394,18 @@ public class LiepinDriver {
     // ------------------------------------------------------------------
 
     /**
-     * 投递一个岗位：hover 出沟通按钮 → 点"聊一聊" → 等聊天窗 → （可选）补一句
-     * 追问 → 关聊天窗。
+     * 投递一个岗位：hover 出沟通按钮 → 点"聊一聊" → 等聊天窗 → 补一句追问
+     * 并核对它真的发出去了 → 关聊天窗和沟通抽屉。
      * <p>
-     * 成功判据是聊天窗头部出现——平台在点击时就已经把默认招呼语发给 HR 了，
-     * 所以追问发不出去、聊天窗关不掉，都算投递成功。
+     * <b>成功判据是聊天窗出现</b>。点"聊一聊"时平台会把默认招呼语（"对这个岗位
+     * 充满期待"）直接发给 HR，聊天窗就是这件事的回执；聊天窗没出现说明点击被
+     * 弹窗吃掉、登录态掉了或被风控，那种情况下记"已投递"就是虚报——
+     * 2026-09-27 实测：选择器失配后连续 36 次都判成成功，用户对着猎聘只看到 4 个会话。
      * <p>
-     * {@code greeting} 是调用方（编排层）已经定好的一句话：AI 开着时是按 JD
-     * 生成的，关了就是配置里的固定话术。这里不再自己读配置，避免同一句
-     * 话在采集和投递之间被改来改去。
+     * {@code greeting} 是调用方（编排层）已经定好的一句追问：AI 开着时按 JD 生成，
+     * 关了就是配置里的固定话术。这里不再自己读配置，避免同一句话在采集和投递之间
+     * 被改来改去。追问没发出去不影响"已沟通"（默认招呼语已经到位），但落库时
+     * 不能把它当成已发送的话术记进去。
      */
     public DeliveryOutcome deliver(LiepinJobCard card, Page listPage, LiepinProperties.LiepinConfig config,
                                    String greeting, ProgressListener listener, BooleanSupplier stop) {
@@ -415,22 +435,27 @@ public class LiepinDriver {
             String text = safeText(button);
             if (text != null && text.contains("继续聊")) {
                 // 已经聊过了：平台侧就是已投递，不重复点
+                listener.onProgress("岗位此前已沟通过 | " + target);
                 return new DeliveryOutcome(DeliveryStatus.DELIVERED, null, null);
             }
             dismissBlockingModals(listPage);
             clickWithHoverWake(button);
 
             if (!waitForChatWindow(listPage, stop)) {
-                // 聊天窗没出来也按成功算：点击本身已经触发平台发送默认招呼语
-                log.debug("聊天窗未确认出现 | {}", target);
+                closeChatPanels(listPage, listener);
+                log.info("聊天窗未出现，沟通未确认 | {}", target);
+                return DeliveryOutcome.failed("点击后聊天窗没有出现，沟通未确认（可能被弹窗挡住或平台限制）");
             }
+            String sent = null;
             if (greeting != null && !greeting.isBlank()) {
-                sendFollowUp(listPage, greeting);
+                sent = sendFollowUp(listPage, greeting, stop) ? greeting : null;
+                if (sent == null) {
+                    listener.onProgress("追问没发出去 | " + target);
+                }
             }
-            closeChatWindow(listPage);
-            forceCleanImOverlay(listPage);
+            closeChatPanels(listPage, listener);
             listener.onProgress("已打招呼 | " + target);
-            return DeliveryOutcome.delivered(greeting);
+            return DeliveryOutcome.delivered(sent);
         } catch (Exception e) {
             log.warn("投递过程异常 | {}: {}", target, e.getMessage());
             return DeliveryOutcome.failed(e.getMessage());
@@ -463,11 +488,11 @@ public class LiepinDriver {
         button.click(new Locator.ClickOptions().setTimeout(ACTION_TIMEOUT_MS));
     }
 
-    /** 等聊天窗头部出现。用轮询而不是 waitForSelector：本平台后者不可靠 */
+    /** 等聊天窗出现。用轮询而不是 waitForSelector：本平台后者不可靠 */
     private boolean waitForChatWindow(Page page, BooleanSupplier stop) {
-        for (int i = 0; i < 6 && !stop.getAsBoolean(); i++) {
+        for (int i = 0; i < 16 && !stop.getAsBoolean(); i++) {
             try {
-                if (page.locator(CHAT_HEADER).count() > 0) {
+                if (page.locator(CHAT_WINDOW).count() > 0) {
                     return true;
                 }
             } catch (Exception ignore) {
@@ -478,77 +503,107 @@ public class LiepinDriver {
     }
 
     /**
-     * 往聊天里补一句追问。全程 best-effort：任何一步失败都静默返回，
-     * 不影响"已打招呼"的判定——默认招呼语在点击时就已发出。
+     * 往聊天里补一句追问，并回来这一句到底有没有发出去。
+     *
+     * <p>必须核对：聊天窗里已经有平台自己发的那条默认招呼语，"消息条数变多"不能
+     * 证明是我们的追问变多了，所以按文本比对最新几条自己发的消息。
+     * 2026-09-27 之前这里的选择器整体失配，追问一条都没发出去，日志里却全是"已打招呼"。
      */
-    private void sendFollowUp(Page page, String message) {
+    private boolean sendFollowUp(Page page, String message, BooleanSupplier stop) {
         try {
             Locator input = null;
-            for (String selector : new String[]{
-                    "div.__im_basic__chat-wrapper [contenteditable='true']:not([style*='display: none'])",
-                    ".__im_basic__chat-input textarea",
-                    "div[class*='im-basic'] textarea",
-                    "div[class*='chat'] div[contenteditable='true']"}) {
-                Locator candidate = page.locator(selector);
+            for (int i = 0; i < 6 && input == null && !stop.getAsBoolean(); i++) {
+                Locator candidate = page.locator(CHAT_INPUT);
                 if (candidate.count() > 0 && candidate.first().isVisible()) {
                     input = candidate.first();
-                    break;
+                } else {
+                    sleep(500);
                 }
             }
             if (input == null) {
-                return;
+                log.info("聊天窗里没有输入框，追问发不出去");
+                return false;
             }
-            Object tag = input.evaluate("el => el.tagName.toLowerCase()");
-            if ("textarea".equals(String.valueOf(tag))) {
-                input.fill(message);
-            } else {
-                // contenteditable 用 fill 无效，必须写 innerText 再派发 input 事件
-                input.evaluate("(el, msg) => {"
-                        + "  el.innerText = msg;"
-                        + "  el.dispatchEvent(new Event('input', {bubbles: true}));"
-                        + "}", message);
-            }
+            input.click();
+            // CHAT_INPUT 只命中 textarea（im-ui 的输入框），fill 就够了
+            input.fill(message);
             sleep(1000);
             input.press("Enter");
-            sleep(1000);
+            return sentMessageAppeared(page, message, stop);
         } catch (Exception e) {
-            log.debug("追问语发送失败（不影响投递判定）: {}", e.getMessage());
+            log.info("追问发送失败: {}", e.getMessage());
+            return false;
         }
+    }
+
+    /** 追问是否出现在"我发的消息"气泡里（平台默认招呼语也是自己发的，所以只能比文本） */
+    private boolean sentMessageAppeared(Page page, String message, BooleanSupplier stop) {
+        String probe = normalizeForCompare(message);
+        if (probe.isEmpty()) {
+            return false;
+        }
+        for (int i = 0; i < 12 && !stop.getAsBoolean(); i++) {
+            try {
+                List<String> mine = page.locator(SENT_MESSAGE).allTextContents();
+                for (String text : mine) {
+                    if (normalizeForCompare(text).contains(probe)) {
+                        return true;
+                    }
+                }
+            } catch (Exception ignore) {
+                // 列表重渲染的瞬间读不到，下一轮再试
+            }
+            sleep(500);
+        }
+        return false;
+    }
+
+    /** 比对消息文本时去掉空白和标点，只比文字 */
+    static String normalizeForCompare(String text) {
+        if (text == null) {
+            return "";
+        }
+        return text.replaceAll("[\\s\\p{Punct}，。！？、；：“”‘’（）【】《》]", "");
     }
 
     /**
-     * 投递后暴力清理 IM overlay。
+     * 关掉聊天窗和"我的沟通"抽屉。
      *
-     * <p>猎聘投递后会打开一个 IM 聊天弹窗。closeChatWindow 用 CSS 选择器关它，
-     * 但弹窗结构随版本变化，选择器一旦失配弹窗就留在页面上，把后面所有岗位的
-     * 沟通按钮全挡住——实测连续投 2 个成功后从第 3 个起全部失败就是这个原因。
-     * 用 JS 直接删 DOM 节点不依赖任何选择器，更可靠。
+     * <p>两个都要关：抽屉贴在页面右侧，正好压在岗位卡片的沟通按钮上，
+     * 不关的话后面每张卡都报"未找到沟通按钮"。
+     *
+     * <p>这里只点平台自己的关闭按钮，不再像以前那样用 JS 直接删 DOM 节点——
+     * 一是那段拼接里的转义写错，生成的 JS 从来没跑起来过（日志里每次都是
+     * SyntaxError），二是把 React 管理的节点硬摘掉会让组件状态错乱，
+     * 表现就是"投两个之后开始全失败"。
      */
-    private void forceCleanImOverlay(Page page) {
+    private void closeChatPanels(Page page, ProgressListener listener) {
+        clickQuietly(page, CHAT_CLOSE);
+        clickQuietly(page, DRAWER_CLOSE);
         try {
             page.keyboard().press("Escape");
-            page.evaluate("() => {" +
-                "  document.querySelectorAll('[class*=\'__im_\']')." +
-                "    forEach(el => el.remove());" +
-                "  document.querySelectorAll('[class*=\'im-overlay\'], [class*=\'im-panel\'], " +
-                "    [class*=\'chat-window\'], [class*=\'deliver-greeting\'], " +
-                "    [class*=\'el-overlay\'], [class*=\'v-modal\'], [class*=\'van-overlay\'], " +
-                "    [class*=\'modal-mask\'], [class*=\'backdrop\']').forEach(el => el.remove());" +
-                "}");
-        } catch (Exception e) {
-            log.debug("暴力清理 IM overlay 失败: {}", e.getMessage());
+        } catch (Exception ignore) {
+        }
+        sleep(500);
+        try {
+            int left = page.locator(CHAT_WINDOW).count() + page.locator(CHAT_DRAWER).count();
+            if (left > 0) {
+                listener.onProgress("聊天窗没关掉，可能影响后面几张卡");
+                log.info("投递后仍有 IM 浮层没关掉: {} 个", left);
+            }
+        } catch (Exception ignore) {
+            // 页面正在跳转，读不到就算了
         }
     }
 
-    private void closeChatWindow(Page page) {
+    private void clickQuietly(Page page, String selector) {
         try {
-            Locator close = page.locator(CHAT_CLOSE);
-            if (close.count() > 0) {
+            Locator close = page.locator(selector);
+            if (close.count() > 0 && close.first().isVisible()) {
                 close.first().click(new Locator.ClickOptions().setTimeout(ACTION_TIMEOUT_MS));
-                sleep(500);
             }
         } catch (Exception e) {
-            log.debug("关闭聊天窗失败（不影响投递判定）: {}", e.getMessage());
+            log.debug("点 {} 失败: {}", selector, e.getMessage());
         }
     }
 

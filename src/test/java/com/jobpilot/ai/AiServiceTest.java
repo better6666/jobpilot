@@ -393,7 +393,7 @@ class AiServiceTest {
     }
 
     @Test
-    void 超长截到最后一个标点() {
+    void 超长只能截在逗号上时换成句号() {
         String raw = "一二三四五，六七八九十，".repeat(12) + "尾巴";
         assertTrue(raw.length() > AiService.GREETING_MAX_LEN);
 
@@ -401,8 +401,21 @@ class AiServiceTest {
 
         assertTrue(cleaned.length() < raw.length());
         assertTrue(cleaned.length() <= AiService.GREETING_MAX_LEN);
-        assertTrue(cleaned.endsWith("，"), cleaned);
+        // 以前留着逗号，HR 收到的是一句明显被砍了一半的话
+        assertTrue(cleaned.endsWith("。"), cleaned);
         assertTrue(cleaned.length() > AiService.GREETING_MAX_LEN / 2, "截太狠不如不发");
+    }
+
+    @Test
+    void 超长时优先截在句号上() {
+        String raw = "我做过两季橱窗陈列。".repeat(12) + "后面这句太长了被砍掉也没关系，";
+        String cleaned = AiService.cleanGreeting(raw);
+        assertTrue(cleaned.endsWith("陈列。"), cleaned);
+    }
+
+    @Test
+    void 模型自己停在逗号上也补成句号() {
+        assertEquals("我对这个岗位很感兴趣。", AiService.cleanGreeting("我对这个岗位很感兴趣，"));
     }
 
     @Test

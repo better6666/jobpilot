@@ -565,17 +565,41 @@ public class AiService {
         if (s.isEmpty()) {
             return null;
         }
-        if (s.length() > GREETING_MAX_LEN) {
-            s = s.substring(0, GREETING_MAX_LEN);
-            int last = Math.max(s.lastIndexOf('。'), Math.max(s.lastIndexOf('！'), s.lastIndexOf('？')));
-            int comma = Math.max(s.lastIndexOf('，'), Math.max(s.lastIndexOf('；'), s.lastIndexOf('!')));
-            int boundary = Math.max(last, comma);
-            if (boundary > GREETING_MAX_LEN / 2) {
-                s = s.substring(0, boundary + 1);
-            }
-            s = s.trim();
-        }
+        s = clipAtSentence(s, GREETING_MAX_LEN);
         return s.isEmpty() ? null : s;
+    }
+
+    /**
+     * 超长时截到句子边界。优先句号/问号/感叹号；只能截在逗号上时把逗号换成句号——
+     * 以前直接留着逗号，HR 收到的是"……为贵司带来创意价值，期待能加入团队共同推动广告项目，"
+     * 这种明显被砍了一半的话（本机库里实测十几条）。
+     */
+    static String clipAtSentence(String text, int max) {
+        if (text == null) {
+            return null;
+        }
+        String s = text.trim();
+        if (s.length() <= max) {
+            return endWithFullStop(s);
+        }
+        s = s.substring(0, max);
+        int sentence = Math.max(s.lastIndexOf('。'), Math.max(s.lastIndexOf('！'), s.lastIndexOf('？')));
+        if (sentence > max / 3) {
+            return s.substring(0, sentence + 1).trim();
+        }
+        int comma = Math.max(s.lastIndexOf('，'), Math.max(s.lastIndexOf('；'), s.lastIndexOf('、')));
+        if (comma > max / 2) {
+            return s.substring(0, comma).trim() + "。";
+        }
+        return s.trim();
+    }
+
+    /** 模型自己就停在逗号上（输出被上游截断）时补成句号 */
+    private static String endWithFullStop(String s) {
+        if (s.endsWith("，") || s.endsWith("；") || s.endsWith("、") || s.endsWith(",")) {
+            return s.substring(0, s.length() - 1) + "。";
+        }
+        return s;
     }
 
     /** 去掉围栏、包裹的引号和"话术："这类自带标签 */

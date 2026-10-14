@@ -153,6 +153,29 @@ class LiepinServiceDedupTest {
         assertEquals(0, service.status().getSkipped());
     }
 
+    /**
+     * 聊天窗没出现就是没投出去，必须记失败、不算投递数。
+     *
+     * <p>2026-09-27 的实投里这里判成了成功：猎聘换了 IM 组件、旧选择器全失配，
+     * 日志连着 36 条"已打招呼"，用户打开猎聘只看到 4 个会话。宁可报失败让用户
+     * 重跑，也不能报成功——报上去的投递数必须是真实沟通数。
+     */
+    @Test
+    void 聊天窗没出现时记失败而不是记已投递() {
+        when(deliveryMapper.selectOne(any())).thenReturn(null);
+        when(driver.deliver(any(), any(), any(), any(), any(), any()))
+                .thenReturn(DeliveryOutcome.failed("点击后聊天窗没有出现，沟通未确认（可能被弹窗挡住或平台限制）"));
+
+        service.processCardForTest(card(), "陈列设计", properties.get(), null);
+
+        ArgumentCaptor<Delivery> captor = ArgumentCaptor.forClass(Delivery.class);
+        verify(deliveryMapper).insert(captor.capture());
+        assertEquals("投递失败", captor.getValue().getDeliveryStatus());
+        assertTrue(captor.getValue().getFailReason().contains("聊天窗"), captor.getValue().getFailReason());
+        assertEquals(0, service.status().getDelivered());
+        assertEquals(1, service.status().getFailed());
+    }
+
     @Test
     void 打分不达标记已过滤() {
         LiepinProperties.LiepinConfig config = properties.get();
@@ -182,6 +205,33 @@ class LiepinServiceDedupTest {
         verify(deliveryMapper).insert(captor.capture());
         assertEquals("投递失败", captor.getValue().getDeliveryStatus());
         assertEquals("触发每日投递上限", captor.getValue().getFailReason());
+    }
+
+    @Test
+    void 连续失败到上限就停任务_中间成功一次会清零() {
+        when(deliveryMapper.selectOne(any())).thenReturn(null);
+        when(driver.deliver(any(), any(), any(), any(), any(), any()))
+                .thenReturn(DeliveryOutcome.failed("点击后聊天窗没有出现"));
+        int limit = com.jobpilot.delivery.DeliveryService.MAX_CONSECUTIVE_FAILURES;
+
+        for (int i = 0; i < limit - 1; i++) {
+            service.processCardForTest(card(), "陈列设计", properties.get(), null);
+        }
+        assertTrue(service.status().getLogs().stream().noneMatch(l -> l.contains("任务停止")));
+
+        // 成功一次清零：再失败 limit-1 次也不该停
+        when(driver.deliver(any(), any(), any(), any(), any(), any()))
+                .thenReturn(DeliveryOutcome.delivered("您好"));
+        service.processCardForTest(card(), "陈列设计", properties.get(), null);
+        when(driver.deliver(any(), any(), any(), any(), any(), any()))
+                .thenReturn(DeliveryOutcome.failed("点击后聊天窗没有出现"));
+        for (int i = 0; i < limit - 1; i++) {
+            service.processCardForTest(card(), "陈列设计", properties.get(), null);
+        }
+        assertTrue(service.status().getLogs().stream().noneMatch(l -> l.contains("任务停止")));
+
+        service.processCardForTest(card(), "陈列设计", properties.get(), null);
+        assertTrue(service.status().getLogs().stream().anyMatch(l -> l.contains("连续 " + limit + " 个岗位投递失败")));
     }
 
     private static com.jobpilot.delivery.ScoreRules.Rule newScoreRule(String match, int score) {

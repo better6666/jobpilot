@@ -44,10 +44,13 @@ public class NativeMainWindow {
             new Platform("liepin", "猎聘", List.of("salary"), false),
             new Platform("job51", "51job", List.of("salary", "degree", "experience"), false),
             new Platform("zhilian", "智联招聘", List.of(), true),
-            new Platform("shixiseng", "实习僧", List.of(), false));
+            new Platform("shixiseng", "实习僧", List.of(), false),
+            new Platform("nowcoder", "牛客", List.of("recruitType"), false),
+            new Platform("yingjiesheng", "应届生求职网", List.of(), false));
     private static final Map<String, String> FILTER_NAMES = Map.of(
             "jobType", "职位类型", "salary", "薪资", "experience", "经验",
-            "degree", "学历", "scale", "公司规模", "stage", "融资阶段");
+            "degree", "学历", "scale", "公司规模", "stage", "融资阶段",
+            "recruitType", "招聘类型");
     /**
      * "我的条件"两档下拉的选项。存中文档位名而不是码：这条过滤在本地跑，
      * 五个平台共用，而只有 51job 和 Boss 有码表。见 delivery/RequirementFilter。
@@ -289,7 +292,7 @@ public class NativeMainWindow {
         sayHi.setRows(3);
         sayHi.setLineWrap(true);
         sayHi.setWrapStyleWord(true);
-        fields.add(field("固定打招呼话术 · Boss 直聘", scroll(sayHi)));
+        fields.add(field("固定打招呼话术 · Boss 直聘（一行一条轮换；可用 {公司} {岗位}）", scroll(sayHi)));
         JToggleButton advanced = new JToggleButton("▸  高级筛选规则");
         advanced.setHorizontalAlignment(SwingConstants.LEFT);
         advanced.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 12));
