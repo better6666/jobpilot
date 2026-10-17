@@ -2,6 +2,7 @@ package com.jobpilot.wuba;
 
 import com.jobpilot.browser.BrowserManager;
 import com.jobpilot.browser.HumanVerification;
+import com.jobpilot.browser.PageProbe;
 import com.jobpilot.delivery.CardConsumer;
 import com.jobpilot.delivery.DeliveryOutcome;
 import com.jobpilot.delivery.DeliveryStatus;
@@ -40,7 +41,6 @@ public class WubaDriver {
     private static final String ITEM = "li.job_item";
     private static final String NEXT = "a.next";
     private static final String LOGIN_URL = "https://passport.58.com/login";
-    private static final String[] SUCCESS = {"申请成功", "投递成功", "已申请", "已投递"};
     private static final String[] LIMIT = {"今日申请次数", "申请次数已达上限", "今天已经申请", "达到上限"};
     private static final int NAV_TIMEOUT_MS = 45_000;
     private static final int ACTION_TIMEOUT_MS = 10_000;
@@ -244,27 +244,27 @@ public class WubaDriver {
             String lastShape = null;
             for (int i = 0; i < 25 && !stop.getAsBoolean(); i++) {
                 sleep(400);
-                String shape = overlayShape(listPage);
+                String shape = PageProbe.overlayShape(listPage);
                 if (shape != null && !shape.equals(lastShape)) {
                     // 第一次真投前没见过这些弹窗：每种形态都记一笔，后面据此校准
                     log.info("58 申请后页面弹出 | {} | {}", target, shape);
                     lastShape = shape;
                 }
-                String limit = bodyHit(listPage, LIMIT);
+                String limit = PageProbe.bodyHit(listPage, LIMIT);
                 if (limit != null) {
                     return DeliveryOutcome.limit("58 提示：" + limit);
                 }
                 String after = safeText(btn);
                 if ((after != null && (after.contains("已申请") || after.contains("已投递")))
-                        || bodyHit(listPage, new String[]{"申请成功", "投递成功"}) != null) {
+                        || PageProbe.bodyHit(listPage, "申请成功", "投递成功") != null) {
                     listener.onProgress("已申请 | " + target);
                     closeOverlays(listPage);
                     return DeliveryOutcome.delivered(null);
                 }
-                if (bodyHit(listPage, new String[]{"请先登录", "登录后申请"}) != null) {
+                if (PageProbe.bodyHit(listPage, "请先登录", "登录后申请") != null) {
                     return DeliveryOutcome.failed("58 同城提示要先登录");
                 }
-                if (!confirmed && clickConfirm(listPage)) {
+                if (!confirmed && PageProbe.clickConfirm(listPage)) {
                     confirmed = true;
                     log.info("58 申请：点了弹窗里的确认按钮 | {}", target);
                 }
@@ -280,45 +280,7 @@ public class WubaDriver {
         }
     }
 
-    /** 当前页面上浮着的弹层：文字 + 按钮，没有返回 null */
-    private String overlayShape(Page page) {
-        try {
-            Object o = page.evaluate("() => { const out = [];"
-                    + " for (const e of document.querySelectorAll('div, section')) {"
-                    + "  const st = getComputedStyle(e);"
-                    + "  if (!(st.position === 'fixed' || st.position === 'absolute') || e.offsetParent === null) continue;"
-                    + "  if (parseInt(st.zIndex || '0') < 10 || e.getBoundingClientRect().width < 150) continue;"
-                    + "  const text = (e.innerText || '').replace(/\\s+/g, ' ').trim(); if (text.length < 2) continue;"
-                    + "  const btns = [...e.querySelectorAll('a, button, span')].filter(b => b.children.length === 0)"
-                    + "    .map(b => (b.innerText || '').trim()).filter(t => t && t.length < 10).slice(0, 8);"
-                    + "  out.push(e.className.toString().slice(0, 40) + ' :: ' + text.slice(0, 120) + ' :: ' + btns.join('/'));"
-                    + "  if (out.length >= 3) break; }"
-                    + " return out.length ? out.join(' || ') : null; }");
-            return o == null ? null : String.valueOf(o);
-        } catch (Exception e) {
-            return null;
-        }
-    }
 
-    /** 弹层里带"投递/确定/申请"字样的主按钮，点一次 */
-    private boolean clickConfirm(Page page) {
-        try {
-            Object clicked = page.evaluate("() => {"
-                    + " const re = /^(投递|确定|确认|确认投递|立即投递|确认申请|投递简历|发送)$/;"
-                    + " for (const e of document.querySelectorAll('div, section')) {"
-                    + "  const st = getComputedStyle(e);"
-                    + "  if (!(st.position === 'fixed' || st.position === 'absolute') || e.offsetParent === null) continue;"
-                    + "  if (parseInt(st.zIndex || '0') < 10) continue;"
-                    + "  if (!/简历|申请|投递/.test(e.innerText || '')) continue;"
-                    + "  const b = [...e.querySelectorAll('a, button, span')].filter(x => x.children.length === 0 && x.offsetParent !== null)"
-                    + "    .find(x => re.test((x.innerText || '').trim()));"
-                    + "  if (b) { b.click(); return true; } }"
-                    + " return false; }");
-            return Boolean.TRUE.equals(clicked);
-        } catch (Exception e) {
-            return false;
-        }
-    }
 
     private void closeOverlays(Page page) {
         try {
@@ -329,15 +291,6 @@ public class WubaDriver {
         }
     }
 
-    private static String bodyHit(Page page, String[] needles) {
-        try {
-            Object hit = page.evaluate("ks => { const b = document.body ? document.body.innerText : '';"
-                    + " return ks.find(k => b.includes(k)) || null; }", List.of(needles));
-            return hit == null ? null : String.valueOf(hit);
-        } catch (Exception e) {
-            return null;
-        }
-    }
 
     // ------------------------------------------------------------------
     // 基础设施

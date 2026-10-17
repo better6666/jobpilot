@@ -48,6 +48,7 @@ public class NativeMainWindow {
             new Platform("nowcoder", "牛客", List.of("recruitType"), false),
             new Platform("yingjiesheng", "应届生求职网", List.of(), false),
             new Platform("wuba", "58同城", List.of("salary"), false));
+    // 拉勾：驱动已写好（com.jobpilot.lagou），登录后的采集和投递还没实测，验证完再加进来
     private static final Map<String, String> FILTER_NAMES = Map.of(
             "jobType", "职位类型", "salary", "薪资", "experience", "经验",
             "degree", "学历", "scale", "公司规模", "stage", "融资阶段",
