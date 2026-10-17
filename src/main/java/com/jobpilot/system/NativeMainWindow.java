@@ -145,8 +145,34 @@ public class NativeMainWindow {
         });
     }
 
+    /**
+     * 窗口和任务栏图标。装机版的 macOS 程序坞图标来自 .app 里的 icns，这里管的是
+     * Windows 任务栏/窗口左上角，以及开发时直接跑 jar 的情况。读不到图标不影响启动
+     */
+    static void applyAppIcon(JFrame target) {
+        List<Image> icons = new ArrayList<>();
+        for (int size : new int[]{16, 32, 64, 256}) {
+            java.net.URL url = NativeMainWindow.class.getResource("/icon/app-" + size + ".png");
+            if (url != null) {
+                icons.add(Toolkit.getDefaultToolkit().getImage(url));
+            }
+        }
+        if (icons.isEmpty()) {
+            return;
+        }
+        target.setIconImages(icons);
+        try {
+            if (Taskbar.isTaskbarSupported() && Taskbar.getTaskbar().isSupported(Taskbar.Feature.ICON_IMAGE)) {
+                Taskbar.getTaskbar().setIconImage(icons.get(icons.size() - 1));
+            }
+        } catch (Exception ignore) {
+            // 部分系统/桌面环境不让改，忽略
+        }
+    }
+
     private void build() {
         frame = new JFrame("JobPilot · 简历自动投递");
+        applyAppIcon(frame);
         frame.setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
         frame.addWindowListener(new WindowAdapter() {
             @Override public void windowClosing(WindowEvent event) { quit(); }
