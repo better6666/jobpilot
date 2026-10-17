@@ -46,7 +46,8 @@ public class NativeMainWindow {
             new Platform("zhilian", "智联招聘", List.of(), true),
             new Platform("shixiseng", "实习僧", List.of(), false),
             new Platform("nowcoder", "牛客", List.of("recruitType"), false),
-            new Platform("yingjiesheng", "应届生求职网", List.of(), false));
+            new Platform("yingjiesheng", "应届生求职网", List.of(), false),
+            new Platform("wuba", "58同城", List.of("salary"), false));
     private static final Map<String, String> FILTER_NAMES = Map.of(
             "jobType", "职位类型", "salary", "薪资", "experience", "经验",
             "degree", "学历", "scale", "公司规模", "stage", "融资阶段",
