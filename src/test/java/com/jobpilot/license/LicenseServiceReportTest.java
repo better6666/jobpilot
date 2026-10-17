@@ -176,6 +176,13 @@ class LicenseServiceReportTest {
         verify(licenseClient, timeout(2000).times(2)).post(eq(API_BASE), eq("/report"), captor.capture());
         // 两次投递合成一次上报，不断网期间漏掉的那次补回来了
         assertEquals(2, captor.getValue().get("n"));
+        // 上报在后台线程：请求发出去（上面的 verify 就过了）到把响应写回剩余次数之间有个窗口，
+        // 直接读偶尔会读到旧值 100。等它写回再断言
+        long deadline = System.currentTimeMillis() + 2000;
+        while (!Long.valueOf(98L).equals(service.status().getQuotaRemaining())
+                && System.currentTimeMillis() < deadline) {
+            Thread.sleep(20);
+        }
         assertEquals(98L, service.status().getQuotaRemaining());
     }
 

@@ -40,12 +40,12 @@ public class Job51Properties {
         // 搜索关键词和城市出厂不预填，沿用 PlatformConfig 的空默认——预填谁的意向就成了谁的私货
 
         /**
-         * 学历要求，值为逗号连接的档位码（{@code degree=04,05,06,07}）。
-         * 51job 这个筛选是"及以上"方向，整串码直接存在码表里，见 job51-options.json
+         * 学历要求，值为逗号连接的码（{@code 07,01,02,03} = 大专及以下含学历不限）。
+         * 空或"0"时按"我的学历"自动换算，码义见 {@link Job51Codes}
          */
         private String degree = "";
 
-        /** 工作年限，值同上（{@code workYear=01,02}），语义是"不超过这一档" */
+        /** 工作年限，值同上（{@code 01,06} = 应届生含无需经验），码义见 {@link Job51Codes} */
         private String experience = "";
     }
 }

@@ -14,8 +14,7 @@ import java.util.List;
  * 四条约束（都来自实测，改之前先读）：
  * <ul>
  *   <li><b>jobArea、salary、degree、workYear 都支持多值</b>，用英文逗号连接。
- *       degree 是"及以上"方向（本科 = 05,06,07），workYear 是"不超过这档"
- *       （1-3年 = 01,02），整串码存在 job51-options.json 里，这里只管拼。
+ *       degree / workYear 的码义见 {@link Job51Codes}（以前的码表错位一档，已改）
  *       值为 "0"（不限）时整个参数省略，不要传 0——传了会搜出空结果</li>
  *   <li><b>关键词必须 URL 编码</b>。老工程是裸拼中文，浏览器虽然容错，
  *       但日志和重定向都不好看，而且关键词里带空格或 & 时会直接拼坏</li>
@@ -40,13 +39,14 @@ public final class Job51SearchUrl {
             if (salary != null) {
                 params.add("salary=" + salary);
             }
-            // 学历/经验是多值码（"04,05,06,07"）。站点自己发的是 %2C，
+            // 学历/经验是多值码（"07,01,02,03"）。站点自己发的是 %2C，
             // 这里照发——裸逗号浏览器容错，但服务端网关不一定
-            String degree = usable(config.getDegree());
+            // 学历码按"我的学历"兜底换算，旧码表的错码在这里被忽略，见 Job51Codes
+            String degree = Job51Codes.degree(config.getDegree(), config.getMyDegree());
             if (degree != null) {
                 params.add("degree=" + degree.replace(",", "%2C"));
             }
-            String workYear = usable(config.getExperience());
+            String workYear = Job51Codes.experience(config.getExperience());
             if (workYear != null) {
                 params.add("workYear=" + workYear.replace(",", "%2C"));
             }

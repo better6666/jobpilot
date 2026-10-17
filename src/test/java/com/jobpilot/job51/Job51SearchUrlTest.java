@@ -82,11 +82,23 @@ class Job51SearchUrlTest {
     @Test
     void 学历和经验的多值码用百分号逗号() {
         Job51Properties.Job51Config config = config();
-        config.setDegree("04,05,06,07");
-        config.setExperience("01,02");
+        config.setDegree("07,01,02,03");
+        config.setExperience("01,06");
         String url = Job51SearchUrl.build("070300", "设计", config);
-        assertTrue(url.contains("degree=04%2C05%2C06%2C07"), url);
-        assertTrue(url.contains("workYear=01%2C02"), url);
+        assertTrue(url.contains("degree=07%2C01%2C02%2C03"), url);
+        assertTrue(url.contains("workYear=01%2C06"), url);
+    }
+
+    @Test
+    void 没选学历时按我的学历自动筛_旧码表的错码被忽略() {
+        Job51Properties.Job51Config config = config();
+        config.setMyDegree("大专");
+        assertTrue(Job51SearchUrl.build("070300", "设计", config).contains("degree=07%2C01%2C02%2C03"));
+        // 旧码表"大专及以上"存的是 04,05,06,07，实际搜的是本科到博士——不能再照发
+        config.setDegree("04,05,06,07");
+        String url = Job51SearchUrl.build("070300", "设计", config);
+        assertTrue(url.contains("degree=07%2C01%2C02%2C03"), url);
+        assertFalse(url.contains("04%2C05"), url);
     }
 
     @Test
