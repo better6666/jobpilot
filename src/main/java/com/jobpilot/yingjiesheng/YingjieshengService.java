@@ -102,7 +102,8 @@ public class YingjieshengService extends DeliveryService<YingjieshengJobCard> {
             return "转载岗位，要去原网站投";
         }
         String city = config.getCity() == null ? "" : config.getCity().trim();
-        if (!city.isEmpty() && card.getCityName() != null && !card.getCityName().contains(city)) {
+        if (!city.isEmpty() && !card.isCityMatchedByPlatform()
+                && card.getCityName() != null && !card.getCityName().contains(city)) {
             return "城市不符（" + card.getCityName() + "）";
         }
         return null;

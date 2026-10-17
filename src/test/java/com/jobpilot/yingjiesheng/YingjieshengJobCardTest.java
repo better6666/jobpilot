@@ -74,6 +74,14 @@ class YingjieshengJobCardTest {
         YingjieshengJobCard far = cards().get(0);
         far.setCityName("沈阳");
         assertTrue(YingjieshengService.localReject(far, config).startsWith("城市不符"));
+        // 平台按苏州筛过时会返回昆山、太仓这类下辖县级市，不能再按名字拦
+        PlatformConfig suzhou = new PlatformConfig();
+        suzhou.setCity("苏州");
+        YingjieshengJobCard kunshan = cards().get(0);
+        kunshan.setCityName("昆山");
+        assertTrue(YingjieshengService.localReject(kunshan, suzhou).startsWith("城市不符"));
+        kunshan.setCityMatchedByPlatform(true);
+        assertNull(YingjieshengService.localReject(kunshan, suzhou));
     }
 
     @Test

@@ -46,6 +46,8 @@ public class YingjieshengJobCard implements JobCard {
     private boolean reprint;
     /** 接口自己说已经申请过（isapply=1） */
     private boolean applied;
+    /** 搜索时平台已经按城市筛过（下辖县级市也算），本地不再按城市名比 */
+    private boolean cityMatchedByPlatform;
 
     @Override
     public String getBossId() {

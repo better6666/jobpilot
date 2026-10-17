@@ -176,8 +176,12 @@ public class YingjieshengDriver {
                 return;
             }
             waitForResponse(seq, before, stop);
-            if (city != null && !city.isBlank() && !pickCity(page, city.trim(), seq, stop)) {
-                listener.onProgress("【" + keyword + "】筛选栏里没有「" + city + "」，按全国搜，城市在本地过滤");
+            boolean cityByPlatform = false;
+            if (city != null && !city.isBlank()) {
+                cityByPlatform = pickCity(page, city.trim(), seq, stop);
+                if (!cityByPlatform) {
+                    listener.onProgress("【" + keyword + "】筛选栏里选不到「" + city + "」，按全国搜，城市在本地过滤");
+                }
             }
             int processed = 0;
             for (int pageNum = 1; pageNum <= MAX_PAGE; pageNum++) {
@@ -221,6 +225,8 @@ public class YingjieshengDriver {
                         if (card == null) {
                             card = cardFromDom(item, jobId);
                         }
+                        // 平台已按城市筛过：结果里有"昆山""太仓"这类下辖县级市，本地再按名字比会误拦
+                        card.setCityMatchedByPlatform(cityByPlatform);
                         processed++;
                         consumer.accept(card, page);
                     } catch (Exception e) {
@@ -252,24 +258,66 @@ public class YingjieshengDriver {
     }
 
     /** 点「工作地点」那一排里的城市。只认可见的、文字正好等于城市名的叶子节点 */
+    /**
+     * 在筛选栏选城市。2026-10-17 登录后实测：
+     * <ul>
+     *   <li>常用城市是一排 {@code .area-option-item}（全国、北京、上海…西安、其他城市），
+     *       点了接口就带上 {@code jobarea=010000}。<b>只点这一排里可见的那个</b>——
+     *       页面上别处也有"北京"字样，随便找一个点会点空</li>
+     *   <li>不在这一排的（比如苏州）要点"其他城市"，弹 {@code .jbs_cascader_dialog}：
+     *       左边 A-Z 字母，右边该字母下的城市（{@code .residenceDialog__right-city}），
+     *       底部按钮文字是"确 定"（中间有空格）。不知道城市拼音首字母，就挨个点字母找</li>
+     *   <li>选之前先点回"全国"：上一次选的城市会被记住，不清掉就成了多选</li>
+     * </ul>
+     */
     private boolean pickCity(Page page, String city, AtomicLong seq, BooleanSupplier stop) {
-        long mark = seq.get();
         try {
-            Object clicked = page.evaluate("city => {"
-                    + "  const nodes = [...document.querySelectorAll('span, a, li, div')];"
-                    + "  const hit = nodes.find(n => n.children.length === 0 && n.textContent.trim() === city"
-                    + "      && n.offsetParent !== null && !n.closest('.search-list-item-wrapper'));"
-                    + "  if (!hit) return false;"
-                    + "  hit.click();"
-                    + "  return true;"
+            long reset = seq.get();
+            Object onRow = page.evaluate("city => {"
+                    + "  const row = [...document.querySelectorAll('.area-option-item')].filter(e => e.offsetParent !== null);"
+                    + "  const all = row.find(e => e.innerText.trim() === '全国');"
+                    + "  if (all && !all.className.includes('active')) { all.click(); return 'reset'; }"
+                    + "  return row.length ? 'ok' : 'none';"
                     + "}", city);
-            if (!Boolean.TRUE.equals(clicked)) {
+            if ("none".equals(String.valueOf(onRow))) {
                 return false;
             }
+            if ("reset".equals(String.valueOf(onRow))) {
+                waitForResponse(seq, reset, stop);
+                sleep(500);
+            }
+            long mark = seq.get();
+            Object clicked = page.evaluate("async city => {"
+                    + "  const sleep = ms => new Promise(r => setTimeout(r, ms));"
+                    + "  const row = [...document.querySelectorAll('.area-option-item')].filter(e => e.offsetParent !== null);"
+                    + "  const direct = row.find(e => e.innerText.trim() === city);"
+                    + "  if (direct) { direct.click(); return 'row'; }"
+                    + "  const other = row.find(e => e.innerText.trim() === '其他城市');"
+                    + "  if (!other) return null;"
+                    + "  other.click(); await sleep(1000);"
+                    + "  const w = document.querySelector('.jbs_cascader_dialog');"
+                    + "  if (!w) return null;"
+                    + "  const find = () => [...w.querySelectorAll('.residenceDialog__right-city')]"
+                    + "      .find(e => e.offsetParent !== null && e.innerText.trim() === city);"
+                    + "  let hit = find();"
+                    + "  if (!hit) { for (const l of w.querySelectorAll('.residenceDialog__left-title')) {"
+                    + "    l.click(); await sleep(250); hit = find(); if (hit) break; } }"
+                    + "  if (!hit) return null;"
+                    + "  hit.click(); await sleep(400);"
+                    + "  const ok = [...w.querySelectorAll('button, span, div')].find(e => e.children.length === 0"
+                    + "      && e.offsetParent !== null && e.innerText.replace(/\\s/g, '') === '确定');"
+                    + "  if (!ok) return null;"
+                    + "  ok.click(); return 'dialog';"
+                    + "}", city);
+            if (clicked == null) {
+                return false;
+            }
+            waitForResponse(seq, mark, stop);
         } catch (Exception e) {
+            log.debug("应届生选城市失败: {}", e.getMessage());
             return false;
         }
-        return waitForResponse(seq, mark, stop);
+        return true;
     }
 
     private boolean clickNextPage(Page page) {
