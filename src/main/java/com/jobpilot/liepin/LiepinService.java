@@ -98,7 +98,9 @@ public class LiepinService extends DeliveryService<LiepinJobCard> {
     protected void collect(String keyword, String searchUrl, int maxCards,
                            ProgressListener listener, BooleanSupplier stop,
                            CardConsumer<LiepinJobCard> consumer) {
-        driver.processKeyword(searchUrl, keyword, maxCards, listener, stop, consumer);
+        // 学历要在搜索阶段就筛（大专及以下时），基类的 collect 不带配置，这里现读
+        driver.processKeyword(searchUrl, keyword, properties.get().getMyDegree(), maxCards,
+                listener, stop, consumer);
     }
 
     /**

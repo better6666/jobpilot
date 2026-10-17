@@ -52,7 +52,7 @@ public final class RequirementFilter {
      * 学历文案 → 档。返回 -1 表示认不出来（不拦）。
      * 顺序即高低：1 初中及以下 → 6 博士。
      */
-    static int rankOfDegree(String text) {
+    public static int rankOfDegree(String text) {
         String t = normalize(text);
         if (t == null) {
             return -1;

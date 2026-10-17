@@ -16,6 +16,7 @@ import org.springframework.stereotype.Component;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Locale;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
@@ -187,13 +188,31 @@ public class LiepinDriver {
     public void processKeyword(String searchUrl, String keyword, int maxCards,
                                ProgressListener listener, BooleanSupplier stop,
                                CardConsumer<LiepinJobCard> consumer) {
+        processKeyword(searchUrl, keyword, null, maxCards, listener, stop, consumer);
+    }
+
+    /**
+     * @param myDegree "我的学历"。大专及以下时按它在猎聘搜索里筛（见 {@link LiepinEduLevel}）
+     */
+    public void processKeyword(String searchUrl, String keyword, String myDegree, int maxCards,
+                               ProgressListener listener, BooleanSupplier stop,
+                               CardConsumer<LiepinJobCard> consumer) {
         Page page = browserManager.context().newPage();
         configureTimeouts(page);
         // 本页接口实体的缓存。每次命中搜索接口就整页替换，所以读之前必须确认
         // 是一次"新"响应，否则拿到的是上一页的数据（下标对不上 DOM）
         AtomicReference<List<LiepinJobCard>> cache = new AtomicReference<>(List.of());
         AtomicLong responseSeq = new AtomicLong();
+        AtomicReference<Map<String, String>> eduOptions = new AtomicReference<>(Map.of());
         page.onResponse(response -> {
+            if (isCondInitResponse(response)) {
+                Map<String, String> options = LiepinEduLevel.parseOptions(safeBody(response));
+                if (!options.isEmpty()) {
+                    eduOptions.set(options);
+                    log.info("猎聘学历选项: {}", options);
+                }
+                return;
+            }
             if (isSearchResponse(response)) {
                 List<LiepinJobCard> cards = LiepinJobCard.parseList(safeBody(response));
                 cache.set(cards);
@@ -207,6 +226,13 @@ public class LiepinDriver {
             if (!waitForPagination(page, listener)) {
                 listener.onProgress("【" + keyword + "】搜索结果分页未出现（可能被登录或验证弹窗挡住），跳过");
                 return;
+            }
+            if (LiepinEduLevel.worthFiltering(myDegree) && !searchUrl.contains("eduLevel=")) {
+                String filtered = applyEduLevel(page, searchUrl, myDegree, eduOptions, keyword, listener, stop);
+                if (filtered != null && !waitForPagination(page, listener)) {
+                    listener.onProgress("【" + keyword + "】按学历「" + myDegree + "」筛选后没有岗位");
+                    return;
+                }
             }
             int maxPage = readMaxPage(page);
             listener.onProgress("【" + keyword + "】搜索页就绪，共 " + maxPage + " 页可翻");
@@ -725,6 +751,41 @@ public class LiepinDriver {
                 sleep(300);
             }
         } catch (Exception ignore) {
+        }
+    }
+
+    /**
+     * 按学历重开搜索页。选项要等页面自己的 cond-init 请求回来才知道，最多等几秒；
+     * 拿不到就不筛，照旧靠本地过滤，并把原因写进日志。
+     *
+     * @return 用上的新地址；没筛返回 null
+     */
+    private String applyEduLevel(Page page, String searchUrl, String myDegree,
+                                 AtomicReference<Map<String, String>> eduOptions, String keyword,
+                                 ProgressListener listener, BooleanSupplier stop) {
+        for (int i = 0; i < 16 && eduOptions.get().isEmpty() && !stop.getAsBoolean(); i++) {
+            sleep(300);
+        }
+        String code = LiepinEduLevel.pick(eduOptions.get(), myDegree);
+        if (code == null) {
+            listener.onProgress("【" + keyword + "】没拿到猎聘的学历选项，按全部学历搜索，"
+                    + "高于「" + myDegree + "」的岗位在本地过滤");
+            return null;
+        }
+        String url = LiepinEduLevel.withEduLevel(searchUrl, code);
+        listener.onProgress("【" + keyword + "】只看要求「" + myDegree + "」的岗位"
+                + "（猎聘的学历筛选只能单选，标「学历不限」的岗位不在这批结果里）");
+        navigate(page, url, listener);
+        dismissBlockingModals(page);
+        return url;
+    }
+
+    private static boolean isCondInitResponse(Response response) {
+        try {
+            String url = response.url();
+            return url != null && url.contains(SEARCH_API + "-cond-init");
+        } catch (Exception e) {
+            return false;
         }
     }
 
