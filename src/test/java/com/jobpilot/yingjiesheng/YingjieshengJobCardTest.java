@@ -83,4 +83,11 @@ class YingjieshengJobCardTest {
         assertEquals("https://q.yingjiesheng.com/jobs/search/UI%20%E8%AE%BE%E8%AE%A1",
                 YingjieshengDriver.searchUrl(" UI 设计 "));
     }
+
+    @Test
+    void 认得出被跳到登录页() {
+        assertTrue(YingjieshengDriver.isLoginRedirect(
+                "https://q.yingjiesheng.com/login?url=https%3A%2F%2Fq.yingjiesheng.com%2Fjobs%2Fsearch%2F%E8%BF%90%E8%90%A5"));
+        assertFalse(YingjieshengDriver.isLoginRedirect("https://q.yingjiesheng.com/jobs/search/%E8%BF%90%E8%90%A5"));
+    }
 }

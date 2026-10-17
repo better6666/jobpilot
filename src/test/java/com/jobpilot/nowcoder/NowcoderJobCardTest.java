@@ -63,6 +63,14 @@ class NowcoderJobCardTest {
     }
 
     @Test
+    void 热度标签不当城市() {
+        NowcoderJobCard c = NowcoderDriver.cardFrom(fields("/jobs/detail/9", "实习 | 游戏运营", "300-500元/天",
+                List.of("刚刚有人投递过", "广州", "5天/周", "最少3个月", "有转正", "本科"), "某游戏",
+                List.of("游戏", "1000-9999人"), ""));
+        assertEquals("广州", c.getCityName());
+    }
+
+    @Test
     void 官网直投标出来_没有详情链接的丢掉() {
         NowcoderJobCard c = NowcoderDriver.cardFrom(fields("/jobs/detail/3", "产品运营-内推码DNK2026", "薪资面议",
                 List.of("北京/深圳/天津"), "联想", List.of(), "产品运营 直达官网 投后必反馈"));

@@ -112,6 +112,19 @@ public class YingjieshengDriver {
         }
     }
 
+    /** 搜索页被跳到了登录页 */
+    static boolean isLoginRedirect(String url) {
+        return url != null && url.contains("yingjiesheng.com/login");
+    }
+
+    private static boolean isLoginRedirect(Page page) {
+        try {
+            return isLoginRedirect(page.url());
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     /** 导航栏右上角还挂着「登录/注册」就是没登录 */
     boolean isLoggedIn(Page page) {
         try {
@@ -153,6 +166,13 @@ public class YingjieshengDriver {
             long before = seq.get();
             navigate(page, searchUrl, listener);
             if (!HumanVerification.waitIfShowing(page, DISPLAY_NAME, waitMinutes, listener, stop)) {
+                return;
+            }
+            if (isLoginRedirect(page)) {
+                // 2026-10-17 起未登录访问搜索页会被 302 到 /login（标题是 App 下载页）。
+                // 不识别的话只会报"没有搜到岗位"，用户以为是关键词的问题
+                listener.onProgress("【" + keyword + "】应届生求职网要求登录后才能搜索，"
+                        + "请在弹出的浏览器窗口里登录后重新开始");
                 return;
             }
             waitForResponse(seq, before, stop);

@@ -99,6 +99,10 @@ public class NowcoderJobCard implements JobCard {
             }
             if (tag.startsWith("HR") || tag.contains("在线") || tag.contains("处理简历")) {
                 bossActiveTimeDesc = tag;
+            } else if (tag.contains("投递") || tag.contains("有人") || tag.startsWith("刚刚") || tag.contains("活跃")) {
+                // "刚刚有人投递过"这类热度标签（2026-10-17 新出现）：以前会被当成城市，
+                // 本地城市过滤就把整张卡误拦成"城市不符"
+                continue;
             } else if (DEGREE.matcher(tag).matches()) {
                 jobDegree = tag;
             } else if (EXPERIENCE.matcher(tag).find() && jobExperience == null) {
