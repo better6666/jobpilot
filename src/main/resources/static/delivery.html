@@ -327,8 +327,8 @@ function renderFilters(config, options) {
   for (const field of meta.filters) {
     const cell = document.createElement('div');
     if (field === 'salary' && meta.salaryKind === 'text') {
-      cell.innerHTML = `<label>薪资区间（元，形如 12000,20000；留空=不限）</label>
-        <input id="salaryText" type="text" placeholder="12000,20000">`;
+      cell.innerHTML = `<label>薪资区间（元，留空=不限；和智联下拉一致：4001,6000 / 6001,8000 / 8001,10000 / 10001,15000 / 15001,25000）</label>
+        <input id="salaryText" type="text" placeholder="6001,8000">`;
       host.appendChild(cell);
       $('salaryText').value = (config && config.salary) || '';
       continue;

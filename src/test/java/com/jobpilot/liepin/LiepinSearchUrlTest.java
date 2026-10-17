@@ -70,12 +70,25 @@ class LiepinSearchUrlTest {
     @Test
     void 薪资有值时带上() {
         LiepinProperties.LiepinConfig config = config();
-        config.setSalary("15");
+        config.setSalary("5$10");
         String url = LiepinSearchUrl.build("070020", "新媒体运营", config);
-        assertTrue(url.contains("salary=15"), url);
-        // 参数顺序固定：city, dq, salary, currentPage, key
-        assertEquals("https://www.liepin.com/zhaopin/?city=070020&dq=070020&salary=15&currentPage=0"
+        // 参数名是 salaryCode、取值带 $（2026-10-17 真站实测）；参数顺序固定：city, dq, salaryCode, currentPage, key
+        assertEquals("https://www.liepin.com/zhaopin/?city=070020&dq=070020&salaryCode=5%2410&currentPage=0"
                 + "&key=%E6%96%B0%E5%AA%92%E4%BD%93%E8%BF%90%E8%90%A5", url);
+    }
+
+    @Test
+    void 旧配置的薪资码换算成官方区间_不认识的不筛() {
+        // 旧码表发的 salary=15 猎聘不认，这里按原来的档位名换到最接近的官方区间
+        assertEquals("5$10", LiepinSearchUrl.salaryCode("15"));
+        assertEquals("10$20", LiepinSearchUrl.salaryCode("20"));
+        assertEquals("3$5", LiepinSearchUrl.salaryCode("10"));
+        assertNull(LiepinSearchUrl.salaryCode("0"));
+        assertNull(LiepinSearchUrl.salaryCode(""));
+        assertNull(LiepinSearchUrl.salaryCode("99"));
+        LiepinProperties.LiepinConfig config = config();
+        config.setSalary("15");
+        assertTrue(LiepinSearchUrl.build("070020", "运营", config).contains("salaryCode=5%2410"));
     }
 
     @Test

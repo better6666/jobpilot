@@ -125,7 +125,16 @@ public class ZhilianService extends DeliveryService<ZhilianJobCard> {
     protected DeliveryOutcome deliver(ZhilianJobCard card, Page listPage, PlatformConfig config,
                                       ProgressListener listener, BooleanSupplier stop) {
         ZhilianProperties.ZhilianConfig zhilianConfig = (ZhilianProperties.ZhilianConfig) config;
-        return driver.deliver(card, listPage, zhilianConfig, listener, stop);
+        // 投完后智联会弹"向HR打招呼"。话术按需现生成：弹窗里真有输入框才调 AI，
+        // 没有就不花这次额度
+        java.util.function.Supplier<String> greeting = () -> {
+            GreetingService.Greeting g = greetingFor(card, config);
+            if (g.note() != null) {
+                appendLog("话术兜底 | " + brief(card) + " | " + g.note());
+            }
+            return g.text();
+        };
+        return driver.deliver(card, listPage, zhilianConfig, listener, stop, greeting);
     }
 
     // ------------------------------------------------------------------

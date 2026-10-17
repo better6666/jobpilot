@@ -94,7 +94,7 @@ class ZhilianServiceDedupTest {
 
         service.processCardForTest(card(), "新媒体运营", properties.get(), null);
 
-        verify(driver, never()).deliver(any(), any(), any(), any(), any());
+        verify(driver, never()).deliver(any(), any(), any(), any(), any(), any());
         verify(deliveryMapper, never()).insert(any(Delivery.class));
         assertEquals(1, service.status().getSkipped());
     }
@@ -102,7 +102,7 @@ class ZhilianServiceDedupTest {
     @Test
     void 新岗位投递成功后insert且platform为zhilian() {
         when(deliveryMapper.selectOne(any())).thenReturn(null);
-        when(driver.deliver(any(), any(), any(), any(), any()))
+        when(driver.deliver(any(), any(), any(), any(), any(), any()))
                 .thenReturn(DeliveryOutcome.delivered("简历已投递"));
 
         service.processCardForTest(card(), "新媒体运营", properties.get(), null);
@@ -124,14 +124,14 @@ class ZhilianServiceDedupTest {
         ZhilianProperties.ZhilianConfig config = properties.get();
         config.setDryRun(true);
         // 干跑与否是驱动层决定的，编排层的职责是把 dryRun 传下去、把 PREVIEW 记成"预演"
-        when(driver.deliver(any(), any(), any(), any(), any()))
+        when(driver.deliver(any(), any(), any(), any(), any(), any()))
                 .thenReturn(DeliveryOutcome.preview("预演"));
 
         service.processCardForTest(card(), "新媒体运营", config, null);
 
         ArgumentCaptor<ZhilianProperties.ZhilianConfig> captor =
                 ArgumentCaptor.forClass(ZhilianProperties.ZhilianConfig.class);
-        verify(driver).deliver(any(), any(), captor.capture(), any(), any());
+        verify(driver).deliver(any(), any(), captor.capture(), any(), any(), any());
         assertTrue(captor.getValue().isDryRun());
 
         ArgumentCaptor<Delivery> saved = ArgumentCaptor.forClass(Delivery.class);
@@ -143,7 +143,7 @@ class ZhilianServiceDedupTest {
     @Test
     void 触发每日投递上限时停任务并记失败() {
         when(deliveryMapper.selectOne(any())).thenReturn(null);
-        when(driver.deliver(any(), any(), any(), any(), any()))
+        when(driver.deliver(any(), any(), any(), any(), any(), any()))
                 .thenReturn(new DeliveryOutcome(DeliveryStatus.LIMIT, "今日投递已达上限", null));
 
         service.processCardForTest(card(), "新媒体运营", properties.get(), null);
@@ -167,7 +167,7 @@ class ZhilianServiceDedupTest {
         rules.setJdRules(java.util.List.of(newRule("运营", 100)));
         config.setScoreRules(rules);
         when(deliveryMapper.selectOne(any())).thenReturn(null);
-        when(driver.deliver(any(), any(), any(), any(), any()))
+        when(driver.deliver(any(), any(), any(), any(), any(), any()))
                 .thenReturn(DeliveryOutcome.delivered("简历已投递"));
 
         service.processCardForTest(card(), "新媒体运营", config, null);

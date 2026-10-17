@@ -526,7 +526,7 @@ public class NativeMainWindow {
         }
         if (selected.salaryText()) {
             salaryText.setText(config.path("salary").asText(""));
-            filters.add(field("薪资区间 · 元，如 12000,20000", salaryText));
+            filters.add(field("薪资区间 · 元，同智联档位如 6001,8000 / 10001,15000", salaryText));
         }
         filters.revalidate();
         filters.repaint();

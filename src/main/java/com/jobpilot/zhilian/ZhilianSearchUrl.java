@@ -54,6 +54,11 @@ public final class ZhilianSearchUrl {
         if (salary != null) {
             url.append("&sl=").append(encode(salary));
         }
+        // 学历：按"我的学历"在搜索里筛（大专及以下时），码义和取舍见 ZhilianEduLevel
+        String el = config == null ? null : ZhilianEduLevel.code(config.getMyDegree());
+        if (el != null) {
+            url.append("&el=").append(el);
+        }
         if (pageNum > 1) {
             url.append("&page=").append(pageNum);
         }

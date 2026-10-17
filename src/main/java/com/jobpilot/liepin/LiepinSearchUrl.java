@@ -9,7 +9,7 @@ import java.util.List;
 /**
  * 猎聘搜索页 URL 构造。
  * <p>
- * 形如 https://www.liepin.com/zhaopin/?city=060080&dq=060080&salary=15&currentPage=0&key=%E6%96%B0...
+ * 形如 https://www.liepin.com/zhaopin/?city=060080&dq=060080&salaryCode=5%2410&currentPage=0&key=%E6%96%B0...
  * <p>
  * 两条硬约束（都是实测出来的，改之前先读）：
  * <ul>
@@ -34,9 +34,11 @@ public final class LiepinSearchUrl {
             params.add("city=" + cityCode.trim());
             params.add("dq=" + cityCode.trim());
         }
-        if (config != null && config.getSalary() != null && !config.getSalary().isBlank()
-                && !"0".equals(config.getSalary().trim())) {
-            params.add("salary=" + config.getSalary().trim());
+        String salary = config == null ? null : salaryCode(config.getSalary());
+        if (salary != null) {
+            // 参数名是 salaryCode，取值形如 5$10（猎聘前端代码 + 真站实测）。
+            // 以前发的是 salary=15，猎聘根本不认，薪资筛选从来没生效过
+            params.add("salaryCode=" + salary.replace("$", "%24"));
         }
         // 页码从 0 开始。真正翻页靠点"下一页"按钮，这个参数只对首屏有意义
         params.add("currentPage=0");
@@ -44,6 +46,22 @@ public final class LiepinSearchUrl {
             params.add("key=" + encode(keyword.trim()));
         }
         return BASE + "?" + String.join("&", params);
+    }
+
+    /** 旧码表的薪资值（猎聘不认的那套）→ 最接近的官方区间 */
+    private static final java.util.Map<String, String> LEGACY_SALARY = java.util.Map.of(
+            "10", "3$5", "15", "5$10", "20", "10$20", "25", "20$40", "30", "20$40", "35", "40$60");
+
+    /** 实际要发的薪资码；空/"0"/不认识的旧值返回 null（不筛） */
+    static String salaryCode(String selected) {
+        if (selected == null || selected.isBlank() || "0".equals(selected.trim())) {
+            return null;
+        }
+        String s = selected.trim();
+        if (s.contains("$")) {
+            return s;
+        }
+        return LEGACY_SALARY.get(s);
     }
 
     /** 城市码：已经是 3-6 位数字码原样返回；否则按城市名查码表；查不到返回 null */

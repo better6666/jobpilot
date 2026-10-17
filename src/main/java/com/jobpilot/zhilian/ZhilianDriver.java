@@ -421,6 +421,16 @@ public class ZhilianDriver {
     public DeliveryOutcome deliver(ZhilianJobCard card, Page listPage,
                                    ZhilianProperties.ZhilianConfig config,
                                    ProgressListener listener, BooleanSupplier stop) {
+        return deliver(card, listPage, config, listener, stop, null);
+    }
+
+    /**
+     * @param greeting 投完后"向HR打招呼"弹窗里要发的话（按需生成，见 ZhilianService）；null = 不打招呼
+     */
+    public DeliveryOutcome deliver(ZhilianJobCard card, Page listPage,
+                                   ZhilianProperties.ZhilianConfig config,
+                                   ProgressListener listener, BooleanSupplier stop,
+                                   java.util.function.Supplier<String> greeting) {
         String target = (card.getBrandName() != null ? card.getBrandName() : "?")
                 + " | " + (card.getJobName() != null ? card.getJobName() : "?");
         int index = currentCardIndex;
@@ -476,6 +486,7 @@ public class ZhilianDriver {
             handleResumeDialog(listPage);
             confirmResume(listPage);
             sleep(600);
+            String sent = greetHr(listPage, greeting, listener, target);
             closeGreetingModal(listPage);
             bruteRemoveMasks(listPage);
 
@@ -483,7 +494,8 @@ public class ZhilianDriver {
                 return DeliveryOutcome.limit("触发每日投递上限");
             }
             listener.onProgress("已投递 | " + target);
-            return DeliveryOutcome.delivered(config.getSayHi());
+            // 只记真正发出去的话术；以前不管发没发都记配置里的固定话术，记录对不上实际
+            return DeliveryOutcome.delivered(sent);
         } catch (Exception e) {
             log.warn("投递过程异常 | {}: {}", target, e.getMessage());
             bruteRemoveMasks(listPage);
@@ -556,6 +568,93 @@ public class ZhilianDriver {
                     "}");
         } catch (Exception e) {
             log.debug("JS 兜底点确认按钮也失败: {}", e.getMessage());
+        }
+    }
+
+    /** 投递后的打招呼弹窗 */
+    private static final String GREETING_MODAL = ".deliver-greeting-modal";
+    private static final String GREETING_INPUT = "textarea, [contenteditable='true'], input[type='text']";
+    private static final String GREETING_SEND =
+            "button:has-text('发送'), button:has-text('打招呼'), button:has-text('确定'), [class*='send']";
+
+    /**
+     * 在投递后的"向HR打招呼"弹窗里发一句话术。返回发出去的话；没弹窗、弹窗里没有输入框、
+     * 或者没确认发出去，都返回 null（调用方照常关弹窗，投递本身不受影响）。
+     *
+     * <p><b>弹窗结构未经真机验证</b>：只投递不发消息拿不到它。所以每次弹出都把结构写进日志
+     * （文字、有没有输入框、有哪些按钮），真跑一次就能据此校准选择器。
+     */
+    String greetHr(Page page, java.util.function.Supplier<String> greeting,
+                   ProgressListener listener, String target) {
+        if (greeting == null) {
+            return null;
+        }
+        try {
+            Locator modal = null;
+            for (int i = 0; i < 8; i++) {
+                Locator m = page.locator(GREETING_MODAL).first();
+                if (m.count() > 0 && m.isVisible()) {
+                    modal = m;
+                    break;
+                }
+                sleep(250);
+            }
+            if (modal == null) {
+                return null;
+            }
+            Object shape = modal.evaluate("m => ({"
+                    + " text: (m.innerText || '').replace(/\\s+/g, ' ').slice(0, 160),"
+                    + " inputs: m.querySelectorAll(\"textarea, [contenteditable='true'], input[type='text']\").length,"
+                    + " buttons: [...m.querySelectorAll('button, [class*=btn]')].map(b => (b.innerText || '').trim()).filter(Boolean).slice(0, 6)"
+                    + "})");
+            log.info("智联打招呼弹窗结构 | {} | {}", target, shape);
+
+            Locator input = modal.locator(GREETING_INPUT).first();
+            if (input.count() == 0 || !input.isVisible()) {
+                return null;
+            }
+            String text = greeting.get();
+            if (text == null || text.isBlank()) {
+                return null;
+            }
+            input.click(new Locator.ClickOptions().setTimeout(ACTION_TIMEOUT_MS));
+            Object tag = input.evaluate("el => el.tagName.toLowerCase()");
+            if ("textarea".equals(String.valueOf(tag)) || "input".equals(String.valueOf(tag))) {
+                input.fill(text);
+            } else {
+                input.evaluate("(el, msg) => { el.innerText = msg; el.dispatchEvent(new Event('input', {bubbles: true})); }", text);
+            }
+            sleep(500);
+            Locator send = modal.locator(GREETING_SEND).last();
+            if (send.count() > 0 && send.isVisible()) {
+                send.click(new Locator.ClickOptions().setTimeout(ACTION_TIMEOUT_MS));
+            } else {
+                input.press("Enter");
+            }
+            // 发出去的判据：弹窗关了，或者输入框被清空了
+            for (int i = 0; i < 12; i++) {
+                sleep(250);
+                boolean closed = page.locator(GREETING_MODAL).count() == 0
+                        || !page.locator(GREETING_MODAL).first().isVisible();
+                if (closed || isBlankInput(input)) {
+                    listener.onProgress("已向 HR 打招呼 | " + target);
+                    return text;
+                }
+            }
+            listener.onProgress("打招呼没确认发出去，只完成了投递 | " + target);
+            return null;
+        } catch (Exception e) {
+            log.info("智联打招呼失败（不影响投递）| {}: {}", target, e.getMessage());
+            return null;
+        }
+    }
+
+    private static boolean isBlankInput(Locator input) {
+        try {
+            Object v = input.evaluate("el => (el.value !== undefined ? el.value : el.innerText) || ''");
+            return String.valueOf(v).isBlank();
+        } catch (Exception e) {
+            return false;
         }
     }
 
