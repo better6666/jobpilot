@@ -18,6 +18,7 @@ import com.jobpilot.license.Entitlement;
 import com.jobpilot.license.EntitlementService;
 import com.jobpilot.license.LicenseProperties;
 import com.jobpilot.license.LicenseService;
+import com.microsoft.playwright.impl.TargetClosedError;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -33,9 +34,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.startsWith;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -177,7 +180,7 @@ class LiepinQuotaPrecheckTest {
 
         assertEquals("「猎聘」今日投递额度已用完（每平台 150 个）。"
                 + "明天 0 点后自动恢复，升级套餐可提高额度，也可以先切别的平台投。", error);
-        verify(browserManager, never()).submitAsync(any());
+        verify(browserManager, never()).submitAsync(any(), any());
     }
 
     /** 额度按平台各算一份：Boss 用满了不影响猎聘照常起 */
@@ -188,7 +191,7 @@ class LiepinQuotaPrecheckTest {
 
         assertTrue(bossService().start().contains("额度已用完"));
         assertNull(liepinService().start());
-        verify(browserManager).submitAsync(any());
+        verify(browserManager).submitAsync(any(), any());
     }
 
     @Test
@@ -198,7 +201,7 @@ class LiepinQuotaPrecheckTest {
         config.setDryRun(true);
 
         assertNull(liepinService().start());
-        verify(browserManager).submitAsync(any());
+        verify(browserManager).submitAsync(any(), any());
     }
 
     @Test
@@ -208,7 +211,36 @@ class LiepinQuotaPrecheckTest {
         String error = bossService().start();
 
         assertTrue(error.contains("打招呼语"), error);
-        verify(browserManager, never()).submitAsync(any());
+        verify(browserManager, never()).submitAsync(any(), any());
+    }
+
+    @Test
+    void 浏览器启动失败后结束任务并允许重新开始() {
+        BossService service = bossService();
+        doAnswer(call -> {
+            call.getArgument(1, Runnable.class).run();
+            return null;
+        }).when(browserManager).submitAsync(any(), any());
+
+        assertNull(service.start());
+        assertEquals(RunStatus.RunState.FINISHED, service.status().getState());
+        assertTrue(service.status().getMessage().contains("浏览器启动失败"));
+        assertNull(service.start());
+    }
+
+    @Test
+    void 登录时关闭浏览器后提示重新开始() {
+        BossService service = bossService();
+        doAnswer(call -> {
+            call.getArgument(0, Runnable.class).run();
+            return null;
+        }).when(browserManager).submitAsync(any(), any());
+        when(bossDriver.ensureLogin(anyInt(), any(), any())).thenThrow(new TargetClosedError());
+
+        assertNull(service.start());
+        assertEquals(RunStatus.RunState.FINISHED, service.status().getState());
+        assertTrue(service.status().getMessage().contains("浏览器窗口或标签页已关闭"));
+        assertNull(service.start());
     }
 
     // ------------------------------------------------------------------

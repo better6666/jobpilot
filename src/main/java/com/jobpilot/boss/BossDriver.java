@@ -9,6 +9,7 @@ import com.jobpilot.delivery.ProgressListener;
 import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.Response;
+import com.microsoft.playwright.impl.TargetClosedError;
 import com.microsoft.playwright.options.WaitUntilState;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -77,7 +78,10 @@ public class BossDriver {
             listener.onProgress("未检测到登录态，请在浏览器窗口里扫码登录（等待 " + timeoutMinutes + " 分钟）");
             long deadline = System.currentTimeMillis() + timeoutMinutes * 60_000L;
             while (System.currentTimeMillis() < deadline && !stop.getAsBoolean()) {
-                sleep(2000);
+                page.waitForTimeout(2000);
+                if (page.isClosed()) {
+                    throw new TargetClosedError();
+                }
                 if (hasLoginCookie()) {
                     listener.onProgress("扫码登录成功");
                     return LoginResult.LOGGED_IN;
@@ -584,6 +588,8 @@ public class BossDriver {
                     .setTimeout(NAV_TIMEOUT_MS)
                     .setWaitUntil(WaitUntilState.DOMCONTENTLOADED));
             sleep(1500);
+        } catch (TargetClosedError e) {
+            throw e;
         } catch (Exception e) {
             // SPA 的 DOMCONTENTLOADED 也可能抛超时（长连接阻塞），页面往往已经可用
             log.warn("导航 {} 超时或异常（{}），按已加载页面继续", url, e.getMessage());

@@ -61,5 +61,6 @@ browser:
   headless: false
   slow-mo-ms: 50
   channel: chrome
+  # 无头模式使用以下视口尺寸。有界面时视口随窗口变化。
   width: 1440
   height: 900

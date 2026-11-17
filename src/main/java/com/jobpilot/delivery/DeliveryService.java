@@ -5,6 +5,7 @@ import com.jobpilot.ai.GreetingService;
 import com.jobpilot.browser.BrowserManager;
 import com.jobpilot.license.LicenseService;
 import com.microsoft.playwright.Page;
+import com.microsoft.playwright.impl.TargetClosedError;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 
@@ -201,6 +202,12 @@ public abstract class DeliveryService<C extends JobCard> {
                     // 再也起不来了（start() 会一直返回"已有任务在运行"）
                     coordinator.release(platform());
                 }
+            }, () -> {
+                try {
+                    finish("浏览器启动失败。请确认 Chrome 能正常打开，然后重新点击「开始投递」。");
+                } finally {
+                    coordinator.release(platform());
+                }
             });
         } catch (Exception e) {
             coordinator.release(platform());
@@ -313,6 +320,9 @@ public abstract class DeliveryService<C extends JobCard> {
                         + status.getPreviewed() + " 个，过滤 " + status.getFiltered()
                         + " 个，失败 " + status.getFailed() + " 个");
             }
+        } catch (TargetClosedError e) {
+            log.info("投递任务因浏览器窗口或标签页关闭而结束", e);
+            finish("浏览器窗口或标签页已关闭。请重新点击「开始投递」。");
         } catch (Exception e) {
             log.error("投递任务异常终止", e);
             finish("任务异常终止: " + e.getMessage());

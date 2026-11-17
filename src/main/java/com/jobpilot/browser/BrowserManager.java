@@ -2,7 +2,9 @@ package com.jobpilot.browser;
 
 import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.BrowserType;
+import com.microsoft.playwright.Page;
 import com.microsoft.playwright.Playwright;
+import com.microsoft.playwright.impl.TargetClosedError;
 import jakarta.annotation.PreDestroy;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
@@ -42,9 +44,9 @@ public class BrowserManager {
     });
 
     private Playwright playwright;
-    private BrowserContext context;
+    private volatile BrowserContext context;
     /** 上一次 submit 超时后上下文可能已损坏，置位后下次启动前重建 */
-    private boolean contextPoisoned;
+    private volatile boolean contextPoisoned;
 
     public BrowserManager(BrowserProperties properties) {
         this.properties = properties;
@@ -60,14 +62,17 @@ public class BrowserManager {
         private int slowMoMs = 50;
         /** 浏览器通道：chrome 用本机 Chrome（风控最低）；留空用 playwright 自带 chromium */
         private String channel = "chrome";
+        /** 无头模式的视口尺寸。 */
         private int width = 1440;
         private int height = 900;
     }
 
     /** 在 dispatcher 线程里执行任务；超时后销毁上下文（Playwright 调用无法安全中断）。 */
     public <T> T submit(Callable<T> task, Duration timeout) {
-        ensureStarted();
-        Future<T> future = dispatcher.submit(task);
+        Future<T> future = dispatcher.submit(() -> {
+            ensureStarted();
+            return task.call();
+        });
         try {
             return future.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
         } catch (TimeoutException e) {
@@ -87,7 +92,8 @@ public class BrowserManager {
     }
 
     public boolean isContextAlive() {
-        return context != null && !contextPoisoned;
+        BrowserContext current = context;
+        return current != null && !current.isClosed() && !contextPoisoned;
     }
 
     /**
@@ -95,11 +101,16 @@ public class BrowserManager {
      * 不能占着调用线程；任务体仍在 dispatcher 线程上顺序执行，浏览器安全。
      */
     public Future<?> submitAsync(Runnable task) {
+        return submitAsync(task, () -> {});
+    }
+
+    public Future<?> submitAsync(Runnable task, Runnable onStartFailure) {
         return dispatcher.submit(() -> {
             try {
                 ensureStarted();
-            } catch (Exception e) {
+            } catch (RuntimeException e) {
                 log.error("启动浏览器失败，任务未执行", e);
+                onStartFailure.run();
                 throw e;
             }
             task.run();
@@ -115,36 +126,30 @@ public class BrowserManager {
         try {
             dispatcher.submit(() -> {
                 closeContextQuietly();
+                contextPoisoned = false;
                 return null;
             }).get(30, TimeUnit.SECONDS);
         } catch (Exception e) {
             log.warn("重置浏览器上下文异常: {}", e.getMessage());
         }
-        contextPoisoned = false;
     }
 
     @PreDestroy
     public void shutdown() {
-        if (context != null) {
-            try {
-                dispatcher.submit(() -> {
-                    closeContextQuietly();
-                    return null;
-                }).get(15, TimeUnit.SECONDS);
-            } catch (Exception e) {
-                log.warn("关闭浏览器上下文异常: {}", e.getMessage());
-            }
+        try {
+            dispatcher.submit(() -> {
+                closeContextQuietly();
+                if (playwright != null) {
+                    playwright.close();
+                    playwright = null;
+                }
+                return null;
+            }).get(15, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            log.warn("关闭浏览器异常: {}", e.getMessage());
+        } finally {
+            dispatcher.shutdownNow();
         }
-        dispatcher.shutdownNow();
-        if (playwright != null) {
-            try {
-                playwright.close();
-            } catch (Exception e) {
-                log.warn("关闭 Playwright 异常: {}", e.getMessage());
-            }
-            playwright = null;
-        }
-        context = null;
     }
 
     private void ensureStarted() {
@@ -153,11 +158,22 @@ public class BrowserManager {
             playwright = Playwright.create();
             log.info("Playwright 已启动");
         }
-        if (context == null || contextPoisoned) {
-            context = launchContext();
-            contextPoisoned = false;
-            log.info("浏览器上下文已就绪");
+        if (isContextAlive()) {
+            try {
+                List<Page> pages = context.pages();
+                if (!pages.isEmpty()) {
+                    // Java 在调用协议时才处理关闭事件，空闲时关窗后缓存状态可能仍显示存活。
+                    context.newCDPSession(pages.getFirst()).detach();
+                    return;
+                }
+            } catch (TargetClosedError e) {
+                log.info("浏览器已关闭，重新打开");
+            }
         }
+        closeContextQuietly();
+        context = launchContext();
+        contextPoisoned = false;
+        log.info("浏览器上下文已就绪");
     }
 
     /**
@@ -183,7 +199,6 @@ public class BrowserManager {
                 new BrowserType.LaunchPersistentContextOptions()
                         .setHeadless(properties.isHeadless())
                         .setSlowMo((double) properties.getSlowMoMs())
-                        .setViewportSize(properties.getWidth(), properties.getHeight())
                         .setLocale("zh-CN")
                         .setTimezoneId("Asia/Shanghai")
                         .setArgs(List.of(
@@ -192,6 +207,12 @@ public class BrowserManager {
                                 "--no-default-browser-check",
                                 "--disable-session-crashed-bubble"))
                         .setIgnoreDefaultArgs(List.of("--enable-automation"));
+        if (properties.isHeadless()) {
+            options.setViewportSize(properties.getWidth(), properties.getHeight());
+        } else {
+            // 扫码登录页按网页视口居中，视口超过实际窗口时登录框会被裁切。
+            options.setViewportSize(null);
+        }
         // 上一次崩溃留下的锁文件会让 Chromium 起来就死（表现为 newPage 抛
         // "Failed to open a new tab"）。Chrome 正在跑时锁会被重建，所以这里
         // 清理是安全的
@@ -214,17 +235,9 @@ public class BrowserManager {
             }
             log.warn("用 channel={} 启动浏览器失败，退回 playwright 自带 chromium: {}",
                     properties.getChannel(), e.getMessage());
-            BrowserType.LaunchPersistentContextOptions fallback =
-                    new BrowserType.LaunchPersistentContextOptions()
-                            .setHeadless(properties.isHeadless())
-                            .setSlowMo((double) properties.getSlowMoMs())
-                            .setViewportSize(properties.getWidth(), properties.getHeight())
-                            .setLocale("zh-CN")
-                            .setTimezoneId("Asia/Shanghai")
-                            .setArgs(options.args)
-                            .setIgnoreDefaultArgs(List.of("--enable-automation"));
+            options.setChannel((String) null);
             try {
-                ctx = playwright.chromium().launchPersistentContext(userDataDir, fallback);
+                ctx = playwright.chromium().launchPersistentContext(userDataDir, options);
             } catch (Exception e2) {
                 // 数据目录可能被上一次崩溃写坏（版本不匹配的 profile、残留锁），
                 // 改名留档换新目录再试最后一次。用户重新登录一次就能恢复
@@ -234,7 +247,7 @@ public class BrowserManager {
                     java.nio.file.Files.move(userDataDir, backup);
                     log.warn("浏览器数据目录疑似损坏，已挪到 {}，用全新目录重试", backup);
                 } catch (Exception ignore) { }
-                ctx = playwright.chromium().launchPersistentContext(userDataDir, fallback);
+                ctx = playwright.chromium().launchPersistentContext(userDataDir, options);
             }
         }
         // 保留持久化上下文启动时的初始标签页。关闭最后一个标签页可能让有界面的
