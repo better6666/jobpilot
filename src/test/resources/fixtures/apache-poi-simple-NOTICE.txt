@@ -1,0 +1,4 @@
+DOC parser test fixture: simple.doc from Apache POI.
+Source: https://github.com/apache/poi/blob/trunk/test-data/document/simple.doc
+Licensed under Apache License 2.0; see apache-poi-LICENSE.txt.
+The fixture is used for tests only and is excluded from runtime packages.

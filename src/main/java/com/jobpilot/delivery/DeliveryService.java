@@ -411,7 +411,7 @@ public abstract class DeliveryService<C extends JobCard> {
 
             switch (outcome.status()) {
                 case DELIVERED -> {
-                    record(card, keyword, "已投递", null, score, outcome.greeting(), existing);
+                    record(card, keyword, "已投递", outcome.failReason(), score, outcome.greeting(), existing);
                     status.setDelivered(status.getDelivered() + 1);
                     consecutiveFailures = 0;
                     if (entitlementService != null) {

@@ -502,7 +502,7 @@ public class AiService {
             }
             return choices.get(0).path("message").path("content").asText(null);
         } catch (Exception e) {
-            log.debug("解析接口响应失败: {}", e.getMessage());
+            log.debug("解析接口响应失败: {}", e.getClass().getSimpleName());
             return null;
         }
     }

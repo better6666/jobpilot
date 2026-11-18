@@ -82,9 +82,12 @@ jobs:
           JS
           rm -rf build/bundled-browser/.links
 
+      - name: 简历聊天附件实跑（测试页面，无真实联系人）
+        run: ./gradlew resumeSmoke
+
       - name: 裁剪运行时（模块清单经实跑验证，勿用 jdeps 推断）
         run: |
-          jlink --add-modules java.base,java.desktop,java.instrument,java.logging,java.management,java.naming,java.net.http,java.security.jgss,java.security.sasl,java.sql,java.transaction.xa,java.xml,jdk.crypto.ec,jdk.unsupported \
+          jlink --add-modules java.base,java.desktop,java.instrument,java.logging,java.management,java.naming,java.net.http,java.security.jgss,java.security.sasl,java.sql,java.transaction.xa,java.xml,jdk.crypto.ec,jdk.unsupported,jdk.charsets \
             --strip-debug --no-header-files --no-man-pages --compress=zip-6 \
             --output build/runtime
 
@@ -102,7 +105,7 @@ jobs:
           # dmg 由这个 app-image 转出来，图标跟着走，不用再传
           ICON=packaging/icon/JobPilot.ico
           [ "$RUNNER_OS" = "macOS" ] && ICON=packaging/icon/JobPilot.icns
-          jpackage --type app-image --name JobPilot --app-version 1.0.23 \
+          jpackage --type app-image --name JobPilot --app-version 1.0.24 \
             --input build/stage --main-jar jobpilot-0.1.0.jar \
             --runtime-image build/runtime --dest build/dist \
             --icon "$ICON" \
@@ -184,6 +187,21 @@ jobs:
           # patchright 的 cli.js 必须是真身：npm 包里的 cli.js 只有 12 字节的占位
           CLI="$(dirname "$NODE")/package/cli.js"
           [ "$(wc -c < "$CLI")" -gt 100 ] || { echo "::error::cli.js 疑似占位文件: $CLI"; exit 1; }
+          node <<'JS'
+          const fs = require('node:fs');
+          (async () => {
+            for (const [file, text] of [['resume-gb18030.txt', '职业目标'], ['resume-synthetic.docx', '候选人'], ['apache-poi-simple.doc', 'simple']]) {
+              const content = fs.readFileSync(process.env.GITHUB_WORKSPACE + '/src/test/resources/fixtures/' + file);
+              const response = await fetch('http://127.0.0.1:18080/api/resumes/import?filename=' + encodeURIComponent(file), {
+                method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: content
+              });
+              const result = await response.json();
+              if (!result.success || !result.data.text.toLowerCase().includes(text.toLowerCase())) throw new Error('运行时简历解析失败：' + file);
+              console.log('打包运行时简历解析通过：' + file);
+              await fetch('http://127.0.0.1:18080/api/resumes/' + result.data.id, { method: 'DELETE' });
+            }
+          })().catch(error => { console.error(error); process.exitCode = 1; });
+          JS
           kill $APP_PID
 
       # dmg 只能从 app-image 转：直接 --type dmg 时 jpackage 会把中间 .app 删掉，
@@ -191,7 +209,7 @@ jobs:
       - name: macOS 转 dmg
         if: runner.os == 'macOS'
         run: |
-          jpackage --type dmg --name JobPilot --app-version 1.0.23 \
+          jpackage --type dmg --name JobPilot --app-version 1.0.24 \
             --app-image build/dist/JobPilot.app --dest build/dist
           rm -rf build/dist/JobPilot.app
 
@@ -199,6 +217,17 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: Compress-Archive -Path build/dist/JobPilot -DestinationPath JobPilot-windows.zip
+
+      - name: 获取正式 1.0.23 客户端（验证旧版接收更新）
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p build/previous
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            gh release download v1.0.23 --pattern 'JobPilot-1.0.23.dmg' --dir build/previous
+          else
+            gh release download v1.0.23 --pattern 'JobPilot-windows.zip' --dir build/previous
+          fi
 
       - name: 验证一键升级与失败回滚
         run: ./gradlew updaterSmoke

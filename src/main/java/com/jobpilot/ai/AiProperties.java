@@ -37,7 +37,7 @@ public class AiProperties {
         return normalizeMode(configService.getJson(CONFIG_KEY, AiConfig.class, new AiConfig()));
     }
 
-    public void save(AiConfig incoming) {
+    public synchronized void save(AiConfig incoming) {
         AiConfig current = get();
         if (incoming == null) {
             return;
@@ -51,6 +51,12 @@ public class AiProperties {
         log.info("AI 配置已保存：enabled={} mode={} baseUrl={} model={} persona={}字",
                 incoming.isEnabled(), incoming.getMode(), incoming.getBaseUrl(), incoming.getModel(),
                 incoming.getPersona() == null ? 0 : incoming.getPersona().length());
+    }
+
+    public synchronized void updatePersona(String persona) {
+        AiConfig current = get();
+        current.setPersona(persona);
+        configService.setJson(CONFIG_KEY, current);
     }
 
     /**

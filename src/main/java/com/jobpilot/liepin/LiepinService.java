@@ -75,7 +75,7 @@ public class LiepinService extends DeliveryService<LiepinJobCard> {
                 && LiepinSearchUrl.resolveCityCode(options, city) == null) {
             return "城市「" + city + "」无法识别，请填城市名（如：杭州）或猎聘城市码";
         }
-        return null;
+        return driver.validateResume(config);
     }
 
     @Override

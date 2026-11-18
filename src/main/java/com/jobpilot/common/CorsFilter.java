@@ -14,9 +14,7 @@ import org.springframework.stereotype.Component;
 import java.io.IOException;
 
 /**
- * 跨域放行。激活页可能托管在 CF 上（用户从网页激活本机后端），浏览器会拦跨域请求；
- * 门禁返回的 402 也要带头，否则前端只看到 opaque error 读不到 message。
- * 本服务监听在本机 9527，放开 Origin 没有实际风险。
+ * 本机界面同源访问；下载站的激活页只允许访问授权接口，避免外部页面读取本地简历和 AI 配置。
  */
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE)
@@ -26,10 +24,28 @@ public class CorsFilter implements Filter {
     public void doFilter(ServletRequest req, ServletResponse res, FilterChain chain)
             throws IOException, ServletException {
         HttpServletResponse response = (HttpServletResponse) res;
-        response.setHeader("Access-Control-Allow-Origin", "*");
-        response.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+        HttpServletRequest request = (HttpServletRequest) req;
+        if (request.getRequestURI().startsWith("/api/")) response.setHeader("Cache-Control", "no-store");
+        String host = request.getServerName();
+        if (!java.util.Set.of("localhost", "127.0.0.1", "::1", "[::1]").contains(host)) {
+            response.sendError(HttpServletResponse.SC_FORBIDDEN);
+            return;
+        }
+        String origin = request.getHeader("Origin");
+        if (origin != null) {
+            String own = request.getScheme() + "://" + host + ":" + request.getServerPort();
+            boolean same = origin.equals(own) || request.getServerPort() == 80 && origin.equals("http://" + host);
+            boolean activation = origin.equals("https://getjobs.dpdns.org") && request.getRequestURI().startsWith("/api/license/");
+            if (!same && !activation) {
+                response.sendError(HttpServletResponse.SC_FORBIDDEN);
+                return;
+            }
+            response.setHeader("Access-Control-Allow-Origin", origin);
+            response.setHeader("Vary", "Origin");
+        }
+        response.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
         response.setHeader("Access-Control-Allow-Headers", "Content-Type");
-        if ("OPTIONS".equalsIgnoreCase(((HttpServletRequest) req).getMethod())) {
+        if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
             response.setStatus(HttpServletResponse.SC_OK);
             return;
         }

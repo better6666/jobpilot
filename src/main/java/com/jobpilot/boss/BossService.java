@@ -74,7 +74,7 @@ public class BossService extends DeliveryService<BossJobCard> {
                 && BossSearchUrl.resolveCityCode(options, city) == null) {
             return "城市「" + city + "」无法识别，请填城市名（如：上海）或城市码";
         }
-        return null;
+        return driver.validateResume(config);
     }
 
     /** Boss 是把话术亲手打进聊天框的，空着就等于给 HR 发空白消息 */
@@ -135,8 +135,8 @@ public class BossService extends DeliveryService<BossJobCard> {
         if (greeting.note() != null) {
             appendLog("话术兜底 | " + brief(card) + " | " + greeting.note());
         }
-        return driver.deliver(listPage, card, greeting.text(), bossConfig.isDryRun(),
-                listener, stop);
+        return bossConfig.isSendResume() ? driver.deliverWithResume(listPage, card, greeting.text(), bossConfig, listener, stop)
+                : driver.deliver(listPage, card, greeting.text(), bossConfig.isDryRun(), listener, stop);
     }
 
     @Override

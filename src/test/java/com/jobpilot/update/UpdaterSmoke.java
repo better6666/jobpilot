@@ -27,7 +27,7 @@ public class UpdaterSmoke {
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final HttpClient HTTP = HttpClient.newHttpClient();
     private static final boolean MAC = System.getProperty("os.name").toLowerCase().contains("mac");
-    private static final String VERSION = "1.0.23";
+    private static final String VERSION = "1.0.24";
     private static Path temporary;
     private static Path isolatedHome;
     private static Path target;
@@ -48,7 +48,7 @@ public class UpdaterSmoke {
         Map<Path, UpdateManifest.Asset> assets = Map.of(badPackage, asset(origin, badPackage), goodPackage, asset(origin, goodPackage));
         fixture.createContext("/updates.json", exchange -> {
             byte[] body = JSON.writeValueAsBytes(new UpdateManifest(VERSION, "2026-11-18",
-                    List.of("QA 企业规模筛选", "QA 一键更新与重启"),
+                    List.of("QA 简历导入与 AI 画像", "QA 自选简历附件"),
                     Map.of(MAC ? "macos-arm64" : "windows-x64", assets.get(payload.get()))));
             exchange.getResponseHeaders().set("Content-Type", "application/json");
             exchange.sendResponseHeaders(200, body.length);
@@ -63,14 +63,14 @@ public class UpdaterSmoke {
         try (ServerSocket port = new ServerSocket(0)) { appPort = port.getLocalPort(); }
         try {
             Process original = startInstalled(origin);
-            waitVersion("1.0.22");
+            waitVersion("1.0.23");
             JsonNode config = get("/api/boss/config");
             ((com.fasterxml.jackson.databind.node.ObjectNode) config).putArray("keywords").add("updater-test-data");
             request("PUT", "/api/boss/config", config);
             waitAvailable();
             request("POST", "/api/updates/install", Map.of("version", VERSION));
             waitResult("FAILED");
-            waitVersion("1.0.22");
+            waitVersion("1.0.23");
             if (original.isAlive()) throw new AssertionError("未实际进入替换和回滚阶段");
             assertSavedData();
             System.out.println("PASS: failed startup restored the previous app and preserved user data");
@@ -91,9 +91,9 @@ public class UpdaterSmoke {
                 stopInstalled();
                 Path configFile = target.resolve("app/JobPilot.cfg");
                 Files.writeString(configFile, Files.readString(configFile)
-                        .replace("jpackage.app-version=" + VERSION, "jpackage.app-version=1.0.22"));
+                        .replace("jpackage.app-version=" + VERSION, "jpackage.app-version=1.0.23"));
                 startInstalled(origin, true);
-                waitVersion("1.0.22");
+                waitVersion("1.0.23");
                 waitAvailable();
                 Files.delete(dataDir().resolve("updates/result.json"));
                 request("POST", "/api/updates/install", Map.of("version", VERSION));
@@ -170,25 +170,24 @@ public class UpdaterSmoke {
     private static void prepareInstalledCopy(Path repo, Path goodPackage) throws Exception {
         Path installed = Files.createDirectories(temporary.resolve("installed"));
         target = installed.resolve(MAC ? "JobPilot.app" : "JobPilot");
+        Path previous = repo.resolve("build/previous").resolve(MAC ? "JobPilot-1.0.23.dmg" : "JobPilot-windows.zip");
+        if (!Files.isRegularFile(previous)) throw new IllegalStateException("请先下载正式 v1.0.23 安装包至 build/previous");
         if (MAC) {
             Path mount = Files.createDirectories(temporary.resolve("mount"));
-            run("hdiutil", "attach", "-readonly", "-nobrowse", "-mountpoint", mount.toString(), goodPackage.toString());
+            run("hdiutil", "attach", "-readonly", "-nobrowse", "-mountpoint", mount.toString(), previous.toString());
             try { run("ditto", mount.resolve("JobPilot.app").toString(), target.toString()); }
             finally { run("hdiutil", "detach", mount.toString()); }
-            run("/usr/libexec/PlistBuddy", "-c", "Set :CFBundleShortVersionString 1.0.22", target.resolve("Contents/Info.plist").toString());
         } else {
-            Path source = repo.resolve("build/dist/JobPilot");
-            try (var walk = Files.walk(source)) {
-                for (Path file : walk.toList()) {
-                    Path copy = target.resolve(source.relativize(file));
-                    if (Files.isDirectory(file)) Files.createDirectories(copy);
-                    else Files.copy(file, copy);
+            try (var zip = new java.util.zip.ZipInputStream(Files.newInputStream(previous))) {
+                for (var entry = zip.getNextEntry(); entry != null; entry = zip.getNextEntry()) {
+                    Path destination = installed.resolve(entry.getName()).normalize();
+                    if (!destination.startsWith(installed)) throw new IllegalStateException("安装包路径异常");
+                    if (entry.isDirectory()) Files.createDirectories(destination);
+                    else { Files.createDirectories(destination.getParent()); Files.copy(zip, destination); }
                 }
             }
         }
-        Path config = target.resolve(MAC ? "Contents/app/JobPilot.cfg" : "app/JobPilot.cfg");
-        Files.writeString(config, Files.readString(config).replace("jpackage.app-version=" + VERSION, "jpackage.app-version=1.0.22"));
-        if (MAC) run("codesign", "--force", "--sign", "-", target.toString());
+        System.out.println("Using the real published v1.0.23 client as the update source");
     }
 
     private static Path executable(Path app) {

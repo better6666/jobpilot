@@ -94,7 +94,7 @@ public class UpdateService {
             throw new IllegalStateException("当前运行方式不支持自动安装，请使用正式安装包");
         }
         if (coordinator.acquire("软件更新") != null) {
-            throw new IllegalStateException("请先停止投递任务，再更新并重启软件");
+            throw new IllegalStateException("请先等待当前任务完成，或停止投递后，再更新并重启软件");
         }
         state = "DOWNLOADING";
         progress = 0;

@@ -122,6 +122,28 @@ class AiPropertiesTest {
         verify(configService, org.mockito.Mockito.never()).setJson(anyString(), any());
     }
 
+    @Test
+    void 应用简历画像只更新背景并保留接口选项() {
+        AiConfig existing = savedWithKey("qa-existing-key");
+        existing.setEnabled(false);
+        existing.setMode(AiProperties.MODE_CUSTOM);
+        existing.setBaseUrl("https://provider.example/v1");
+        existing.setModel("qa-model");
+        existing.setTemperature(0.6);
+        stored(existing);
+        properties.updatePersona("Java 后端项目经验");
+        ArgumentCaptor<AiConfig> captor = ArgumentCaptor.forClass(AiConfig.class);
+        verify(configService).setJson(eq("ai"), captor.capture());
+        AiConfig saved = captor.getValue();
+        assertEquals("Java 后端项目经验", saved.getPersona());
+        assertEquals("qa-existing-key", saved.getApiKey());
+        assertEquals("https://provider.example/v1", saved.getBaseUrl());
+        assertEquals("qa-model", saved.getModel());
+        assertEquals(AiProperties.MODE_CUSTOM, saved.getMode());
+        assertFalse(saved.isEnabled());
+        assertEquals(0.6, saved.getTemperature());
+    }
+
     private static AiConfig savedWithKey(String key) {
         AiConfig existing = new AiConfig();
         existing.setApiKey(key);

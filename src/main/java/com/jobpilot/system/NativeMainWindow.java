@@ -106,6 +106,10 @@ public class NativeMainWindow {
     private final JSpinner waitSeconds = spinner(10, 1, 120);
     private final JSpinner loginTimeout = spinner(5, 1, 30);
     private final JTextArea sayHi = new JTextArea(3, 24);
+    private final JCheckBox sendResume = new JCheckBox("聊天中自动发送所选简历（默认关闭）");
+    private final JCheckBox liepinResumeSync = new JCheckBox("允许猎聘上传附件时解析并完善在线简历");
+    private final JComboBox<Choice> resumeSelection = new JComboBox<>();
+    private ResumePanel resumePanel;
     private final JTextArea scoreRules = new JTextArea(8, 24);
     private final JCheckBox dryRun = new JCheckBox("预演模式：不实际投递或发送消息", true);
     private final JCheckBox inactiveHr = new JCheckBox("过滤不活跃 HR");
@@ -196,6 +200,8 @@ public class NativeMainWindow {
         JPanel pages = new JPanel(new CardLayout());
         pages.add(deliveryPanel(), "delivery");
         pages.add(aiPanel(), "ai");
+        resumePanel = new ResumePanel(base, this::api, persona -> aiPersona.setText(persona), this::refreshResumeChoices);
+        pages.add(page("简历与画像", "管理本地简历，用 AI 梳理职业方向与优化建议", resumePanel), "resumes");
         pages.add(licensePanel(), "license");
         pages.add(plansPanel(), "plans");
         frame.getContentPane().setBackground(CANVAS);
@@ -414,6 +420,12 @@ public class NativeMainWindow {
         updateGreetingHint();
         fields.add(greetingHint);
         fields.add(field("固定话术 / AI 失败时备用（一行一条；可用 {公司} {岗位}）", scroll(sayHi)));
+        sendResume.setOpaque(false);
+        fields.add(sendResume);
+        liepinResumeSync.setOpaque(false);
+        fields.add(liepinResumeSync);
+        fields.add(field("简历附件 · 在“简历与画像”中导入", resumeSelection));
+        fields.add(label("<html>仅用于本次投递打开的 BOSS / 猎聘聊天；发送受平台权限限制。<br>预演不上传，需对方同意的会话会单独提示。</html>", 12, MUTED, Font.PLAIN));
         JToggleButton advanced = new JToggleButton("▸  高级筛选规则");
         advanced.setHorizontalAlignment(SwingConstants.LEFT);
         advanced.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 12));
@@ -620,10 +632,12 @@ public class NativeMainWindow {
             JsonNode options = api("GET", path(selected, "options"), null);
             JsonNode config = api("GET", path(selected, "config"), null);
             JsonNode ai = api("GET", "/api/ai/config", null);
-            return new JsonNode[]{options, config, ai};
+            JsonNode resumes = api("GET", "/api/resumes", null);
+            return new JsonNode[]{options, config, ai, resumes};
         }, pair -> {
             if (platform.getSelectedItem() != selected) return;
             fillConfig(selected, pair[0], pair[1], pair[2]);
+            fillResumes(pair[3], pair[1].path("resumeId").asText(""));
             refreshStatus();
             refreshDeliveries();
         });
@@ -665,6 +679,11 @@ public class NativeMainWindow {
         selectChoice(greetingMode, useAi ? "ai" : "fixed");
         greetingMode.setEnabled(usesGreeting);
         sayHi.setEnabled(usesGreeting);
+        sendResume.setSelected(config.path("sendResume").asBoolean(false));
+        sendResume.setEnabled(usesGreeting);
+        liepinResumeSync.setVisible("liepin".equals(selected.key()));
+        liepinResumeSync.setSelected(config.path("liepinResumeSync").asBoolean(false));
+        resumeSelection.setEnabled(usesGreeting);
         updateGreetingHint();
         inactiveHr.setSelected(config.path("filterInactiveHr").asBoolean(false));
         inactiveHr.setVisible("boss".equals(selected.key()));
@@ -685,6 +704,25 @@ public class NativeMainWindow {
         greetingHint.setText("ai".equals(choiceValue(greetingMode))
                 ? "<html>在 AI 话术页填写求职背景，生成失败时使用备用话术。</html>"
                 : "<html>按填写内容发送，多行轮换；仅替换 {公司} 和 {岗位}。</html>");
+    }
+
+    private void refreshResumeChoices() {
+        String selected = choiceValue(resumeSelection);
+        asyncQuiet(() -> api("GET", "/api/resumes", null), catalog -> fillResumes(catalog, selected));
+    }
+
+    private void fillResumes(JsonNode catalog, String selected) {
+        resumeSelection.removeAllItems();
+        resumeSelection.addItem(new Choice("", "请选择要发送的简历"));
+        boolean found = selected == null || selected.isBlank();
+        for (JsonNode item : catalog.path("items")) {
+            if ("txt".equals(item.path("extension").asText())) continue;
+            String id = item.path("id").asText();
+            resumeSelection.addItem(new Choice(id, item.path("name").asText()));
+            if (id.equals(selected)) found = true;
+        }
+        if (!found) resumeSelection.addItem(new Choice(selected, "所选简历已移除，请重新选择"));
+        selectChoice(resumeSelection, selected == null ? "" : selected);
     }
 
     private void saveConfig() {
@@ -723,6 +761,13 @@ public class NativeMainWindow {
         if ("boss".equals(selected.key()) || "liepin".equals(selected.key())) {
             body.put("sayHi", sayHi.getText());
             body.put("aiGreeting", "ai".equals(choiceValue(greetingMode)));
+            if (sendResume.isSelected() && choiceValue(resumeSelection).isBlank()) {
+                message("请先在“简历与画像”中导入，并选择要发送的简历");
+                return null;
+            }
+            body.put("sendResume", sendResume.isSelected());
+            body.put("liepinResumeSync", "liepin".equals(selected.key()) && liepinResumeSync.isSelected());
+            body.put("resumeId", choiceValue(resumeSelection));
         }
         if ("boss".equals(selected.key())) {
             body.put("filterInactiveHr", inactiveHr.isSelected());
@@ -1174,7 +1219,7 @@ public class NativeMainWindow {
         JLabel menu = label("工作区", 11, new Color(125, 143, 174), Font.BOLD);
         menu.setBorder(new EmptyBorder(0, 11, 10, 0));
         top.add(menu);
-        String[][] items = {{"▦  投递工作台", "delivery"}, {"✦  AI 话术", "ai"},
+        String[][] items = {{"▦  投递工作台", "delivery"}, {"▤  简历与画像", "resumes"}, {"✦  AI 话术", "ai"},
                 {"▣  卡密管理", "license"}, {"◇  会员套餐", "plans"}};
         List<JButton> buttons = new ArrayList<>();
         for (String[] item : items) {
@@ -1195,6 +1240,8 @@ public class NativeMainWindow {
                     other.setForeground(selected ? WHITE : new Color(186, 197, 216));
                 });
                 if ("ai".equals(item[1])) loadAi();
+                if ("resumes".equals(item[1])) resumePanel.refresh();
+                if ("delivery".equals(item[1])) refreshResumeChoices();
                 if ("license".equals(item[1])) loadLicense();
                 if ("plans".equals(item[1])) loadPlans();
             });

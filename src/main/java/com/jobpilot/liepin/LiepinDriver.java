@@ -6,6 +6,8 @@ import com.jobpilot.delivery.DeliveryOutcome;
 import com.jobpilot.delivery.DeliveryStatus;
 import com.jobpilot.delivery.LoginResult;
 import com.jobpilot.delivery.ProgressListener;
+import com.jobpilot.delivery.PlatformConfig;
+import com.jobpilot.resume.ResumeAttachmentService;
 import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.Response;
@@ -59,9 +61,20 @@ import java.util.function.BooleanSupplier;
 public class LiepinDriver {
 
     private final BrowserManager browserManager;
+    private final ResumeAttachmentService resumes;
 
     public LiepinDriver(BrowserManager browserManager) {
+        this(browserManager, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public LiepinDriver(BrowserManager browserManager, ResumeAttachmentService resumes) {
         this.browserManager = browserManager;
+        this.resumes = resumes;
+    }
+
+    public String validateResume(PlatformConfig config) {
+        return !config.isSendResume() ? null : resumes == null ? "当前运行未启用简历附件模块" : resumes.validate(config);
     }
 
     private static final String DOMAIN = "https://www.liepin.com";
@@ -479,9 +492,11 @@ public class LiepinDriver {
                     listener.onProgress("追问没发出去 | " + target);
                 }
             }
+            String note = config.isSendResume() ? resumes.send("liepin", listPage, config, card, stop) : null;
+            if (note != null) listener.onProgress(note + " | " + target);
             closeChatPanels(listPage, listener);
             listener.onProgress("已打招呼 | " + target);
-            return DeliveryOutcome.delivered(sent);
+            return new DeliveryOutcome(DeliveryStatus.DELIVERED, note, sent);
         } catch (Exception e) {
             log.warn("投递过程异常 | {}: {}", target, e.getMessage());
             return DeliveryOutcome.failed(e.getMessage());

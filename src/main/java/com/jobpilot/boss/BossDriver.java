@@ -6,6 +6,8 @@ import com.jobpilot.delivery.DeliveryOutcome;
 import com.jobpilot.delivery.DeliveryStatus;
 import com.jobpilot.delivery.LoginResult;
 import com.jobpilot.delivery.ProgressListener;
+import com.jobpilot.delivery.PlatformConfig;
+import com.jobpilot.resume.ResumeAttachmentService;
 import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.Response;
@@ -46,9 +48,20 @@ import java.util.function.BooleanSupplier;
 public class BossDriver {
 
     private final BrowserManager browserManager;
+    private final ResumeAttachmentService resumes;
 
     public BossDriver(BrowserManager browserManager) {
+        this(browserManager, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public BossDriver(BrowserManager browserManager, ResumeAttachmentService resumes) {
         this.browserManager = browserManager;
+        this.resumes = resumes;
+    }
+
+    public String validateResume(PlatformConfig config) {
+        return !config.isSendResume() ? null : resumes == null ? "当前运行未启用简历附件模块" : resumes.validate(config);
     }
 
     private static final String BOSS_DOMAIN = "https://www.zhipin.com";
@@ -285,6 +298,17 @@ public class BossDriver {
      */
     public DeliveryOutcome deliver(Page listPage, BossJobCard card, String greeting,
                                    boolean dryRun, ProgressListener listener, BooleanSupplier stop) {
+        return deliverInternal(listPage, card, greeting, dryRun, listener, stop, null);
+    }
+
+    public DeliveryOutcome deliverWithResume(Page listPage, BossJobCard card, String greeting,
+                                             PlatformConfig config, ProgressListener listener, BooleanSupplier stop) {
+        return deliverInternal(listPage, card, greeting, config.isDryRun(), listener, stop, config);
+    }
+
+    private DeliveryOutcome deliverInternal(Page listPage, BossJobCard card, String greeting,
+                                            boolean dryRun, ProgressListener listener, BooleanSupplier stop,
+                                            PlatformConfig resumeConfig) {
         String target = (card.getBrandName() != null ? card.getBrandName() : "?")
                 + " | " + (card.getJobName() != null ? card.getJobName() : "?");
         if (dryRun) {
@@ -295,6 +319,7 @@ public class BossDriver {
             return new DeliveryOutcome(DeliveryStatus.FAILED, "已停止", greeting);
         }
         Page detailPage = null;
+        Page ownedChatPage = null;
         try {
             // 1. 从列表页详情面板拿"查看更多"链接（Boss 的立即沟通按钮只在完整详情页有）
             Locator moreBtn = listPage.locator("a.more-job-btn");
@@ -348,6 +373,7 @@ public class BossDriver {
             if (!found) {
                 return new DeliveryOutcome(DeliveryStatus.FAILED, "未找到沟通按钮", greeting);
             }
+            java.util.Set<Page> beforeChat = new java.util.HashSet<>(browserManager.context().pages());
             chatBtn.first().click(new Locator.ClickOptions().setTimeout(ACTION_TIMEOUT_MS));
             sleep(1500);
 
@@ -364,10 +390,11 @@ public class BossDriver {
                 }
                 // 立即沟通可能把聊天开到了新标签页
                 for (Page candidate : browserManager.context().pages()) {
-                    if (candidate != detailPage && candidate != listPage) {
+                    if (candidate != detailPage && candidate != listPage && !beforeChat.contains(candidate)) {
                         Locator candidateInput = findChatInput(candidate);
                         if (candidateInput != null) {
                             chatPage = candidate;
+                            ownedChatPage = candidate;
                             input = candidateInput;
                             break;
                         }
@@ -431,11 +458,15 @@ public class BossDriver {
                 return new DeliveryOutcome(DeliveryStatus.FAILED, "消息未确认发出（输入框仍有内容）", greeting);
             }
             listener.onProgress("已发送打招呼语 | " + target);
-            return new DeliveryOutcome(DeliveryStatus.DELIVERED, null, greeting);
+            String note = resumeConfig != null && resumeConfig.isSendResume()
+                    ? resumes.send("boss", chatPage, resumeConfig, card, stop) : null;
+            if (note != null) listener.onProgress(note + " | " + target);
+            return new DeliveryOutcome(DeliveryStatus.DELIVERED, note, greeting);
         } catch (Exception e) {
             log.warn("投递过程异常 | {}: {}", target, e.getMessage());
             return new DeliveryOutcome(DeliveryStatus.FAILED, e.getMessage(), greeting);
         } finally {
+            closeQuietly(ownedChatPage);
             closeQuietly(detailPage);
         }
     }

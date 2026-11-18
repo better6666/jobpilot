@@ -51,6 +51,11 @@ public class PlatformConfig {
     /** null 沿用旧版 AI 总开关，true 用 AI，false 只用客户填写的固定话术。 */
     private Boolean aiGreeting;
 
+    /** 仅用于本次投递打开的聊天；客户主动开启并选择文件后才发送。 */
+    private boolean sendResume;
+    private boolean liepinResumeSync;
+    private String resumeId = "";
+
     /** true = 只走流程不真投，记录落库状态为"预演" */
     private boolean dryRun = true;
 
