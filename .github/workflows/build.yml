@@ -120,6 +120,11 @@ jobs:
             [ -f build/dist/JobPilot.app/Contents/Resources/JobPilot.icns ] || { echo "::error::app 里没有 JobPilot.icns"; exit 1; }
           fi
 
+      - name: Windows 启动器支持中文路径
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./packaging/windows-utf8.ps1 -Executable build/dist/JobPilot/JobPilot.exe
+
       - name: 随包浏览器实跑（不使用系统 Chrome 或 Edge）
         run: |
           if [ "$RUNNER_OS" = "macOS" ]; then
