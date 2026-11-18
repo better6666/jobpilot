@@ -56,11 +56,11 @@ license:
 
 # 浏览器自动化（Boss 投递）
 # headless 必须 false：扫码登录、滑块验证都要真人看窗口
-# channel=chrome 用本机 Chrome（反检测最好）；留空则用 playwright 自带 chromium
+# auto 依次尝试 Chrome、Edge 和随软件附带的 Chromium
 browser:
   headless: false
   slow-mo-ms: 50
-  channel: chrome
+  channel: auto
   # 无头模式使用以下视口尺寸。有界面时视口随窗口变化。
   width: 1440
   height: 900

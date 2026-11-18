@@ -207,6 +207,30 @@ class GreetingServiceTest {
     }
 
     @Test
+    void explicitFixedModePreservesCustomerTextEvenWhenAiIsEnabled() {
+        fullyConfigured();
+        String text = "您好，我想了解这个岗位，期待您的回复。";
+        assertEquals(text, service.compose(card(), text, "Boss 直聘", false).text());
+        assertEquals("您好，想应聘某某科技的运营助理", service.compose(card(),
+                "您好，想应聘{公司}的{岗位}", "Boss 直聘", false).text());
+        assertEquals(text, service.composeFollowUp(card(), text, false).text());
+        assertFalse(service.aiUsable(false));
+        verifyNoInteractions(aiService);
+    }
+
+    @Test
+    void explicitAiChoiceWorksWithLegacyGlobalSwitchDisabled() {
+        platformConfigured();
+        cfg.setEnabled(false);
+        when(aiService.chatPlatform(anyString(), anyString(), anyString(), anyString(),
+                anyString(), anyDouble(), anyString())).thenReturn(AiService.AiResult.ok("您好，想应聘运营助理。"));
+        assertTrue(service.aiUsable(true));
+        GreetingService.Greeting greeting = service.compose(card(), "固定话术", "Boss 直聘", true);
+        assertEquals("您好，想应聘运营助理。", greeting.text());
+        assertNull(greeting.note());
+    }
+
+    @Test
     void 没填求职者背景时退回固定话术并说明原因() {
         cfg.setEnabled(true);
         cfg.setBaseUrl("https://relay.example.com/v1");

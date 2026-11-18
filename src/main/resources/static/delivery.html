@@ -124,7 +124,7 @@
     <div class="row">
       <button id="btnStart">开始投递</button>
       <button id="btnStop" class="danger" disabled>停止</button>
-      <span id="loginHint" class="hint" style="margin:0">投递会在本机打开 Chrome 窗口，扫码登录后自动进行；窗口不要最小化。</span>
+      <span id="loginHint" class="hint" style="margin:0">投递会在本机打开浏览器窗口，扫码登录后自动进行；窗口不要最小化。</span>
     </div>
   </div>
 
@@ -139,6 +139,15 @@
         <label>城市</label>
         <select id="city"></select>
       </div>
+      <div>
+        <label for="minCompanySize">企业最少人数（0 不限）</label>
+        <input id="minCompanySize" type="number" min="0" value="0">
+      </div>
+      <div>
+        <label for="maxCompanySize">企业最多人数（0 不限）</label>
+        <input id="maxCompanySize" type="number" min="0" value="0">
+      </div>
+      <div class="full hint">按网站公布的完整人数区间筛选，启用后跳过规模不明的企业。</div>
       <div id="filterFields"></div>
       <div>
         <label>每个关键词最多处理岗位数</label>
@@ -153,9 +162,11 @@
         <input id="loginTimeout" type="number" min="1" max="30" value="5">
       </div>
       <div class="full" id="sayHiWrap">
-        <label>打招呼话术（一行一条，轮换着发）</label>
+        <label for="greetingMode">发送话术</label>
+        <select id="greetingMode"><option value="fixed">固定话术</option><option value="ai">AI 话术</option></select>
+        <label for="sayHi">固定话术 / AI 失败时备用（一行一条）</label>
         <textarea id="sayHi" rows="3" placeholder="您好，看到{公司}在招{岗位}，我做过……&#10;您好，我对{岗位}很感兴趣……"></textarea>
-        <div class="hint">AI 话术启用时，AI 调不通会先用「求职者背景」按岗位现拼一句，每条都不一样；只有这里写了多行时才改为轮换你写的这几条。写 {公司} {岗位} 会换成真实的公司名和岗位名。去 <a href="/ai.html" style="color:#3370ff">AI 话术</a> 页配置接口。</div>
+        <div class="hint">固定话术按填写内容发送，多行轮换，仅替换 {公司} 和 {岗位}。选择 AI 话术后，到 <a href="/ai.html">AI 话术</a> 页填写求职背景和接口配置。</div>
       </div>
       <div class="full">
         <label>打分规则（JSON：threshold 阈值；titleReject/degreeReject 一票否决；jobRules/degreeRules/experienceRules/industryRules/jdRules 为 {match, score} 加减分列表）</label>
@@ -222,7 +233,7 @@ const PLATFORMS = {
     salaryKind: 'select',
     sayHi: true,
     filterInactiveHr: true,
-    loginHint: '投递会在本机打开 Chrome 窗口，扫码登录后自动进行；窗口不要最小化。'
+    loginHint: '投递会在本机打开浏览器窗口，扫码登录后自动进行；窗口不要最小化。'
   },
   liepin: {
     name: '猎聘',
@@ -361,10 +372,17 @@ async function loadConfig() {
   }
   $('city').value = c.city || '';
   renderFilters(c, window.__options || {});
+  $('minCompanySize').value = c.minCompanySize || 0;
+  $('maxCompanySize').value = c.maxCompanySize || 0;
   $('maxJobs').value = c.maxJobsPerKeyword;
   $('waitSeconds').value = c.waitSeconds;
   $('loginTimeout').value = c.loginTimeoutMinutes;
-  if (meta.sayHi) $('sayHi').value = c.sayHi || '';
+  if (meta.sayHi || platform === 'liepin') {
+    $('sayHi').value = c.sayHi || '';
+    const useAi = typeof c.aiGreeting === 'boolean' ? c.aiGreeting
+      : !!(await api('/api/ai/config')).data?.enabled;
+    $('greetingMode').value = useAi ? 'ai' : 'fixed';
+  }
   $('scoreRules').value = JSON.stringify(c.scoreRules || {}, null, 2);
   $('dryRun').checked = !!c.dryRun;
   if (meta.filterInactiveHr) $('filterInactiveHr').checked = !!c.filterInactiveHr;
@@ -382,6 +400,8 @@ function readConfig() {
   const body = {
     keywords: $('keywords').value.split('\n').map(s => s.trim()).filter(Boolean),
     city: $('city').value.trim(),
+    minCompanySize: Number($('minCompanySize').value) || 0,
+    maxCompanySize: Number($('maxCompanySize').value) || 0,
     maxJobsPerKeyword: Number($('maxJobs').value) || 50,
     waitSeconds: Number($('waitSeconds').value) || 10,
     loginTimeoutMinutes: Number($('loginTimeout').value) || 5,
@@ -397,7 +417,10 @@ function readConfig() {
   for (const field of meta.filters) {
     if (field !== 'salary' && $(field)) body[field] = $(field).value;
   }
-  if (meta.sayHi) body.sayHi = $('sayHi').value;
+  if (meta.sayHi || platform === 'liepin') {
+    body.sayHi = $('sayHi').value;
+    body.aiGreeting = $('greetingMode').value === 'ai';
+  }
   if (meta.filterInactiveHr) body.filterInactiveHr = $('filterInactiveHr').checked;
   return body;
 }
@@ -512,7 +535,7 @@ function init() {
     .join('');
   sw.onchange = () => { location.href = '/delivery.html?platform=' + sw.value; };
 
-  $('sayHiWrap').style.display = meta.sayHi ? '' : 'none';
+  $('sayHiWrap').style.display = meta.sayHi || platform === 'liepin' ? '' : 'none';
   $('inactiveHrWrap').style.display = meta.filterInactiveHr ? '' : 'none';
 
   $('btnStart').onclick = async () => {

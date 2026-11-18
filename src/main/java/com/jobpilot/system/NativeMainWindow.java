@@ -90,6 +90,11 @@ public class NativeMainWindow {
     private final JComboBox<Choice> myExperience = new JComboBox<>();
     private final Map<String, JComboBox<Choice>> filterBoxes = new LinkedHashMap<>();
     private final JTextField salaryText = new JTextField();
+    private final JSpinner minCompanySize = spinner(0, 0, 10000000);
+    private final JSpinner maxCompanySize = spinner(0, 0, 10000000);
+    private final JComboBox<Choice> greetingMode = new JComboBox<>(new Choice[]{
+            new Choice("fixed", "固定话术"), new Choice("ai", "AI 话术")});
+    private final JLabel greetingHint = new JLabel();
     private final JSpinner maxJobs = spinner(50, 1, 500);
     private final JSpinner waitSeconds = spinner(10, 1, 120);
     private final JSpinner loginTimeout = spinner(5, 1, 30);
@@ -295,9 +300,13 @@ public class NativeMainWindow {
         JPanel basics = grid2();
         basics.add(field("城市", city));
         basics.add(field("每个关键词最多处理", maxJobs));
+        basics.add(field("企业最少人数（0 不限）", minCompanySize));
+        basics.add(field("企业最多人数（0 不限）", maxCompanySize));
         basics.add(field("岗位间隔 · 秒", waitSeconds));
         basics.add(field("登录等待 · 分钟", loginTimeout));
         searchFields.add(basics, BorderLayout.CENTER);
+        searchFields.add(label("<html>按网站公布的人数区间筛选，启用后跳过规模不明的企业。</html>",
+                12, MUTED, Font.PLAIN), BorderLayout.SOUTH);
         search.add(searchFields, BorderLayout.CENTER);
         left.add(search);
         left.add(Box.createVerticalStrut(14));
@@ -320,7 +329,13 @@ public class NativeMainWindow {
         sayHi.setRows(3);
         sayHi.setLineWrap(true);
         sayHi.setWrapStyleWord(true);
-        fields.add(field("固定打招呼话术 · Boss 直聘（一行一条轮换；可用 {公司} {岗位}）", scroll(sayHi)));
+        fields.add(field("发送话术 · Boss 直聘 / 猎聘", greetingMode));
+        greetingHint.setForeground(MUTED);
+        greetingHint.setAlignmentX(Component.LEFT_ALIGNMENT);
+        greetingMode.addActionListener(e -> updateGreetingHint());
+        updateGreetingHint();
+        fields.add(greetingHint);
+        fields.add(field("固定话术 / AI 失败时备用（一行一条；可用 {公司} {岗位}）", scroll(sayHi)));
         JToggleButton advanced = new JToggleButton("▸  高级筛选规则");
         advanced.setHorizontalAlignment(SwingConstants.LEFT);
         advanced.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 12));
@@ -410,7 +425,7 @@ public class NativeMainWindow {
         JPanel intro = card(new BorderLayout(0, 12));
         intro.add(sectionHead("个性化沟通", "按求职背景生成更贴合岗位的消息"), BorderLayout.NORTH);
         aiEnabled.setOpaque(false);
-        intro.add(aiEnabled, BorderLayout.CENTER);
+        intro.add(label("在投递工作台选择 AI 话术或固定话术。", 13, MUTED, Font.PLAIN), BorderLayout.CENTER);
         JPanel source = card(new BorderLayout(0, 12));
         source.add(sectionHead("模型与接口", "选择平台中转或填写自己的接口"), BorderLayout.NORTH);
         JPanel fields = new JPanel();
@@ -526,16 +541,17 @@ public class NativeMainWindow {
         async(() -> {
             JsonNode options = api("GET", path(selected, "options"), null);
             JsonNode config = api("GET", path(selected, "config"), null);
-            return new JsonNode[]{options, config};
+            JsonNode ai = api("GET", "/api/ai/config", null);
+            return new JsonNode[]{options, config, ai};
         }, pair -> {
             if (platform.getSelectedItem() != selected) return;
-            fillConfig(selected, pair[0], pair[1]);
+            fillConfig(selected, pair[0], pair[1], pair[2]);
             refreshStatus();
             refreshDeliveries();
         });
     }
 
-    private void fillConfig(Platform selected, JsonNode options, JsonNode config) {
+    private void fillConfig(Platform selected, JsonNode options, JsonNode config, JsonNode ai) {
         keywords.setText(join(config.path("keywords")));
         keywords.setCaretPosition(0);
         fillChoices(city, options.path("cities"), config.path("city").asText(""), true);
@@ -558,12 +574,20 @@ public class NativeMainWindow {
         }
         filters.revalidate();
         filters.repaint();
+        minCompanySize.setValue(config.path("minCompanySize").asInt(0));
+        maxCompanySize.setValue(config.path("maxCompanySize").asInt(0));
         maxJobs.setValue(config.path("maxJobsPerKeyword").asInt(50));
         waitSeconds.setValue(config.path("waitSeconds").asInt(10));
         loginTimeout.setValue(config.path("loginTimeoutMinutes").asInt(5));
         sayHi.setText(config.path("sayHi").asText(""));
         sayHi.setCaretPosition(0);
-        sayHi.setEnabled("boss".equals(selected.key()));
+        boolean usesGreeting = "boss".equals(selected.key()) || "liepin".equals(selected.key());
+        boolean useAi = config.path("aiGreeting").isBoolean() ? config.path("aiGreeting").asBoolean()
+                : ai.path("enabled").asBoolean(false);
+        selectChoice(greetingMode, useAi ? "ai" : "fixed");
+        greetingMode.setEnabled(usesGreeting);
+        sayHi.setEnabled(usesGreeting);
+        updateGreetingHint();
         inactiveHr.setSelected(config.path("filterInactiveHr").asBoolean(false));
         inactiveHr.setVisible("boss".equals(selected.key()));
         dryRun.setSelected(config.path("dryRun").asBoolean(true));
@@ -577,6 +601,12 @@ public class NativeMainWindow {
         SwingUtilities.invokeLater(() -> {
             if (settingsScrollLeft != null) settingsScrollLeft.getVerticalScrollBar().setValue(0);
         });
+    }
+
+    private void updateGreetingHint() {
+        greetingHint.setText("ai".equals(choiceValue(greetingMode))
+                ? "<html>在 AI 话术页填写求职背景，生成失败时使用备用话术。</html>"
+                : "<html>按填写内容发送，多行轮换；仅替换 {公司} 和 {岗位}。</html>");
     }
 
     private void saveConfig() {
@@ -593,6 +623,8 @@ public class NativeMainWindow {
         List<String> words = keywords.getText().lines().map(String::trim).filter(s -> !s.isEmpty()).toList();
         body.put("keywords", words);
         body.put("city", choiceValue(city));
+        body.put("minCompanySize", minCompanySize.getValue());
+        body.put("maxCompanySize", maxCompanySize.getValue());
         body.put("maxJobsPerKeyword", maxJobs.getValue());
         body.put("waitSeconds", waitSeconds.getValue());
         body.put("loginTimeoutMinutes", loginTimeout.getValue());
@@ -610,8 +642,11 @@ public class NativeMainWindow {
         filterBoxes.forEach((key, box) -> {
             if (!"salary".equals(key)) body.put(key, choiceValue(box));
         });
-        if ("boss".equals(selected.key())) {
+        if ("boss".equals(selected.key()) || "liepin".equals(selected.key())) {
             body.put("sayHi", sayHi.getText());
+            body.put("aiGreeting", "ai".equals(choiceValue(greetingMode)));
+        }
+        if ("boss".equals(selected.key())) {
             body.put("filterInactiveHr", inactiveHr.isSelected());
         }
         return body;

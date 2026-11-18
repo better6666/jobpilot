@@ -23,6 +23,10 @@ public class PlatformConfig {
     /** 薪资筛选项，值为平台自己的码，"0"/空 = 不限 */
     private String salary = "";
 
+    /** 企业人数范围，0 表示该端不限。 */
+    private int minCompanySize;
+    private int maxCompanySize;
+
     /**
      * 我的最高学历，存中文档位名（大专/本科/…），空 = 不设限。
      * 各平台的 URL 筛选挡不住"要求高于我"的岗位，这一项专管那个，见 {@link RequirementFilter}
@@ -43,6 +47,9 @@ public class PlatformConfig {
      * 留着是因为猎聘的 IM 里还能补一句追问，届时复用。
      */
     private String sayHi = "";
+
+    /** null 沿用旧版 AI 总开关，true 用 AI，false 只用客户填写的固定话术。 */
+    private Boolean aiGreeting;
 
     /** true = 只走流程不真投，记录落库状态为"预演" */
     private boolean dryRun = true;

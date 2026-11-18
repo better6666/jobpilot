@@ -134,12 +134,12 @@ public abstract class DeliveryService<C extends JobCard> {
      * 现在只有 Boss（打招呼语）和猎聘（IM 追问）真会用到。
      */
     protected GreetingService.Greeting greetingFor(C card, PlatformConfig config) {
-        return greetingService.compose(card, config.getSayHi(), displayName());
+        return greetingService.compose(card, config.getSayHi(), displayName(), config.getAiGreeting());
     }
 
     /** 猎聘 IM 里的追问句 */
     protected GreetingService.Greeting followUpFor(C card, PlatformConfig config) {
-        return greetingService.composeFollowUp(card, config.getSayHi());
+        return greetingService.composeFollowUp(card, config.getSayHi(), config.getAiGreeting());
     }
 
     // ------------------------------------------------------------------
@@ -157,6 +157,10 @@ public abstract class DeliveryService<C extends JobCard> {
                 : config.getKeywords().stream().filter(k -> k != null && !k.isBlank()).toList();
         if (keywords.isEmpty()) {
             return "请先配置至少一个搜索关键词";
+        }
+        if (config.getMinCompanySize() < 0 || config.getMaxCompanySize() < 0
+                || (config.getMaxCompanySize() > 0 && config.getMaxCompanySize() < config.getMinCompanySize())) {
+            return "企业规模人数范围无效，最多人数应大于或等于最少人数（0 表示不限）";
         }
         String error = validate(config);
         if (error != null) {
@@ -204,7 +208,7 @@ public abstract class DeliveryService<C extends JobCard> {
                 }
             }, () -> {
                 try {
-                    finish("浏览器启动失败。请确认 Chrome 能正常打开，然后重新点击「开始投递」。");
+                    finish("浏览器启动失败。请重新解压完整软件包，或确认 Chrome / Edge 能正常打开后重试。");
                 } finally {
                     coordinator.release(platform());
                 }
@@ -274,7 +278,7 @@ public abstract class DeliveryService<C extends JobCard> {
             }
             status.setLoggedIn(true);
             appendLog("登录态就绪，开始采集岗位");
-            String ai = greetingService.describe();
+            String ai = greetingService.describe(config.getAiGreeting());
             if (ai != null) {
                 appendLog(ai);
             }
@@ -486,12 +490,15 @@ public abstract class DeliveryService<C extends JobCard> {
      * 发一条空白消息，白白烧掉一个额度还容易被举报，所以直接拦住。
      */
     private String greetingPreCheck(PlatformConfig config) {
-        if (config.isDryRun() || !greetingRequired() || greetingService.aiUsable()) {
+        if (config.isDryRun() || !greetingRequired() || greetingService.aiUsable(config.getAiGreeting())) {
             return null;
         }
         String sayHi = config.getSayHi();
         if (sayHi != null && !sayHi.isBlank()) {
             return null;
+        }
+        if (Boolean.FALSE.equals(config.getAiGreeting())) {
+            return "已选择固定话术，请先填写打招呼内容再开始投递";
         }
         return "还没法真投：AI 话术当前不可用（没开启／没填求职者背景／接口没配全），"
                 + "而这个平台的固定打招呼语是空的。请先在上方填一句打招呼语，"

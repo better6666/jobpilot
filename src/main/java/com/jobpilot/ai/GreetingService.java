@@ -137,8 +137,15 @@ public class GreetingService {
      * @param channel 发到哪个平台（"Boss 直聘"之类），写进提示词让语气对得上渠道；null = 不提
      */
     public Greeting compose(JobCard card, String fallback, String channel) {
+        return compose(card, fallback, channel, null);
+    }
+
+    public Greeting compose(JobCard card, String fallback, String channel, Boolean useAi) {
+        if (Boolean.FALSE.equals(useAi)) {
+            return fixed(card, fallback);
+        }
         AiConfig cfg = properties.get();
-        if (!cfg.isEnabled()) {
+        if (useAi == null && !cfg.isEnabled()) {
             return Greeting.fallback(vary(fallback, card, null), null);
         }
         if (isBlank(cfg.getPersona())) {
@@ -226,8 +233,15 @@ public class GreetingService {
 
     /** 猎聘 IM 里补的那句追问：一句话的问题，不是招呼 */
     public Greeting composeFollowUp(JobCard card, String fallback) {
+        return composeFollowUp(card, fallback, null);
+    }
+
+    public Greeting composeFollowUp(JobCard card, String fallback, Boolean useAi) {
+        if (Boolean.FALSE.equals(useAi)) {
+            return fixed(card, fallback);
+        }
         AiConfig cfg = properties.get();
-        if (!cfg.isEnabled() || isBlank(cfg.getPersona()) || !isConfigured(cfg)) {
+        if ((useAi == null && !cfg.isEnabled()) || isBlank(cfg.getPersona()) || !isConfigured(cfg)) {
             return Greeting.fallback(vary(fallback, card, null), null);
         }
         List<String> recent = recentGreetings();
@@ -300,8 +314,12 @@ public class GreetingService {
      * 只管配置齐不齐，不代表接口一定应答（key 被禁用要到第一次调用才知道）。
      */
     public boolean aiUsable() {
+        return aiUsable(null);
+    }
+
+    public boolean aiUsable(Boolean useAi) {
         AiConfig cfg = properties.get();
-        return cfg.isEnabled() && !isBlank(cfg.getPersona()) && isConfigured(cfg);
+        return (useAi == null ? cfg.isEnabled() : useAi) && !isBlank(cfg.getPersona()) && isConfigured(cfg);
     }
 
     /**
@@ -310,8 +328,15 @@ public class GreetingService {
      * "怎么话术没变化"而不知道去哪配。
      */
     public String describe() {
+        return describe(null);
+    }
+
+    public String describe(Boolean useAi) {
+        if (Boolean.FALSE.equals(useAi)) {
+            return "本次使用固定话术";
+        }
         AiConfig cfg = properties.get();
-        if (!cfg.isEnabled()) {
+        if (useAi == null && !cfg.isEnabled()) {
             return null;
         }
         if (isBlank(cfg.getPersona())) {
@@ -324,6 +349,10 @@ public class GreetingService {
             return "AI 话术已启用（自有接口 " + cfg.getModel() + "），生成失败会自动退回固定话术";
         }
         return "AI 话术已启用（平台提供），生成失败会自动退回固定话术";
+    }
+
+    private Greeting fixed(JobCard card, String text) {
+        return Greeting.fallback(FallbackGreeting.renderFixed(text, card, recentGreetings()), null);
     }
 
     // ------------------------------------------------------------------

@@ -108,6 +108,23 @@ class BossServiceDedupTest {
     }
 
     @Test
+    void 企业规模超出范围时在沟通前过滤() {
+        properties.get().setMinCompanySize(100);
+        properties.get().setMaxCompanySize(499);
+        BossJobCard card = card();
+        card.setBrandScaleName("20-99人");
+
+        service.processCardForTest(card, "新媒体运营", properties.get(), null);
+
+        verifyNoInteractions(driver);
+        assertEquals(1, service.status().getFiltered());
+        ArgumentCaptor<Delivery> saved = ArgumentCaptor.forClass(Delivery.class);
+        verify(deliveryMapper).insert(saved.capture());
+        assertEquals("已过滤", saved.getValue().getDeliveryStatus());
+        assertTrue(saved.getValue().getFailReason().contains("企业规模"));
+    }
+
+    @Test
     void 预演过的岗位真实投递时不被挡住() {
         when(deliveryMapper.selectOne(any())).thenReturn(existing("预演"));
         when(driver.deliver(any(), any(), any(), anyBoolean(), any(), any()))

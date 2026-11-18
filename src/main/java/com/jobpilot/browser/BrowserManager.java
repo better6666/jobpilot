@@ -60,8 +60,8 @@ public class BrowserManager {
         private boolean headless = false;
         /** 每个动作之间的额外停顿（毫秒），模拟真人节奏 */
         private int slowMoMs = 50;
-        /** 浏览器通道：chrome 用本机 Chrome（风控最低）；留空用 playwright 自带 chromium */
-        private String channel = "chrome";
+        /** auto 依次使用 Chrome、Edge 和随包 Chromium；bundled 仅用随包浏览器 */
+        private String channel = "auto";
         /** 无头模式的视口尺寸。 */
         private int width = 1440;
         private int height = 900;
@@ -176,25 +176,7 @@ public class BrowserManager {
         log.info("浏览器上下文已就绪");
     }
 
-    /**
-     * 删掉上次崩溃留下的浏览器锁文件。
-     *
-     * <p>Chromium 崩溃后会在 profile 目录里留 lockfile / SingletonLock，
-     * 下次启动读到坏锁就会「起来就死」——newPage 直接抛 Failed to open a
-     * new tab。Chrome 正在跑时锁会被立刻重建，所以启动前清理是安全的。
-     */
-    private void cleanStaleLocks(Path userDataDir) {
-        for (String name : new String[]{
-                "SingletonLock", "SingletonSocket", "SingletonCookie", "lockfile"}) {
-            try {
-                java.nio.file.Files.deleteIfExists(userDataDir.resolve(name));
-            } catch (Exception ignore) {
-            }
-        }
-    }
-
     private BrowserContext launchContext() {
-        Path userDataDir = userDataDir(com.jobpilot.system.SystemPaths.dataDir());
         BrowserType.LaunchPersistentContextOptions options =
                 new BrowserType.LaunchPersistentContextOptions()
                         .setHeadless(properties.isHeadless())
@@ -213,46 +195,41 @@ public class BrowserManager {
             // 扫码登录页按网页视口居中，视口超过实际窗口时登录框会被裁切。
             options.setViewportSize(null);
         }
-        // 上一次崩溃留下的锁文件会让 Chromium 起来就死（表现为 newPage 抛
-        // "Failed to open a new tab"）。Chrome 正在跑时锁会被重建，所以这里
-        // 清理是安全的
-        cleanStaleLocks(userDataDir);
-
-        boolean wantChannel = properties.getChannel() != null && !properties.getChannel().isBlank();
-        if (wantChannel) {
-            options.setChannel(properties.getChannel());
+        String channel = properties.getChannel();
+        List<String> channels;
+        if (channel == null || channel.isBlank() || "bundled".equals(channel)) {
+            channels = List.of();
+        } else if ("auto".equals(channel) || "chrome".equals(channel)) {
+            channels = List.of("chrome", "msedge");
+        } else {
+            channels = List.of(channel);
         }
-        BrowserContext ctx;
-        try {
-            ctx = playwright.chromium().launchPersistentContext(userDataDir, options);
-        } catch (Exception e) {
-            // 本机没装 Chrome、或被企业策略挡了时 channel 启动会直接失败，
-            // 抛出去就是 "Target page, context or browser has been closed"，
-            // 用户看到的只有一个看不懂的堆栈。退回 playwright 自带的 chromium，
-            // 功能可用、少一点反检测效果，总比完全不能用好
-            if (!wantChannel) {
-                throw e;
-            }
-            log.warn("用 channel={} 启动浏览器失败，退回 playwright 自带 chromium: {}",
-                    properties.getChannel(), e.getMessage());
-            options.setChannel((String) null);
+        Path dataDir = com.jobpilot.system.SystemPaths.dataDir();
+        for (String candidate : channels) {
+            Path profile = "chrome".equals(candidate) ? userDataDir(dataDir)
+                    : dataDir.resolve("browser-data-" + candidate);
             try {
-                ctx = playwright.chromium().launchPersistentContext(userDataDir, options);
-            } catch (Exception e2) {
-                // 数据目录可能被上一次崩溃写坏（版本不匹配的 profile、残留锁），
-                // 改名留档换新目录再试最后一次。用户重新登录一次就能恢复
-                Path backup = userDataDir.resolveSibling(
-                        userDataDir.getFileName() + "-broken-" + System.currentTimeMillis());
-                try {
-                    java.nio.file.Files.move(userDataDir, backup);
-                    log.warn("浏览器数据目录疑似损坏，已挪到 {}，用全新目录重试", backup);
-                } catch (Exception ignore) { }
-                ctx = playwright.chromium().launchPersistentContext(userDataDir, options);
+                options.setChannel(candidate);
+                BrowserContext launched = playwright.chromium().launchPersistentContext(profile, options);
+                log.info("使用浏览器 {}", candidate);
+                return launched;
+            } catch (RuntimeException e) {
+                log.warn("浏览器 {} 启动失败，尝试下一个浏览器: {}", candidate, e.getMessage());
             }
         }
-        // 保留持久化上下文启动时的初始标签页。关闭最后一个标签页可能让有界面的
-        // Chrome 直接退出，随后首次 context.newPage() 会报 Target.createTarget 失败。
-        return ctx;
+        options.setChannel((String) null);
+        Path bundled = BundledBrowser.executable();
+        if (bundled != null) {
+            options.setExecutablePath(bundled);
+        }
+        try {
+            BrowserContext launched = playwright.chromium().launchPersistentContext(
+                    dataDir.resolve("browser-data-chromium"), options);
+            log.info("使用 Chromium 浏览器: {}", bundled == null ? "本机缓存" : bundled);
+            return launched;
+        } catch (RuntimeException e) {
+            throw new BrowserException("浏览器启动失败，请重新解压完整软件包，或安装 Chrome / Edge 后重试", e);
+        }
     }
 
     private void closeContextQuietly() {

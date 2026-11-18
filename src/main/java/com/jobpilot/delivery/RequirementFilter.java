@@ -30,6 +30,10 @@ public final class RequirementFilter {
         if (card == null || config == null) {
             return null;
         }
+        String companySize = CompanySizeFilter.reject(card, config);
+        if (companySize != null) {
+            return companySize;
+        }
         int myDegree = rankOfDegree(config.getMyDegree());
         if (myDegree >= 0) {
             int need = rankOfDegree(card.getJobDegree());

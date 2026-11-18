@@ -71,6 +71,15 @@ final class FallbackGreeting {
         return lead + text;
     }
 
+    static String renderFixed(String sayHi, JobCard card, List<String> recent) {
+        if (sayHi == null || sayHi.isBlank()) {
+            return sayHi;
+        }
+        String chosen = pickVariant(variants(sayHi), recent);
+        return fill(chosen, card == null ? null : clean(card.getBrandName()),
+                card == null ? null : clean(card.getJobName()));
+    }
+
     private static final Pattern GENERIC_JOB = Pattern.compile("(这个|该|此|贵)(岗位|职位)");
     private static final Pattern GENERIC_COMPANY = Pattern.compile("贵(公司|司)");
 

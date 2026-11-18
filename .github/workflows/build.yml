@@ -67,6 +67,21 @@ jobs:
           path: build/test-results/test/*.xml
           retention-days: 7
 
+      - name: 准备随包 Chromium
+        run: |
+          export PLAYWRIGHT_BROWSERS_PATH="$PWD/build/bundled-browser"
+          node build/patchright-driver/package/cli.js install chromium --no-shell --no-progress
+          node <<'JS'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const { chromium } = require('./build/patchright-driver/package/index.js');
+          const root = process.env.PLAYWRIGHT_BROWSERS_PATH;
+          const executable = chromium.executablePath();
+          if (!fs.existsSync(executable)) throw new Error('缺少随包 Chromium');
+          fs.writeFileSync(path.join(root, 'executable.txt'), path.relative(root, executable));
+          JS
+          rm -rf build/bundled-browser/.links
+
       - name: 裁剪运行时（模块清单经实跑验证，勿用 jdeps 推断）
         run: |
           jlink --add-modules java.base,java.desktop,java.instrument,java.logging,java.management,java.naming,java.net.http,java.security.jgss,java.security.sasl,java.sql,java.transaction.xa,java.xml,jdk.crypto.ec,jdk.unsupported \
@@ -77,6 +92,7 @@ jobs:
         run: |
           mkdir -p build/stage
           cp build/libs/jobpilot-0.1.0.jar build/stage/
+          cp -R build/bundled-browser build/stage/browser
           # app-version 首段不能为 0：macOS dmg 打包器会直接拒（实测报
           # "The first number in an app-version cannot be zero or negative"）
           # 卡密服务端地址烧进 cfg：装机版双击启动时没有地方传命令行参数，
@@ -87,7 +103,7 @@ jobs:
           # dmg 由这个 app-image 转出来，图标跟着走，不用再传
           ICON=packaging/icon/JobPilot.ico
           [ "$RUNNER_OS" = "macOS" ] && ICON=packaging/icon/JobPilot.icns
-          jpackage --type app-image --name JobPilot --app-version 1.0.21 \
+          jpackage --type app-image --name JobPilot --app-version 1.0.22 \
             --input build/stage --main-jar jobpilot-0.1.0.jar \
             --runtime-image build/runtime --dest build/dist \
             --icon "$ICON" \
@@ -96,6 +112,33 @@ jobs:
           if [ "$RUNNER_OS" = "macOS" ]; then
             [ -f build/dist/JobPilot.app/Contents/Resources/JobPilot.icns ] || { echo "::error::app 里没有 JobPilot.icns"; exit 1; }
           fi
+
+      - name: 随包浏览器实跑（不使用系统 Chrome 或 Edge）
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            export JOBPILOT_BROWSER_ROOT="$PWD/build/dist/JobPilot.app/Contents/app/browser"
+          else
+            export JOBPILOT_BROWSER_ROOT="$PWD/build/dist/JobPilot/app/browser"
+          fi
+          node <<'JS'
+          const assert = require('node:assert/strict');
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const { chromium } = require('./build/patchright-driver/package/index.js');
+          (async () => {
+            const root = process.env.JOBPILOT_BROWSER_ROOT;
+            const executablePath = path.join(root, fs.readFileSync(path.join(root, 'executable.txt'), 'utf8').trim());
+            const browser = await chromium.launch({ executablePath, headless: true });
+            try {
+              const page = await browser.newPage();
+              await page.setContent('<main>JobPilot bundled browser</main>');
+              assert.equal(await page.locator('main').textContent(), 'JobPilot bundled browser');
+              console.log('随包 Chromium 启动与网页渲染通过');
+            } finally {
+              await browser.close();
+            }
+          })().catch(error => { console.error(error); process.exitCode = 1; });
+          JS
 
       - name: 冒烟测试（打包产物真跑一次：health + driver/node 解压 + 根路径跳转）
         shell: bash
@@ -136,7 +179,7 @@ jobs:
       - name: macOS 转 dmg
         if: runner.os == 'macOS'
         run: |
-          jpackage --type dmg --name JobPilot --app-version 1.0.21 \
+          jpackage --type dmg --name JobPilot --app-version 1.0.22 \
             --app-image build/dist/JobPilot.app --dest build/dist
           rm -rf build/dist/JobPilot.app
 
