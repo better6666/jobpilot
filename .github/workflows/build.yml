@@ -92,7 +92,6 @@ jobs:
         run: |
           mkdir -p build/stage
           cp build/libs/jobpilot-0.1.0.jar build/stage/
-          cp -R build/bundled-browser build/stage/browser
           # app-version 首段不能为 0：macOS dmg 打包器会直接拒（实测报
           # "The first number in an app-version cannot be zero or negative"）
           # 卡密服务端地址烧进 cfg：装机版双击启动时没有地方传命令行参数，
@@ -108,6 +107,14 @@ jobs:
             --runtime-image build/runtime --dest build/dist \
             --icon "$ICON" \
             --java-options "-Dlicense.api-base=https://getjobs.dpdns.org"
+          # jpackage 会尝试重新签名嵌套浏览器，先创建应用再加入已签名的 Chromium。
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            cp -R build/bundled-browser build/dist/JobPilot.app/Contents/app/browser
+            codesign --force --sign - build/dist/JobPilot.app
+            codesign --verify --deep build/dist/JobPilot.app
+          else
+            cp -R build/bundled-browser build/dist/JobPilot/app/browser
+          fi
           # 图标真进了包才算数：jpackage 找不到图标文件只会警告、照样出包
           if [ "$RUNNER_OS" = "macOS" ]; then
             [ -f build/dist/JobPilot.app/Contents/Resources/JobPilot.icns ] || { echo "::error::app 里没有 JobPilot.icns"; exit 1; }
