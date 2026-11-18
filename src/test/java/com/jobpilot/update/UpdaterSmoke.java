@@ -85,6 +85,21 @@ public class UpdaterSmoke {
             request("POST", "/api/updates/acknowledge", Map.of("version", VERSION));
             if (get("/api/updates").path("installedNotes").size() != 0) throw new AssertionError("更新说明未记录已读状态");
             System.out.println("PASS: downloaded, verified, installed and restarted the packaged app with release notes");
+            if (!MAC) {
+                stopInstalled();
+                Path configFile = target.resolve("app/JobPilot.cfg");
+                Files.writeString(configFile, Files.readString(configFile)
+                        .replace("jpackage.app-version=" + VERSION, "jpackage.app-version=1.0.22"));
+                startInstalled(origin, true);
+                waitVersion("1.0.22");
+                waitAvailable();
+                Files.delete(dataDir().resolve("updates/result.json"));
+                request("POST", "/api/updates/install", Map.of("version", VERSION));
+                waitResult("DONE");
+                waitVersion(VERSION);
+                assertSavedData();
+                System.out.println("PASS: Windows update also restarts correctly with zero launch arguments");
+            }
         } catch (Throwable failure) {
             try (var walk = Files.walk(temporary)) {
                 for (Path file : walk.filter(Files::isRegularFile)
@@ -98,9 +113,7 @@ public class UpdaterSmoke {
             throw failure;
         } finally {
             fixture.stop(0);
-            String launcher = executable(target).toString();
-            ProcessHandle.allProcesses().filter(process -> process.info().command()
-                    .map(command -> command.equalsIgnoreCase(launcher)).orElse(false)).forEach(ProcessHandle::destroy);
+            stopInstalled();
             System.out.println("Updater smoke evidence: " + temporary);
         }
     }
@@ -184,13 +197,31 @@ public class UpdaterSmoke {
     }
 
     private static Process startInstalled(String origin) throws Exception {
-        ProcessBuilder process = new ProcessBuilder(executable(target).toString(), "--server.port=" + appPort,
-                "--jobpilot.console=false", "--updates.manifest-url=" + origin + "/updates.json");
+        return startInstalled(origin, false);
+    }
+
+    private static Process startInstalled(String origin, boolean noArguments) throws Exception {
+        ProcessBuilder process = noArguments ? new ProcessBuilder(executable(target).toString())
+                : new ProcessBuilder(executable(target).toString(), "--server.port=" + appPort,
+                    "--jobpilot.console=false", "--updates.manifest-url=" + origin + "/updates.json");
         Files.createDirectories(temporary.resolve("home"));
         Files.createDirectories(temporary.resolve("roaming"));
-        process.environment().put("JAVA_TOOL_OPTIONS", "-Duser.home=\"" + temporary.resolve("home") + "\"");
+        String options = "-Duser.home=\"" + temporary.resolve("home") + "\"";
+        if (noArguments) options += " -Dserver.port=" + appPort + " -Djobpilot.console=false"
+                + " -Dupdates.manifest-url=" + origin + "/updates.json";
+        process.environment().put("JAVA_TOOL_OPTIONS", options);
         process.environment().put("APPDATA", temporary.resolve("roaming").toString());
         return process.redirectErrorStream(true).redirectOutput(temporary.resolve("original.log").toFile()).start();
+    }
+
+    private static void stopInstalled() throws Exception {
+        List<ProcessHandle> running = ProcessHandle.allProcesses().filter(process -> process.info().command()
+                .map(command -> {
+                    try { return Files.isSameFile(Path.of(command), executable(target)); }
+                    catch (Exception ignored) { return false; }
+                }).orElse(false)).toList();
+        running.forEach(ProcessHandle::destroy);
+        for (ProcessHandle process : running) process.onExit().get(15, java.util.concurrent.TimeUnit.SECONDS);
     }
 
     private static void waitVersion(String version) throws Exception {

@@ -36,7 +36,7 @@ function Quote-Argument([string]$text) {
     return '"' + $escaped + '"'
 }
 $restartArguments = ConvertFrom-Json -InputObject ([IO.File]::ReadAllText((Join-Path $transaction 'args.json')))
-$quotedArguments = foreach ($argument in $restartArguments) { Quote-Argument ([string]$argument) }
+$quotedArguments = @(foreach ($argument in $restartArguments) { Quote-Argument ([string]$argument) })
 $argumentLine = [string]::Join(' ', [string[]]$quotedArguments)
 function Start-App {
     $info = New-Object Diagnostics.ProcessStartInfo
