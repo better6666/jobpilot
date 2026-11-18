@@ -28,7 +28,8 @@ public class HealthController {
 
     @GetMapping("/api/health")
     public ApiResponse<Map<String, Object>> health() {
-        return ApiResponse.ok(Map.of("status", "UP", "time", Instant.now().toString()));
+        return ApiResponse.ok(Map.of("status", "UP", "time", Instant.now().toString(),
+                "version", System.getProperty("jpackage.app-version", "开发版本")));
     }
 
     /** 根路径：没卡先激活，有卡直接进投递管理页 */

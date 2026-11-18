@@ -102,7 +102,7 @@ jobs:
           # dmg 由这个 app-image 转出来，图标跟着走，不用再传
           ICON=packaging/icon/JobPilot.ico
           [ "$RUNNER_OS" = "macOS" ] && ICON=packaging/icon/JobPilot.icns
-          jpackage --type app-image --name JobPilot --app-version 1.0.22 \
+          jpackage --type app-image --name JobPilot --app-version 1.0.23 \
             --input build/stage --main-jar jobpilot-0.1.0.jar \
             --runtime-image build/runtime --dest build/dist \
             --icon "$ICON" \
@@ -186,7 +186,7 @@ jobs:
       - name: macOS 转 dmg
         if: runner.os == 'macOS'
         run: |
-          jpackage --type dmg --name JobPilot --app-version 1.0.22 \
+          jpackage --type dmg --name JobPilot --app-version 1.0.23 \
             --app-image build/dist/JobPilot.app --dest build/dist
           rm -rf build/dist/JobPilot.app
 
@@ -194,6 +194,9 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: Compress-Archive -Path build/dist/JobPilot -DestinationPath JobPilot-windows.zip
+
+      - name: 验证一键升级与失败回滚
+        run: ./gradlew updaterSmoke
 
       - name: 上传构建产物
         uses: actions/upload-artifact@v4

@@ -76,6 +76,13 @@ public class NativeMainWindow {
     private int pollCount;
 
     private final JComboBox<Platform> platform = new JComboBox<>(PLATFORMS.toArray(Platform[]::new));
+    private final JPanel updateBanner = new JPanel(new BorderLayout(12, 0));
+    private final JLabel updateLabel = new JLabel();
+    private final JButton updateButton = new JButton("查看更新");
+    private JsonNode updateInfo;
+    private String announcedUpdate = "";
+    private boolean showingInstalledNotes;
+    private boolean updateCheckRequested;
     private final JLabel runState = new JLabel("状态：读取中…");
     private final JLabel counters = new JLabel("失败 0 · 跳过 0");
     private final JLabel modeBadge = new JLabel("预演模式");
@@ -193,15 +200,86 @@ public class NativeMainWindow {
         pages.add(plansPanel(), "plans");
         frame.getContentPane().setBackground(CANVAS);
         frame.add(sidebar(pages), BorderLayout.WEST);
-        frame.add(pages, BorderLayout.CENTER);
+        JPanel content = new JPanel(new BorderLayout());
+        updateBanner.setBackground(new Color(232, 238, 255));
+        updateBanner.setBorder(new EmptyBorder(10, 24, 10, 24));
+        updateBanner.add(updateLabel, BorderLayout.CENTER);
+        updateBanner.add(updateButton, BorderLayout.EAST);
+        updateBanner.setVisible(false);
+        updateButton.addActionListener(e -> showUpdateDetails());
+        content.add(updateBanner, BorderLayout.NORTH);
+        content.add(pages, BorderLayout.CENTER);
+        frame.add(content, BorderLayout.CENTER);
 
         loadPlatform();
         loadLicense();
+        refreshUpdates(false);
         poller = new Timer(3000, e -> {
             refreshStatus();
             if (++pollCount % 4 == 0) refreshDeliveries();
+            if (pollCount % 2 == 0) refreshUpdates(false);
         });
         poller.start();
+    }
+
+    private void refreshUpdates(boolean manual) {
+        if (manual) updateCheckRequested = true;
+        asyncQuiet(() -> api(manual ? "POST" : "GET", manual ? "/api/updates/check" : "/api/updates", null), info -> {
+            updateInfo = info;
+            String state = info.path("state").asText();
+            boolean busy = List.of("DOWNLOADING", "PREPARING", "RESTARTING").contains(state);
+            boolean available = info.path("available").asBoolean();
+            boolean showCheckResult = updateCheckRequested && !"CHECKING".equals(state);
+            if (showCheckResult) updateCheckRequested = false;
+            updateBanner.setVisible(available || busy || "FAILED".equals(state));
+            updateLabel.setText(busy ? info.path("message").asText() + " · " + info.path("progress").asInt() + "%"
+                    : "FAILED".equals(state) ? "更新未完成：" + info.path("message").asText()
+                    : "发现新版本 v" + info.path("latestVersion").asText());
+            updateButton.setEnabled(!busy);
+            if (available && !busy && !info.path("latestVersion").asText().equals(announcedUpdate)) {
+                announcedUpdate = info.path("latestVersion").asText();
+                showUpdateDetails();
+            } else if (showCheckResult) {
+                if (available) showUpdateDetails();
+                else message(info.path("message").asText());
+            }
+            if (!showingInstalledNotes && info.path("installedNotes").size() > 0) {
+                showingInstalledNotes = true;
+                message("已更新至 v" + info.path("currentVersion").asText() + "\n\n"
+                        + updateNotes(info.path("installedNotes")));
+                asyncQuiet(() -> api("POST", "/api/updates/acknowledge",
+                        Map.of("version", info.path("currentVersion").asText())), data -> {});
+            }
+        });
+    }
+
+    private static String updateNotes(JsonNode notes) {
+        List<String> lines = new ArrayList<>();
+        notes.forEach(note -> lines.add("• " + note.asText()));
+        return String.join("\n", lines);
+    }
+
+    private void showUpdateDetails() {
+        if (updateInfo == null || !updateInfo.path("available").asBoolean()) return;
+        JTextArea notes = new JTextArea(updateNotes(updateInfo.path("notes")), 9, 42);
+        notes.setEditable(false);
+        notes.setLineWrap(true);
+        notes.setWrapStyleWord(true);
+        notes.setBackground(WHITE);
+        String version = updateInfo.path("latestVersion").asText();
+        if (!updateInfo.path("installable").asBoolean()) {
+            JOptionPane.showMessageDialog(frame, scroll(notes), "新版 v" + version + " · 请下载安装包", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        int choice = JOptionPane.showOptionDialog(frame, scroll(notes), "新版 v" + version + " · 更新内容",
+                JOptionPane.DEFAULT_OPTION, JOptionPane.INFORMATION_MESSAGE, null,
+                new String[]{"更新并重启", "稍后"}, "稍后");
+        if (choice == 0) {
+            async(() -> api("POST", "/api/updates/install", Map.of("version", version)), info -> {
+                updateInfo = info;
+                refreshUpdates(false);
+            });
+        }
     }
 
     private JPanel deliveryPanel() {
@@ -1132,6 +1210,13 @@ public class NativeMainWindow {
         JLabel local = label("●  本机运行", 12, new Color(145, 224, 186), Font.BOLD);
         local.setBorder(new EmptyBorder(0, 10, 10, 0));
         bottom.add(local);
+        JButton checkUpdates = new JButton("检查更新");
+        checkUpdates.setHorizontalAlignment(SwingConstants.LEFT);
+        checkUpdates.setForeground(new Color(186, 197, 216));
+        checkUpdates.setContentAreaFilled(false);
+        checkUpdates.setBorder(new EmptyBorder(10, 10, 10, 0));
+        checkUpdates.addActionListener(e -> refreshUpdates(true));
+        bottom.add(checkUpdates);
         JButton quit = new JButton("退出 JobPilot");
         quit.setHorizontalAlignment(SwingConstants.LEFT);
         quit.setForeground(new Color(186, 197, 216));

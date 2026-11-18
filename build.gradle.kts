@@ -264,3 +264,9 @@ tasks.withType<Test> {
         showCauses = true
     }
 }
+
+tasks.register<JavaExec>("updaterSmoke") {
+    dependsOn(tasks.testClasses)
+    classpath = sourceSets["test"].runtimeClasspath
+    mainClass.set("com.jobpilot.update.UpdaterSmoke")
+}
