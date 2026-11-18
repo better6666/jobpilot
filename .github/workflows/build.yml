@@ -4,6 +4,15 @@ on:
   push:
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      mirror_tag:
+        description: '仅镜像下载站中已验收的 macOS 包到已有 Release（空值正常构建）'
+        type: string
+        default: ''
+      mirror_macos_sha256:
+        description: '镜像包的已核验 SHA-256'
+        type: string
+        default: ''
 
 # 打包流程。设计要点（都是本地实测踩过坑后固化的）：
 #   1. jdeps 对 Spring Boot fat jar 会漏报模块（看不进 BOOT-INF/lib），
@@ -13,8 +22,31 @@ on:
 #   3. Spring Boot fat jar 的主类是 JarLauncher，别指定 --main-class
 #   4. Windows 用 app-image（不依赖 WiX），macOS 用 dmg
 jobs:
+  mirror-macos:
+    if: github.event_name == 'workflow_dispatch' && inputs.mirror_tag != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: 镜像已验收的 macOS 安装包
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.mirror_tag }}
+          EXPECTED_SHA256: ${{ inputs.mirror_macos_sha256 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$EXPECTED_SHA256" =~ ^[a-f0-9]{64}$ ]]
+          FILE="JobPilot-${RELEASE_TAG#v}.dmg"
+          curl -fL --retry 5 --retry-all-errors --output "$FILE" "https://getjobs.dpdns.org/download/$FILE"
+          echo "$EXPECTED_SHA256  $FILE" | sha256sum --check
+          gh release upload "$RELEASE_TAG" "$FILE" --clobber
+
   # 卡密服务端管计费：它的测试挂了不该照样出包（plans.test 曾过期一个月没人发现）
   license-server:
+    if: inputs.mirror_tag == ''
     runs-on: ubuntu-latest
     defaults:
       run:
