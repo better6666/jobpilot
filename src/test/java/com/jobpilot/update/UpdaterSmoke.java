@@ -85,6 +85,17 @@ public class UpdaterSmoke {
             request("POST", "/api/updates/acknowledge", Map.of("version", VERSION));
             if (get("/api/updates").path("installedNotes").size() != 0) throw new AssertionError("更新说明未记录已读状态");
             System.out.println("PASS: downloaded, verified, installed and restarted the packaged app with release notes");
+        } catch (Throwable failure) {
+            try (var walk = Files.walk(temporary)) {
+                for (Path file : walk.filter(Files::isRegularFile)
+                        .filter(path -> path.toString().endsWith(".log") || path.getFileName().toString().equals("result.json"))
+                        .toList()) {
+                    System.out.println("Updater diagnostic: " + temporary.relativize(file));
+                    List<String> lines = Files.readAllLines(file, StandardCharsets.UTF_8);
+                    lines.stream().skip(Math.max(0, lines.size() - 35)).forEach(System.out::println);
+                }
+            }
+            throw failure;
         } finally {
             fixture.stop(0);
             String launcher = executable(target).toString();
