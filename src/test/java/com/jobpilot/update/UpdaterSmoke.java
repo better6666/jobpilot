@@ -29,12 +29,14 @@ public class UpdaterSmoke {
     private static final boolean MAC = System.getProperty("os.name").toLowerCase().contains("mac");
     private static final String VERSION = "1.0.23";
     private static Path temporary;
+    private static Path isolatedHome;
     private static Path target;
     private static int appPort;
 
     public static void main(String[] args) throws Exception {
         Path repo = Path.of("").toAbsolutePath();
         temporary = Files.createTempDirectory("jobpilot updater 测试-");
+        isolatedHome = MAC ? temporary.resolve("home") : Files.createTempDirectory("jobpilot-updater-home-");
         Path goodPackage = MAC ? repo.resolve("build/dist/JobPilot-" + VERSION + ".dmg")
                 : repo.resolve("JobPilot-windows.zip");
         if (!Files.isRegularFile(goodPackage)) throw new IllegalStateException("请先打包安装文件");
@@ -135,7 +137,8 @@ public class UpdaterSmoke {
     }
 
     private static Path buildBrokenPackage(Path repo) throws Exception {
-        Path broken = Files.createDirectories(temporary.resolve("broken"));
+        // Windows 英文构建机的 javac 不接受中文命令行路径；实际安装和 APPDATA 仍使用中文空格路径。
+        Path broken = Files.createTempDirectory("jobpilot-broken-update-");
         Path classes = Files.createDirectories(broken.resolve("classes"));
         Path source = broken.resolve("BrokenUpdate.java");
         Files.writeString(source, "public class BrokenUpdate { public static void main(String[] args) { System.exit(1); } }");
@@ -204,9 +207,9 @@ public class UpdaterSmoke {
         ProcessBuilder process = noArguments ? new ProcessBuilder(executable(target).toString())
                 : new ProcessBuilder(executable(target).toString(), "--server.port=" + appPort,
                     "--jobpilot.console=false", "--updates.manifest-url=" + origin + "/updates.json");
-        Files.createDirectories(temporary.resolve("home"));
+        Files.createDirectories(isolatedHome);
         Files.createDirectories(temporary.resolve("roaming"));
-        String options = "-Duser.home=\"" + temporary.resolve("home") + "\"";
+        String options = "-Duser.home=\"" + isolatedHome + "\"";
         if (noArguments) options += " -Dserver.port=" + appPort + " -Djobpilot.console=false"
                 + " -Dupdates.manifest-url=" + origin + "/updates.json";
         process.environment().put("JAVA_TOOL_OPTIONS", options);
