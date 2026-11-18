@@ -7,6 +7,10 @@ if (-not $mt) { throw 'Windows SDK mt.exe is required' }
 $temporary = Join-Path ([IO.Path]::GetTempPath()) ('jobpilot-manifest-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $temporary | Out-Null
 try {
+    $original = $exe
+    $exe = Join-Path $temporary 'JobPilot.exe'
+    Copy-Item -LiteralPath $original -Destination $exe
+    (Get-Item -LiteralPath $exe).IsReadOnly = $false
     $manifest = Join-Path $temporary 'launcher.manifest'
     & $mt -nologo "-inputresource:$exe;#1" "-out:$manifest"
     if ($LASTEXITCODE -ne 0) { throw 'Cannot read launcher manifest' }
@@ -30,7 +34,11 @@ try {
     # https://learn.microsoft.com/windows/apps/design/globalizing/use-utf8-code-page
     $codePage.InnerText = 'UTF-8'
     $document.Save($manifest)
-    & $mt -nologo -manifest $manifest "-outputresource:$exe;#1"
+    for ($attempt = 0; $attempt -lt 20; $attempt++) {
+        & $mt -nologo -manifest $manifest "-outputresource:$exe;#1"
+        if ($LASTEXITCODE -eq 0) { break }
+        Start-Sleep -Milliseconds 500
+    }
     if ($LASTEXITCODE -ne 0) { throw 'Cannot update launcher manifest' }
     $verified = Join-Path $temporary 'verified.manifest'
     & $mt -nologo "-inputresource:$exe;#1" "-out:$verified"
@@ -38,6 +46,11 @@ try {
     [xml]$actual = [IO.File]::ReadAllText($verified)
     if ($actual.SelectSingleNode("//*[local-name()='activeCodePage']").InnerText -ne 'UTF-8') {
         throw 'Launcher UTF-8 code page was not embedded'
+    }
+    (Get-Item -LiteralPath $original).IsReadOnly = $false
+    Copy-Item -LiteralPath $exe -Destination $original -Force
+    if ((Get-FileHash -LiteralPath $exe).Hash -ne (Get-FileHash -LiteralPath $original).Hash) {
+        throw 'Launcher copy verification failed'
     }
     Write-Output 'Verified UTF-8 launcher manifest; original resources preserved'
 } finally {
