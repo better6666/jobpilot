@@ -19,13 +19,25 @@ function Save-Result {
     Copy-Item -LiteralPath (Join-Path $transaction 'status.json') -Destination (Join-Path $transaction '..\result.tmp')
     Move-Item -LiteralPath (Join-Path $transaction '..\result.tmp') -Destination (Join-Path $transaction '..\result.json') -Force
 }
+function Move-WithRetry([string]$from, [string]$to) {
+    for ($attempt = 0; $attempt -lt 40; $attempt++) {
+        try {
+            Move-Item -LiteralPath $from -Destination $to
+            return
+        } catch {
+            if ($attempt -eq 39) { throw }
+            Start-Sleep -Milliseconds 500
+        }
+    }
+}
 function Quote-Argument([string]$text) {
     $escaped = [regex]::Replace($text, '(\\*)"', '$1$1\"')
     $escaped = [regex]::Replace($escaped, '(\\+)$', '$1$1')
     return '"' + $escaped + '"'
 }
-$restartArguments = @([IO.File]::ReadAllText((Join-Path $transaction 'args.json')) | ConvertFrom-Json)
-$argumentLine = ($restartArguments | ForEach-Object { Quote-Argument $_ }) -join ' '
+$restartArguments = ConvertFrom-Json -InputObject ([IO.File]::ReadAllText((Join-Path $transaction 'args.json')))
+$quotedArguments = foreach ($argument in $restartArguments) { Quote-Argument ([string]$argument) }
+$argumentLine = [string]::Join(' ', [string[]]$quotedArguments)
 function Start-App {
     $info = New-Object Diagnostics.ProcessStartInfo
     $info.FileName = Join-Path $target 'JobPilot.exe'
@@ -57,9 +69,9 @@ try {
         Start-Sleep -Seconds 1
     }
     if (Get-Process -Id $parentPid -ErrorAction SilentlyContinue) { throw '原程序尚未退出' }
-    Move-Item -LiteralPath $target -Destination $backup
+    Move-WithRetry $target $backup
     $moved = $true
-    Move-Item -LiteralPath $source -Destination $target
+    Move-WithRetry $source $target
     $newProcess = Start-App
     for ($i=0; $i -lt 60; $i++) {
         try {
@@ -82,8 +94,10 @@ try {
         $newProcess.WaitForExit(15000) | Out-Null
     }
     if ($moved) {
-        if (Test-Path -LiteralPath $target) { Move-Item -LiteralPath $target -Destination (Join-Path $staging 'failed') }
-        Move-Item -LiteralPath $backup -Destination $target
+        if (Test-Path -LiteralPath $target) { Move-WithRetry $target (Join-Path $staging 'failed') }
+        Move-WithRetry $backup $target
+        $newProcess = Start-App
+    } elseif (-not (Get-Process -Id $parentPid -ErrorAction SilentlyContinue)) {
         $newProcess = Start-App
     }
     Set-Status 'FAILED' '本次更新未完成，已保留或恢复原程序，可稍后重试'

@@ -34,7 +34,7 @@ public class UpdaterSmoke {
 
     public static void main(String[] args) throws Exception {
         Path repo = Path.of("").toAbsolutePath();
-        temporary = Files.createTempDirectory("jobpilot-updater-smoke-");
+        temporary = Files.createTempDirectory("jobpilot updater 测试-");
         Path goodPackage = MAC ? repo.resolve("build/dist/JobPilot-" + VERSION + ".dmg")
                 : repo.resolve("JobPilot-windows.zip");
         if (!Files.isRegularFile(goodPackage)) throw new IllegalStateException("请先打包安装文件");
@@ -188,7 +188,7 @@ public class UpdaterSmoke {
                 "--jobpilot.console=false", "--updates.manifest-url=" + origin + "/updates.json");
         Files.createDirectories(temporary.resolve("home"));
         Files.createDirectories(temporary.resolve("roaming"));
-        process.environment().put("JAVA_TOOL_OPTIONS", "-Duser.home=" + temporary.resolve("home"));
+        process.environment().put("JAVA_TOOL_OPTIONS", "-Duser.home=\"" + temporary.resolve("home") + "\"");
         process.environment().put("APPDATA", temporary.resolve("roaming").toString());
         return process.redirectErrorStream(true).redirectOutput(temporary.resolve("original.log").toFile()).start();
     }

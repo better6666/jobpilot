@@ -12,6 +12,7 @@ staging=""
 new_pid=""
 mounted=0
 moved=0
+parent_exited=0
 success=0
 status() {
   printf '{"state":"%s","version":"%s","message":"%s"}\n' "$1" "$version" "$2" > "$transaction/status.tmp"
@@ -33,6 +34,8 @@ cleanup() {
     if [[ "$moved" == 1 ]]; then
       if [[ -d "$target" ]]; then mv "$target" "$staging/failed.app"; fi
       mv "$backup" "$target"
+      restart
+    elif [[ "$parent_exited" == 1 ]]; then
       restart
     fi
     status FAILED '本次更新未完成，已保留或恢复原程序，可稍后重试'
@@ -56,6 +59,7 @@ for ((i=0;i<120;i++)); do
   sleep 1
 done
 if kill -0 "$parent_pid" 2>/dev/null; then exit 1; fi
+parent_exited=1
 mv "$target" "$backup"
 moved=1
 mv "$staging/JobPilot.app" "$target"
