@@ -379,7 +379,8 @@ public class LicenseService {
         snapshot.setAllowed(allowed(state));
         snapshot.setLastVerifyAt(record != null ? record.getLastVerifyOkAt() : null);
         snapshot.setExpiresAt(record != null ? record.getExpiresAt() : null);
-        snapshot.setRemainingDays(record != null ? record.getRemainingDays() : null);
+        snapshot.setRemainingDays(record == null || record.getRemainingDays() == null ? null
+                : state == LicenseState.EXPIRED ? 0L : record.getRemainingDays());
         snapshot.setQuotaTotal(record != null ? record.getQuotaTotal() : null);
         snapshot.setQuotaRemaining(record != null ? record.getQuotaRemaining() : null);
         snapshot.setType(record != null ? record.getType() : null);

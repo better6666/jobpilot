@@ -42,6 +42,7 @@ public class AiService {
     private static final int CONNECT_TIMEOUT_MS = 10_000;
     /** 生成一句招呼语的读取超时。真机见过中转站 40 秒才返回，再长就放弃 */
     private static final int READ_TIMEOUT_MS = 45_000;
+    private static final int RESUME_READ_TIMEOUT_MS = 150_000;
     private static final int MAX_ATTEMPTS = 3;
     private static final long[] BACKOFF_MS = {600, 1800};
     /**
@@ -56,11 +57,15 @@ public class AiService {
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
 
+    @org.springframework.beans.factory.annotation.Autowired
     public AiService(ObjectMapper objectMapper) {
+        this(objectMapper, HttpClient.newBuilder()
+                .connectTimeout(Duration.ofMillis(CONNECT_TIMEOUT_MS)).build());
+    }
+
+    AiService(ObjectMapper objectMapper, HttpClient httpClient) {
         this.objectMapper = objectMapper;
-        this.httpClient = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofMillis(CONNECT_TIMEOUT_MS))
-                .build();
+        this.httpClient = httpClient;
     }
 
     /** 一次调用的结果：成功带文本，失败带人能看懂的原因（不含 key） */
@@ -166,6 +171,16 @@ public class AiService {
      */
     public AiResult chat(String baseUrl, String apiKey, String model,
                          String systemPrompt, String userPrompt, double temperature) {
+        return chat(baseUrl, apiKey, model, systemPrompt, userPrompt, temperature, false);
+    }
+
+    public AiResult chatResume(String baseUrl, String apiKey, String model,
+                               String systemPrompt, String userPrompt, double temperature) {
+        return chat(baseUrl, apiKey, model, systemPrompt, userPrompt, temperature, true);
+    }
+
+    private AiResult chat(String baseUrl, String apiKey, String model,
+                          String systemPrompt, String userPrompt, double temperature, boolean resume) {
         String base = normalizeBaseUrl(baseUrl);
         if (base.isEmpty()) {
             return AiResult.fail("接口地址没配或不是 http(s) 地址");
@@ -193,12 +208,13 @@ public class AiService {
         }
 
         String lastError = "未知错误";
-        for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+        int attempts = resume ? 1 : MAX_ATTEMPTS;
+        for (int attempt = 1; attempt <= attempts; attempt++) {
             HttpRequest request;
             try {
                 request = HttpRequest.newBuilder()
                         .uri(URI.create(base + "/chat/completions"))
-                        .timeout(Duration.ofMillis(READ_TIMEOUT_MS))
+                        .timeout(Duration.ofMillis(resume ? RESUME_READ_TIMEOUT_MS : READ_TIMEOUT_MS))
                         .header("Authorization", "Bearer " + apiKey)
                         .header("Content-Type", "application/json")
                         .POST(HttpRequest.BodyPublishers.ofString(body))
@@ -229,7 +245,7 @@ public class AiService {
             } catch (Exception e) {
                 lastError = "连接失败或超时: " + e.getClass().getSimpleName();
             }
-            if (attempt < MAX_ATTEMPTS) {
+            if (attempt < attempts) {
                 sleep(BACKOFF_MS[Math.min(attempt - 1, BACKOFF_MS.length - 1)]);
             }
         }
@@ -259,6 +275,16 @@ public class AiService {
     public AiResult chatPlatform(String apiBase, String token, String deviceId,
                                  String systemPrompt, String userPrompt, double temperature,
                                  String model) {
+        return chatPlatform(apiBase, token, deviceId, systemPrompt, userPrompt, temperature, model, false);
+    }
+
+    public AiResult chatResumePlatform(String apiBase, String token, String deviceId,
+                                       String systemPrompt, String userPrompt, double temperature, String model) {
+        return chatPlatform(apiBase, token, deviceId, systemPrompt, userPrompt, temperature, model, true);
+    }
+
+    private AiResult chatPlatform(String apiBase, String token, String deviceId,
+                                  String systemPrompt, String userPrompt, double temperature, String model, boolean resume) {
         String base = apiBase == null ? "" : apiBase.trim().replaceAll("/+$", "");
         if (base.isEmpty()) {
             return AiResult.fail("卡密服务端地址没配");
@@ -275,6 +301,7 @@ public class AiService {
             payload.put("system", systemPrompt == null ? "" : systemPrompt);
             payload.put("user", userPrompt == null ? "" : userPrompt);
             payload.put("temperature", temperature);
+            if (resume) payload.put("purpose", "resume_analysis");
             if (!isBlank(model)) {
                 payload.put("model", model.trim());
             }
@@ -290,7 +317,7 @@ public class AiService {
             try {
                 request = HttpRequest.newBuilder()
                         .uri(URI.create(base + "/api/ai/chat"))
-                        .timeout(Duration.ofMillis(READ_TIMEOUT_MS))
+                        .timeout(Duration.ofMillis(resume ? RESUME_READ_TIMEOUT_MS : READ_TIMEOUT_MS))
                         .header("Content-Type", "application/json")
                         .POST(HttpRequest.BodyPublishers.ofString(body))
                         .build();
@@ -329,9 +356,8 @@ public class AiService {
                 return AiResult.fail("调用被中断");
             } catch (Exception e) {
                 lastError = "连接卡密服务端失败或超时: " + e.getClass().getSimpleName();
-                // 读超时一次就是 45 秒，连着两次就别再等了；握手失败、连接被重置是秒回的，
-                // 多试几次不费时间，正好扛过一阵网络抖动
-                if (e instanceof java.net.http.HttpTimeoutException && ++timeouts >= 2) {
+                // 完整画像只等待一次长请求；短话术最多两次读超时，连接重置仍可快速重试。
+                if (e instanceof java.net.http.HttpTimeoutException && ++timeouts >= (resume ? 1 : 2)) {
                     break;
                 }
             }

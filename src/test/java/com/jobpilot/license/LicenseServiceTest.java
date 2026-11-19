@@ -143,6 +143,19 @@ class LicenseServiceTest {
     }
 
     @Test
+    void 过期卡不显示缓存的旧剩余天数() throws Exception {
+        LicenseRecord record = recordWithToken();
+        record.setRemainingDays(6L);
+        givenStoredRecord(record);
+        when(licenseClient.post(eq(API_BASE), eq("/verify"), anyMap()))
+                .thenThrow(new LicenseClient.LicenseServerException(402, "CARD_EXPIRED", "卡密已到期"));
+        service.init();
+        assertEquals(LicenseState.EXPIRED, service.status().getState());
+        assertEquals(0L, service.status().getRemainingDays());
+        assertFalse(service.status().isAllowed());
+    }
+
+    @Test
     void 服务端不可达且无历史确认时进入NETWORK_BLOCKED() throws Exception {
         givenStoredRecord(null);
         when(licenseClient.post(eq(API_BASE), eq("/activate"), anyMap())).thenReturn(null);

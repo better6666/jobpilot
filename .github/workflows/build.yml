@@ -137,7 +137,7 @@ jobs:
           # dmg 由这个 app-image 转出来，图标跟着走，不用再传
           ICON=packaging/icon/JobPilot.ico
           [ "$RUNNER_OS" = "macOS" ] && ICON=packaging/icon/JobPilot.icns
-          jpackage --type app-image --name JobPilot --app-version 1.0.24 \
+          jpackage --type app-image --name JobPilot --app-version 1.0.25 \
             --input build/stage --main-jar jobpilot-0.1.0.jar \
             --runtime-image build/runtime --dest build/dist \
             --icon "$ICON" \
@@ -241,7 +241,7 @@ jobs:
       - name: macOS 转 dmg
         if: runner.os == 'macOS'
         run: |
-          jpackage --type dmg --name JobPilot --app-version 1.0.24 \
+          jpackage --type dmg --name JobPilot --app-version 1.0.25 \
             --app-image build/dist/JobPilot.app --dest build/dist
           rm -rf build/dist/JobPilot.app
 
@@ -250,15 +250,15 @@ jobs:
         shell: pwsh
         run: Compress-Archive -Path build/dist/JobPilot -DestinationPath JobPilot-windows.zip
 
-      - name: 获取正式 1.0.23 客户端（验证旧版接收更新）
+      - name: 获取正式 1.0.24 客户端（验证旧版接收更新）
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p build/previous
           if [ "$RUNNER_OS" = "macOS" ]; then
-            gh release download v1.0.23 --pattern 'JobPilot-1.0.23.dmg' --dir build/previous
+            gh release download v1.0.24 --pattern 'JobPilot-1.0.24.dmg' --dir build/previous
           else
-            gh release download v1.0.23 --pattern 'JobPilot-windows.zip' --dir build/previous
+            gh release download v1.0.24 --pattern 'JobPilot-windows.zip' --dir build/previous
           fi
 
       - name: 验证一键升级与失败回滚

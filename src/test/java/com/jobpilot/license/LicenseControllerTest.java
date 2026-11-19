@@ -35,11 +35,14 @@ class LicenseControllerTest {
     @Mock
     private LicenseService licenseService;
 
+    @Mock
+    private EntitlementService entitlementService;
+
     private MockMvc mockMvc;
 
     @BeforeEach
     void setUp() {
-        mockMvc = MockMvcBuilders.standaloneSetup(new LicenseController(licenseService, null, new LicenseProperties(), null, null)).build();
+        mockMvc = MockMvcBuilders.standaloneSetup(new LicenseController(licenseService, entitlementService, new LicenseProperties(), null, null)).build();
     }
 
     @Test
@@ -80,7 +83,9 @@ class LicenseControllerTest {
                 .andExpect(jsonPath("$.data.state").value("ACTIVE"))
                 .andExpect(jsonPath("$.data.allowed").value(true));
 
-        verify(licenseService).activate("GK-TEST-KEY");
+        var order = org.mockito.Mockito.inOrder(licenseService, entitlementService);
+        order.verify(licenseService).activate("GK-TEST-KEY");
+        order.verify(entitlementService).refreshAfterActivation();
     }
 
     @Test
@@ -94,6 +99,7 @@ class LicenseControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.message").value("卡密不存在"));
+        verifyNoInteractions(entitlementService);
     }
 
     @Test

@@ -152,3 +152,8 @@ export function parsePricingModels(body: unknown): Record<string, string[]> {
   }
   return result
 }
+
+/** 完整画像需要比短话术更长的等待；不接受客户端自定任意超时。 */
+export function relayTimeout(purpose: unknown): number {
+  return purpose === 'resume_analysis' ? 120_000 : 45_000
+}

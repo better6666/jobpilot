@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { normalizeRelayBaseUrl, maskKey, modelListPaths, parseModelList, parsePricingModels } from '../src/lib/relay.ts'
+import { normalizeRelayBaseUrl, maskKey, modelListPaths, parseModelList, parsePricingModels, relayTimeout } from '../src/lib/relay.ts'
 
 // ---------------------------------------------------------------- 地址归一
 // 下面每一组用例都和客户端 AiServiceTest#normalizeBaseUrl 一一对应。
@@ -115,3 +115,9 @@ assert.deepEqual(parsePricingModels({}), {})
 assert.deepEqual(parsePricingModels(null), {})
 
 console.log('relay.test.ts 全部通过')
+
+assert.equal(relayTimeout('resume_analysis'), 120_000)
+assert.equal(relayTimeout(undefined), 45_000)
+assert.equal(relayTimeout('greeting'), 45_000)
+assert.equal(relayTimeout(900000), 45_000)
+assert.equal(relayTimeout({purpose:'resume_analysis'}), 45_000)

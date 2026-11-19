@@ -46,11 +46,11 @@ class ResumeAnalyzerTest {
     @Test void customModeReusesSavedConnectionAndRedactsContacts() throws Exception {
         AiConfig config = new AiConfig(); config.setMode("custom"); config.setBaseUrl("https://relay.example/v1");
         config.setApiKey("fixture-key"); config.setModel("fixture-model"); when(properties.get()).thenReturn(config);
-        when(ai.chat(anyString(),anyString(),anyString(),anyString(),anyString(),anyDouble()))
+        when(ai.chatResume(anyString(),anyString(),anyString(),anyString(),anyString(),anyDouble()))
                 .thenReturn(AiService.AiResult.ok(mapper.writeValueAsString(ResumeServiceTest.profile())));
         var profile = analyzer.analyze("Java 开发，邮箱 candidate@example.com，电话 13800138000，证件 12345678901234567X", "Java 开发");
         ArgumentCaptor<String> prompt = ArgumentCaptor.forClass(String.class);
-        verify(ai).chat(eq(config.getBaseUrl()),eq("fixture-key"),eq("fixture-model"),anyString(),prompt.capture(),eq(0.3));
+        verify(ai).chatResume(eq(config.getBaseUrl()),eq("fixture-key"),eq("fixture-model"),anyString(),prompt.capture(),eq(0.3));
         assertThat(prompt.getValue()).contains("Java 开发", "[邮箱已隐藏]", "[电话已隐藏]", "[证件号已隐藏]")
                 .doesNotContain("candidate@example.com", "13800138000", "12345678901234567X");
         assertThat(profile.persona()).isEqualTo(ResumeServiceTest.profile().persona());
@@ -61,16 +61,16 @@ class ResumeAnalyzerTest {
         AiConfig config = new AiConfig(); config.setMode("platform"); config.setModel("chosen-model");
         when(properties.get()).thenReturn(config); when(license.proxyCredentials()).thenReturn(Map.of("token","fixture-token","device_id","fixture-device"));
         licenseProperties.setApiBase("https://platform.example");
-        when(ai.chatPlatform(anyString(),anyString(),anyString(),anyString(),anyString(),anyDouble(),anyString()))
+        when(ai.chatResumePlatform(anyString(),anyString(),anyString(),anyString(),anyString(),anyDouble(),anyString()))
                 .thenReturn(AiService.AiResult.ok("```json\n"+mapper.writeValueAsString(ResumeServiceTest.profile())+"\n```"));
         assertThat(analyzer.analyze("Java 项目经历", "").improvements()).hasSize(1);
-        verify(ai).chatPlatform(eq("https://platform.example"),eq("fixture-token"),eq("fixture-device"),anyString(),anyString(),eq(0.3),eq("chosen-model"));
-        verify(ai,never()).chat(anyString(),anyString(),anyString(),anyString(),anyString(),anyDouble());
+        verify(ai).chatResumePlatform(eq("https://platform.example"),eq("fixture-token"),eq("fixture-device"),anyString(),anyString(),eq(0.3),eq("chosen-model"));
+        verify(ai,never()).chatResume(anyString(),anyString(),anyString(),anyString(),anyString(),anyDouble());
     }
 
     @Test void invalidOrUnavailableAiNeverProducesAFakeProfile() {
         AiConfig config=new AiConfig();config.setMode("custom");when(properties.get()).thenReturn(config);
-        when(ai.chat(any(),any(),any(),any(),any(),anyDouble())).thenReturn(AiService.AiResult.fail("连接超时"));
+        when(ai.chatResume(any(),any(),any(),any(),any(),anyDouble())).thenReturn(AiService.AiResult.fail("连接超时"));
         assertThatThrownBy(()->analyzer.analyze("简历内容", "")).hasMessageContaining("连接超时");
         assertThatThrownBy(()->analyzer.parse("模型未返回 JSON")).hasMessageContaining("格式不完整");
         assertThatThrownBy(()->analyzer.parse("{\"summary\":\"只有一句话\"}")).hasMessageContaining("格式不完整");

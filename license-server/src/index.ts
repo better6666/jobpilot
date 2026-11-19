@@ -14,7 +14,8 @@ import {
   maskKey,
   modelListPaths,
   parseModelList,
-  parsePricingModels
+  parsePricingModels,
+  relayTimeout
 } from './lib/relay'
 
 export interface Env {
@@ -74,6 +75,7 @@ interface CreateCardsBody {
   note?: string
 }
 interface AiChatBody extends AuthBody {
+  purpose?: string
   system?: string
   user?: string
   temperature?: number
@@ -245,7 +247,8 @@ async function callRelay(
   system: string,
   user: string,
   temperature: number,
-  model = relay.model
+  model = relay.model,
+  timeoutMs = 45000
 ): Promise<{ text: string } | { error: string }> {
   const payload = {
     model,
@@ -265,7 +268,7 @@ async function callRelay(
         'Content-Type': 'application/json'
       },
       body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(45000)
+      signal: AbortSignal.timeout(timeoutMs)
     })
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
@@ -748,7 +751,7 @@ app.post('/api/ai/chat', async (c) => {
     if (allowed?.includes(requested)) model = requested
   }
 
-  const result = await callRelay(relay, body?.system ?? '', user, temperature, model)
+  const result = await callRelay(relay, body?.system ?? '', user, temperature, model, relayTimeout(body?.purpose))
   if ('error' in result) {
     return fail(502, 'RELAY_FAILED', result.error)
   }

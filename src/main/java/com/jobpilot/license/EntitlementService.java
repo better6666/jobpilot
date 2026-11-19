@@ -81,6 +81,14 @@ public class EntitlementService {
         return e != null ? e : fallback();
     }
 
+    public synchronized void refreshAfterActivation() {
+        cached = null;
+        lastFetchAt = 0;
+        try { Files.deleteIfExists(cacheFile()); }
+        catch (java.io.IOException error) { log.warn("旧授权权益缓存无法清除"); }
+        refresh();
+    }
+
     /** 强制刷新。启动时和心跳后调用；失败静默保留旧缓存 */
     public synchronized Entitlement refresh() {
         if (!properties.isEnabled()) {

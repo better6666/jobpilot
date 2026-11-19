@@ -88,6 +88,36 @@ class EntitlementServiceTest {
     }
 
     @Test
+    void 新卡激活后刷新权益且断网不继承旧卡高级权限(@org.junit.jupiter.api.io.TempDir java.nio.file.Path dir) throws Exception {
+        LicenseService license = org.mockito.Mockito.mock(LicenseService.class);
+        LicenseRecord record = new LicenseRecord();
+        record.setToken("new-test-token");
+        when(license.recordForTest()).thenReturn(record);
+        when(license.fingerprintForTest()).thenReturn("test-device");
+        try (var paths = org.mockito.Mockito.mockStatic(com.jobpilot.system.SystemPaths.class)) {
+            paths.when(com.jobpilot.system.SystemPaths::dataDir).thenReturn(dir);
+            java.nio.file.Files.writeString(dir.resolve("entitlement.json"), """
+                    {"plan":"advanced","usable":true,"features":{"ai_match":true},"quotas":{"max_resumes":5}}
+                    """);
+            EntitlementService active = new EntitlementService(license, licenseClient, properties, objectMapper, jdbcTemplate);
+            active.initTable();
+            assertThat(active.allows("ai_match")).isTrue();
+            // 新卡请求未取得授权结果时，旧卡高级能力必须失效，重启也不能重载旧缓存。
+            active.refreshAfterActivation();
+            assertThat(active.current().isUsable()).isFalse();
+            assertThat(java.nio.file.Files.exists(dir.resolve("entitlement.json"))).isFalse();
+            when(licenseClient.post(anyString(), eq("/api/license/entitlement"), any()))
+                    .thenReturn(objectMapper.readTree("""
+                            {"success":true,"data":{"plan":"standard","usable":true,"features":{"ai_match":true},"quotas":{"max_resumes":2}}}
+                            """));
+            active.refreshAfterActivation();
+            assertThat(active.current().getPlan()).isEqualTo("standard");
+            assertThat(active.current().quota("max_resumes")).isEqualTo(2);
+            assertThat(active.allows("ai_match")).isTrue();
+        }
+    }
+
+    @Test
     void 体验版不给进阶功能基础功能照常() {
         given(trial());
         EntitlementService s = service;

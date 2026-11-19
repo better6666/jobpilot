@@ -45,11 +45,11 @@ public class ResumeAnalyzer {
                 + "\n<resume_data>\n" + redactContacts(text) + "\n</resume_data>";
         AiService.AiResult result;
         if (AiProperties.MODE_CUSTOM.equals(config.getMode())) {
-            result = ai.chat(config.getBaseUrl(), config.getApiKey(), config.getModel(), SYSTEM, user, 0.3);
+            result = ai.chatResume(config.getBaseUrl(), config.getApiKey(), config.getModel(), SYSTEM, user, 0.3);
         } else {
             var credentials = license.proxyCredentials();
             if (credentials == null) throw new IllegalStateException("请先激活卡密，或在 AI 话术页配置自己的接口");
-            result = ai.chatPlatform(licenseProperties.getApiBase(), credentials.get("token"), credentials.get("device_id"),
+            result = ai.chatResumePlatform(licenseProperties.getApiBase(), credentials.get("token"), credentials.get("device_id"),
                     SYSTEM, user, 0.3, config.getModel());
         }
         if (!result.isOk()) throw new IllegalStateException(result.error());

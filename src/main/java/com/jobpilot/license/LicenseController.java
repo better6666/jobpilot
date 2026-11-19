@@ -30,7 +30,9 @@ public class LicenseController {
             return ApiResponse.fail("卡密不能为空");
         }
         try {
-            return ApiResponse.ok(licenseService.activate(cardKey));
+            LicenseStatus status = licenseService.activate(cardKey);
+            entitlementService.refreshAfterActivation();
+            return ApiResponse.ok(status);
         } catch (LicenseClient.LicenseServerException | LicenseClient.LicenseUnavailableException e) {
             return ApiResponse.fail(e.getMessage());
         }
