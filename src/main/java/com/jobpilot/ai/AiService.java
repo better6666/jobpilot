@@ -236,7 +236,7 @@ public class AiService {
                 }
                 lastError = describeHttpError(code, response.body());
                 // 4xx（429 除外）是确定性问题，重试没意义
-                if (code >= 400 && code < 500 && code != 429) {
+                if (resume || code >= 400 && code < 500 && code != 429) {
                     return AiResult.fail(lastError);
                 }
             } catch (InterruptedException e) {
@@ -348,7 +348,7 @@ public class AiService {
                     return AiResult.ok(text);
                 }
                 lastError = describePlatformError(code, response.body());
-                if (code >= 400 && code < 500 && code != 429) {
+                if (resume || code >= 400 && code < 500 && code != 429) {
                     return AiResult.fail(lastError);
                 }
             } catch (InterruptedException e) {

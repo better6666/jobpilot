@@ -62,6 +62,19 @@ class ResumeTimeoutTest {
         verify(transport, times(2)).send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class));
     }
 
+    @Test
+    @SuppressWarnings("unchecked")
+    void 服务端超时返回502也不能重复提交完整简历() throws Exception {
+        HttpClient transport = mock(HttpClient.class);
+        HttpResponse<String> response = mock(HttpResponse.class);
+        when(response.statusCode()).thenReturn(502);
+        when(response.body()).thenReturn("{\"success\":false,\"message\":\"模型超时\"}");
+        when(transport.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class))).thenReturn(response);
+        AiService ai = new AiService(mapper, transport);
+        assertThat(ai.chatResumePlatform("https://license.test", "test-token", "device", "s", "u", .2, "m").isOk()).isFalse();
+        verify(transport).send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class));
+    }
+
     private static String body(HttpRequest request) throws Exception {
         var bytes = new ByteArrayOutputStream();
         var result = new CompletableFuture<String>();

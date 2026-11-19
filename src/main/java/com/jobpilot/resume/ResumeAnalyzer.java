@@ -22,7 +22,8 @@ public class ResumeAnalyzer {
              "improvements":[{"priority":"高/中/低", "issue":"问题", "evidence":"简历中支持判断的片段或未提供",
                 "suggestion":"可执行的优化步骤", "example":"基于现有事实的改写示例或带占位符的模板"}],
              "missingInformation":["需要用户补充的信息"], "persona":"事实性求职背景"}
-            summary 不超过600字，persona不超过1500字，建议不超过8条；职业方向、优势等列表每项简洁。
+            整个 JSON 的中文内容合计不超过1800字。summary不超过200字，persona不超过400字；
+            优先给最重要的3至4条优化建议，每条的证据、步骤和改写示例简洁具体；其他列表最多6项。
             """;
     private final ObjectMapper mapper;
     private final AiProperties properties;

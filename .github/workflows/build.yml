@@ -137,7 +137,7 @@ jobs:
           # dmg 由这个 app-image 转出来，图标跟着走，不用再传
           ICON=packaging/icon/JobPilot.ico
           [ "$RUNNER_OS" = "macOS" ] && ICON=packaging/icon/JobPilot.icns
-          jpackage --type app-image --name JobPilot --app-version 1.0.25 \
+          jpackage --type app-image --name JobPilot --app-version 1.0.26 \
             --input build/stage --main-jar jobpilot-0.1.0.jar \
             --runtime-image build/runtime --dest build/dist \
             --icon "$ICON" \
@@ -241,7 +241,7 @@ jobs:
       - name: macOS 转 dmg
         if: runner.os == 'macOS'
         run: |
-          jpackage --type dmg --name JobPilot --app-version 1.0.25 \
+          jpackage --type dmg --name JobPilot --app-version 1.0.26 \
             --app-image build/dist/JobPilot.app --dest build/dist
           rm -rf build/dist/JobPilot.app
 
