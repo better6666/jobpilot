@@ -25,10 +25,15 @@ result() {
 args=()
 while IFS= read -r -d '' argument; do args+=("$argument"); done < "$transaction/args.bin"
 restart() {
-  "$target/Contents/MacOS/JobPilot" "${args[@]}" >> "$transaction/restarted.log" 2>&1 &
+  if [[ "${args[0]+set}" == set ]]; then
+    "$target/Contents/MacOS/JobPilot" "${args[@]}" >> "$transaction/restarted.log" 2>&1 &
+  else
+    "$target/Contents/MacOS/JobPilot" >> "$transaction/restarted.log" 2>&1 &
+  fi
   new_pid=$!
 }
 cleanup() {
+  trap - EXIT
   if [[ "$success" == 0 ]]; then
     if [[ -n "$new_pid" ]]; then kill -TERM "$new_pid" 2>/dev/null || true; fi
     if [[ "$moved" == 1 ]]; then
