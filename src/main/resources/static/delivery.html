@@ -156,8 +156,8 @@
         <input id="maxJobs" type="number" min="1" max="200" value="50">
       </div>
       <div>
-        <label>岗位间隔秒数（随机取一半到满值）</label>
-        <input id="waitSeconds" type="number" min="1" max="120" value="10">
+        <label>岗位间隔秒数（正式投递至少 20 秒）</label>
+        <input id="waitSeconds" type="number" min="1" max="120" value="20">
       </div>
       <div>
         <label>扫码登录等待分钟数</label>
@@ -419,7 +419,7 @@ function readConfig() {
     minCompanySize: Number($('minCompanySize').value) || 0,
     maxCompanySize: Number($('maxCompanySize').value) || 0,
     maxJobsPerKeyword: Number($('maxJobs').value) || 50,
-    waitSeconds: Number($('waitSeconds').value) || 10,
+    waitSeconds: Number($('waitSeconds').value) || 20,
     loginTimeoutMinutes: Number($('loginTimeout').value) || 5,
     dryRun: $('dryRun').checked,
     scoreRules

@@ -1,6 +1,7 @@
 package com.jobpilot.boss;
 
 import com.jobpilot.browser.BrowserManager;
+import com.jobpilot.browser.HumanVerification;
 import com.jobpilot.delivery.CardConsumer;
 import com.jobpilot.delivery.DeliveryOutcome;
 import com.jobpilot.delivery.DeliveryStatus;
@@ -18,9 +19,12 @@ import org.springframework.stereotype.Component;
 
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.function.BooleanSupplier;
+import java.util.function.Supplier;
 
 /**
  * Boss 直聘浏览器操作层。
@@ -80,14 +84,18 @@ public class BossDriver {
 
     /** 打开列表页并等待登录。已登录（profile 里有 cookie）直接返回。 */
     public LoginResult ensureLogin(int timeoutMinutes, ProgressListener listener, BooleanSupplier stop) {
+        Set<Page> existing = Set.copyOf(browserManager.context().pages());
         Page page = browserManager.context().newPage();
         configureTimeouts(page);
+        boolean keepPage = false;
         try {
             navigate(page, BOSS_DOMAIN + "/web/geek/jobs", listener);
-            if (hasLoginCookie()) {
+            checkVerification(existing, listener, stop);
+            if (!stop.getAsBoolean() && hasLoginCookie()) {
                 listener.onProgress("已检测到登录态，直接进入岗位列表");
                 return LoginResult.LOGGED_IN;
             }
+            if (stop.getAsBoolean()) return LoginResult.TIMEOUT;
             listener.onProgress("未检测到登录态，请在浏览器窗口里扫码登录（等待 " + timeoutMinutes + " 分钟）");
             long deadline = System.currentTimeMillis() + timeoutMinutes * 60_000L;
             while (System.currentTimeMillis() < deadline && !stop.getAsBoolean()) {
@@ -95,14 +103,18 @@ public class BossDriver {
                 if (page.isClosed()) {
                     throw new TargetClosedError();
                 }
-                if (hasLoginCookie()) {
+                checkVerification(existing, listener, stop);
+                if (!stop.getAsBoolean() && hasLoginCookie()) {
                     listener.onProgress("扫码登录成功");
                     return LoginResult.LOGGED_IN;
                 }
             }
-            return stop.getAsBoolean() ? LoginResult.TIMEOUT : LoginResult.TIMEOUT;
+            return LoginResult.TIMEOUT;
+        } catch (HumanVerification.PausedRun e) {
+            keepPage = true;
+            throw e;
         } finally {
-            closeQuietly(page);
+            if (!keepPage) closeQuietly(page);
         }
     }
 
@@ -141,16 +153,19 @@ public class BossDriver {
     public void processKeyword(String searchUrl, String keyword, int maxCards,
                                ProgressListener listener, BooleanSupplier stop,
                                CardConsumer<BossJobCard> callback) {
+        Set<Page> existing = Set.copyOf(browserManager.context().pages());
         Page page = browserManager.context().newPage();
         configureTimeouts(page);
+        boolean keepPage = false;
         try {
             navigate(page, searchUrl, listener);
-            waitIfSecurityCheck(page, listener, stop);
+            checkVerification(existing, listener, stop);
             if (stop.getAsBoolean()) {
                 return;
             }
 
-            int loaded = scrollToLoadAll(page, listener, stop);
+            int loaded = scrollToLoadAll(page, maxCards, () -> checkVerification(existing, listener, stop), stop);
+            if (stop.getAsBoolean()) return;
             listener.onProgress("【" + keyword + "】岗位加载完成，共 " + loaded + " 个，开始逐个处理");
             page.evaluate("window.scrollTo(0, 0)");
             sleep(1000);
@@ -162,12 +177,15 @@ public class BossDriver {
                     break;
                 }
                 try {
+                    checkVerification(existing, listener, stop);
                     // 每轮重新定位：虚拟滚动会让之前的 element handle 失效
                     Locator cardLocator = page.locator(CARD_XPATH);
                     if (i >= cardLocator.count()) {
                         break;
                     }
-                    BossJobCard card = clickCardAndCapture(page, cardLocator, i);
+                    BossJobCard card = clickCardAndCapture(page, cardLocator, i,
+                            () -> checkVerification(existing, listener, stop), stop);
+                    if (stop.getAsBoolean()) break;
                     if (card == null || card.getEncryptId() == null) {
                         log.debug("【{}】第 {} 个卡片没拦到详情数据，跳过", keyword, i + 1);
                         continue;
@@ -176,13 +194,19 @@ public class BossDriver {
                         listener.onProgress("【" + keyword + "】进度 " + (i + 1) + "/" + count);
                     }
                     callback.accept(card, page);
+                } catch (HumanVerification.PausedRun | TargetClosedError e) {
+                    throw e;
                 } catch (Exception e) {
+                    checkVerification(existing, listener, stop);
                     log.debug("【{}】处理第 {} 个卡片异常: {}", keyword, i + 1, e.getMessage());
                 }
             }
             listener.onProgress("【" + keyword + "】处理完成");
+        } catch (HumanVerification.PausedRun e) {
+            keepPage = true;
+            throw e;
         } finally {
-            closeQuietly(page);
+            if (!keepPage) closeQuietly(page);
         }
     }
 
@@ -195,12 +219,13 @@ public class BossDriver {
      * 点击第 i 个卡片并拦截 detail.json。
      * 第一个卡片页面加载后就是选中态，点它不发请求：先点第二个再切回第一个。
      */
-    private BossJobCard clickCardAndCapture(Page page, Locator cardLocator, int index) {
+    private BossJobCard clickCardAndCapture(Page page, Locator cardLocator, int index,
+                                           BooleanSupplier verification, BooleanSupplier stop) {
         // 列表第一个卡片默认就是选中态，直接点它不触发详情接口：
         // 先点第二个把选中态挪走，再点回目标卡片，接口才会重新请求。
         // 注意与 total 无关——只跑 1 个岗位时同样要先热身，否则必然超时
         boolean needWarmup = index == 0 && cardLocator.count() > 1;
-        for (int attempt = 1; attempt <= 2; attempt++) {
+        for (int attempt = 1; attempt <= 2 && !stop.getAsBoolean(); attempt++) {
             try {
                 if (needWarmup) {
                     try {
@@ -215,6 +240,7 @@ public class BossDriver {
                         new Page.WaitForResponseOptions().setTimeout(CARD_CAPTURE_TIMEOUT_MS),
                         () -> clickQuietly(cardLocator.nth(index)));
                 sleep(500);
+                if (verification.getAsBoolean()) continue;
                 if (response != null) {
                     try {
                         return BossJobCard.parse(response.text());
@@ -223,7 +249,10 @@ public class BossDriver {
                         return null;
                     }
                 }
+            } catch (HumanVerification.PausedRun | TargetClosedError e) {
+                throw e;
             } catch (Exception e) {
+                verification.getAsBoolean();
                 // 刚启动的浏览器首屏渲染慢，点击可能整轮超时；重试一次再放弃这个卡片
                 log.debug("第 {} 个卡片第 {}/2 次拦截详情失败: {}", index + 1, attempt, e.getMessage());
             }
@@ -250,20 +279,23 @@ public class BossDriver {
     }
 
     /** 滚动到列表底部：卡片数连续 3 轮不变认为加载完（Boss 没有可靠的分页信号） */
-    private int scrollToLoadAll(Page page, ProgressListener listener, BooleanSupplier stop) {
+    private int scrollToLoadAll(Page page, int maxCards, BooleanSupplier verification, BooleanSupplier stop) {
         int lastCount = -1;
         int stableRounds = 0;
         for (int round = 0; round < 300; round++) {
             if (stop.getAsBoolean()) {
                 break;
             }
+            verification.getAsBoolean();
+            if (safeCardCount(page) >= maxCards) break;
             try {
                 page.evaluate("window.scrollBy(0, Math.round(window.innerHeight * 1.5))");
             } catch (Exception e) {
                 log.debug("滚动执行失败（frame 可能已失效）: {}", e.getMessage());
                 break;
             }
-            sleep(1200);
+            page.waitForTimeout(2000);
+            verification.getAsBoolean();
             int count = safeCardCount(page);
             if (count <= 0) {
                 break;
@@ -320,7 +352,16 @@ public class BossDriver {
         }
         Page detailPage = null;
         Page ownedChatPage = null;
+        Set<Page> existing = Set.copyOf(browserManager.context().pages());
+        boolean contactStarted = false;
+        boolean greetingConfirmed = false;
+        boolean keepPages = false;
+        Supplier<List<Page>> relatedPages = () -> browserManager.context().pages().stream()
+                .filter(page -> page == listPage || !existing.contains(page)).toList();
         try {
+            if (awaitVerification(() -> List.of(listPage), listener, stop)) {
+                return DeliveryOutcome.failed("列表在验证期间已恢复，请核对当前岗位后重试");
+            }
             // 1. 从列表页详情面板拿"查看更多"链接（Boss 的立即沟通按钮只在完整详情页有）
             Locator moreBtn = listPage.locator("a.more-job-btn");
             if (moreBtn.count() == 0) {
@@ -335,7 +376,9 @@ public class BossDriver {
             detailPage = browserManager.context().newPage();
             configureTimeouts(detailPage);
             navigate(detailPage, BOSS_DOMAIN + href, listener);
-            waitIfSecurityCheck(detailPage, listener, stop);
+            if (awaitVerification(relatedPages, listener, stop) && !(BOSS_DOMAIN + href).equals(detailPage.url())) {
+                return DeliveryOutcome.failed("验证后详情页已跳转，请核对当前岗位后重试");
+            }
 
             // 3. 列表接口没拦住 JD 时从详情页 DOM 兜底
             if (isBlank(card.getPostDescription())) {
@@ -348,8 +391,11 @@ public class BossDriver {
 
             // 4. 沟通按钮：未聊过的岗位显示"立即沟通"，聊过的显示"继续沟通"，两者都能点
             Locator chatBtn = detailPage.locator("a.btn-startchat, a.op-btn-chat");
-            boolean found = false;
+            Locator chatButton = null;
             for (int i = 0; i < 5 && !stop.getAsBoolean(); i++) {
+                if (awaitVerification(relatedPages, listener, stop) && !(BOSS_DOMAIN + href).equals(detailPage.url())) {
+                    return DeliveryOutcome.failed("验证后详情页已跳转，请核对当前岗位后重试");
+                }
                 for (int j = 0; j < chatBtn.count(); j++) {
                     Locator candidate = chatBtn.nth(j);
                     try {
@@ -358,24 +404,26 @@ public class BossDriver {
                         }
                         String text = candidate.textContent();
                         if (text != null && (text.contains("立即沟通") || text.contains("继续沟通"))) {
-                            found = true;
+                            chatButton = candidate;
                             break;
                         }
                     } catch (Exception ignore) {
                         // 元素可能刚被页面重绘替换，接着找下一个
                     }
                 }
-                if (found) {
+                if (chatButton != null) {
                     break;
                 }
                 sleep(1000);
             }
-            if (!found) {
+            if (stop.getAsBoolean()) return DeliveryOutcome.failed("已停止");
+            if (chatButton == null) {
                 return new DeliveryOutcome(DeliveryStatus.FAILED, "未找到沟通按钮", greeting);
             }
-            java.util.Set<Page> beforeChat = new java.util.HashSet<>(browserManager.context().pages());
-            chatBtn.first().click(new Locator.ClickOptions().setTimeout(ACTION_TIMEOUT_MS));
-            sleep(1500);
+            Set<Page> beforeChat = Set.copyOf(browserManager.context().pages());
+            contactStarted = true;
+            chatButton.click(new Locator.ClickOptions().setTimeout(ACTION_TIMEOUT_MS));
+            detailPage.waitForTimeout(1500);
 
             // 5. "已向BOSS发送消息"确认框与聊天输入框合并轮询：
             // 输入框没出现就点一次"继续沟通"（对话框可能比固定等待出现得晚），
@@ -383,6 +431,9 @@ public class BossDriver {
             Page chatPage = detailPage;
             Locator input = null;
             for (int i = 0; i < 20 && !stop.getAsBoolean(); i++) {
+                if (awaitVerification(relatedPages, listener, stop)) {
+                    return DeliveryOutcome.unconfirmed("验证打断沟通，请在平台核对本岗位结果");
+                }
                 input = findChatInput(detailPage);
                 if (input != null) {
                     chatPage = detailPage;
@@ -410,19 +461,22 @@ public class BossDriver {
                     return DeliveryOutcome.limit("Boss 提示：" + notice);
                 }
                 clickContinueChat(detailPage);
-                sleep(1000);
+                detailPage.waitForTimeout(1000);
             }
+            if (stop.getAsBoolean()) throw new HumanVerification.PausedRun("已停止");
             if (input == null) {
                 String notice = visibleDialogText(detailPage);
                 if (isLimitNotice(notice)) {
                     return DeliveryOutcome.limit("Boss 提示：" + notice);
                 }
-                // 把挡路的弹窗原话带上：不然只知道"没找到输入框"，不知道是被什么拦了
+                // 把挡路的弹窗原话带上
                 return new DeliveryOutcome(DeliveryStatus.FAILED, notice != null
                         ? "未找到聊天输入框（页面提示：" + notice + "）" : "未找到聊天输入框", greeting);
             }
 
             // 7. 输入话术并发送
+            if (awaitVerification(relatedPages, listener, stop)) return DeliveryOutcome.unconfirmed("验证打断聊天，请核对沟通结果");
+            if (stop.getAsBoolean()) throw new HumanVerification.PausedRun("已停止");
             input.first().click();
             sleep(300);
             // 超时要按字数放宽：逐字 60ms，一百来字的话术光打字就要 6~8 秒，
@@ -431,15 +485,21 @@ public class BossDriver {
                     .setDelay(TYPE_DELAY_MS)
                     .setTimeout(typingTimeoutMs(greeting)));
             sleep(800);
+            if (awaitVerification(relatedPages, listener, stop)) return DeliveryOutcome.unconfirmed("验证打断聊天，请核对沟通结果");
+            if (stop.getAsBoolean()) throw new HumanVerification.PausedRun("已停止");
 
             boolean sent = false;
             input.first().press("Enter");
-            sleep(1500);
+            chatPage.waitForTimeout(1500);
+            if (awaitVerification(relatedPages, listener, stop)) return DeliveryOutcome.unconfirmed("发送后出现验证，请在聊天中核对结果");
+            if (stop.getAsBoolean()) throw new HumanVerification.PausedRun("已停止");
             if (isInputCleared(input.first())) {
                 sent = true;
             } else {
                 input.first().press("Control+Enter");
-                sleep(1500);
+                chatPage.waitForTimeout(1500);
+                if (awaitVerification(relatedPages, listener, stop)) return DeliveryOutcome.unconfirmed("发送后出现验证，请在聊天中核对结果");
+                if (stop.getAsBoolean()) throw new HumanVerification.PausedRun("已停止");
                 if (isInputCleared(input.first())) {
                     sent = true;
                 }
@@ -450,24 +510,42 @@ public class BossDriver {
                         "button:has-text('发送'), div.btn-send, div.send-message");
                 if (sendBtn.count() > 0) {
                     sendBtn.first().click(new Locator.ClickOptions().setTimeout(ACTION_TIMEOUT_MS));
-                    sleep(1500);
+                    chatPage.waitForTimeout(1500);
+                    if (awaitVerification(relatedPages, listener, stop)) return DeliveryOutcome.unconfirmed("发送后出现验证，请在聊天中核对结果");
                     sent = isInputCleared(input.first());
                 }
             }
             if (!sent) {
                 return new DeliveryOutcome(DeliveryStatus.FAILED, "消息未确认发出（输入框仍有内容）", greeting);
             }
+            greetingConfirmed = true;
             listener.onProgress("已发送打招呼语 | " + target);
             String note = resumeConfig != null && resumeConfig.isSendResume()
                     ? resumes.send("boss", chatPage, resumeConfig, card, stop) : null;
             if (note != null) listener.onProgress(note + " | " + target);
             return new DeliveryOutcome(DeliveryStatus.DELIVERED, note, greeting);
+        } catch (HumanVerification.PausedRun e) {
+            keepPages = true;
+            throw contactStarted && !greetingConfirmed ? e.afterAction() : e;
+        } catch (TargetClosedError e) {
+            if (contactStarted && !greetingConfirmed) throw new HumanVerification.PausedRun("沟通窗口已关闭").afterAction();
+            throw e;
         } catch (Exception e) {
+            try {
+                if (awaitVerification(relatedPages, listener, stop) && contactStarted && !greetingConfirmed) {
+                    return DeliveryOutcome.unconfirmed("验证打断沟通，请在平台核对结果");
+                }
+            } catch (HumanVerification.PausedRun interrupted) {
+                keepPages = true;
+                throw contactStarted && !greetingConfirmed ? interrupted.afterAction() : interrupted;
+            }
             log.warn("投递过程异常 | {}: {}", target, e.getMessage());
             return new DeliveryOutcome(DeliveryStatus.FAILED, e.getMessage(), greeting);
         } finally {
-            closeQuietly(ownedChatPage);
-            closeQuietly(detailPage);
+            if (!keepPages) {
+                closeQuietly(ownedChatPage);
+                closeQuietly(detailPage);
+            }
         }
     }
 
@@ -592,25 +670,14 @@ public class BossDriver {
     // 基础设施
     // ------------------------------------------------------------------
 
-    /** Boss 被风控跳到验证页时：提示用户手动过验证，然后原地等 */
-    private void waitIfSecurityCheck(Page page, ProgressListener listener, BooleanSupplier stop) {
-        try {
-            String url = page.url();
-            if (url != null && (url.contains("verify") || url.contains("captcha"))) {
-                listener.onProgress("触发 Boss 安全校验，请在浏览器窗口里手动完成验证");
-                int waited = 0;
-                while (waited < 300 && !stop.getAsBoolean()) {
-                    sleep(2000);
-                    waited += 2;
-                    String current = page.url();
-                    if (current != null && !current.contains("verify") && !current.contains("captcha")) {
-                        listener.onProgress("安全校验已通过");
-                        return;
-                    }
-                }
-            }
-        } catch (Exception ignore) {
-        }
+    private boolean checkVerification(Set<Page> existing, ProgressListener listener, BooleanSupplier stop) {
+        return awaitVerification(() -> browserManager.context().pages().stream()
+                .filter(page -> !existing.contains(page)).toList(), listener, stop);
+    }
+
+    private static boolean awaitVerification(Supplier<List<Page>> pages,
+                                             ProgressListener listener, BooleanSupplier stop) {
+        return HumanVerification.waitForUser(pages, "BOSS 直聘", listener, stop);
     }
 
     private void navigate(Page page, String url, ProgressListener listener) {

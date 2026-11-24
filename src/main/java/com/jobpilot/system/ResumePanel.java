@@ -40,10 +40,15 @@ public class ResumePanel extends JPanel {
     private final JButton replace = new JButton("替换所选简历");
     private final JButton remove = new JButton("删除本地副本");
     private final JButton upload = new JButton("导入简历");
+    private final JButton refreshButton = new JButton("刷新");
+    private final JTabbedPane tabs = new JTabbedPane();
     private JsonNode current;
     private String loadedText = "";
     private boolean loading;
     private boolean busy;
+    private boolean updatingList;
+    private int loadVersion;
+    private Integer catalogLimit;
     private final Timer timer;
 
     public ResumePanel(String base, Api api, Consumer<String> onPersonaApplied, Runnable onCatalogChanged) {
@@ -55,8 +60,7 @@ public class ResumePanel extends JPanel {
         setOpaque(false);
         JPanel toolbar = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 0));
         toolbar.setOpaque(false);
-        JButton refresh = new JButton("刷新");
-        toolbar.add(upload); toolbar.add(replace); toolbar.add(remove); toolbar.add(refresh); toolbar.add(quota);
+        toolbar.add(upload); toolbar.add(replace); toolbar.add(remove); toolbar.add(refreshButton); toolbar.add(quota);
         add(toolbar, BorderLayout.NORTH);
         list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         list.setFixedCellHeight(42);
@@ -67,7 +71,6 @@ public class ResumePanel extends JPanel {
         detail.setOpaque(false);
         metadata.setForeground(new Color(105, 117, 139));
         detail.add(metadata, BorderLayout.NORTH);
-        JTabbedPane tabs = new JTabbedPane();
         tabs.addTab("简历文本 · 可修正", new JScrollPane(text));
         tabs.addTab("职业画像与优化建议", new JScrollPane(report));
         detail.add(tabs, BorderLayout.CENTER);
@@ -96,17 +99,26 @@ public class ResumePanel extends JPanel {
         report.setText("AI 将给出职业方向、已有技能、优势、逐项优化建议和待补充信息。\n画像不会自动覆盖话术背景，请确认后点击“应用为 AI 话术背景”。");
         upload.addActionListener(event -> choose(false));
         replace.addActionListener(event -> choose(true));
-        refresh.addActionListener(event -> refresh());
-        list.addListSelectionListener(event -> { if (!event.getValueIsAdjusting()) loadSelected(false); });
+        refreshButton.addActionListener(event -> refresh());
+        list.addListSelectionListener(event -> {
+            if (!updatingList && !event.getValueIsAdjusting()) loadSelected(false);
+        });
         save.addActionListener(event -> saveText());
         analyze.addActionListener(event -> {
             String id = selectedId();
             if (id.isEmpty()) return;
             String content = text.getText();
+            if (content.strip().length() < 30) {
+                status.setText("可在“简历文本”中粘贴或补充至少 30 字，再点击 AI 分析画像");
+                tabs.setSelectedIndex(0);
+                text.requestFocusInWindow();
+                return;
+            }
             String role = targetRole.getText();
+            String previous = loadedText;
             busy = true; controls();
             execute(() -> {
-                if (!content.equals(loadedText)) api.request("PUT", path(id, "/text"), Map.of("text", content));
+                if (!content.equals(previous)) api.request("PUT", path(id, "/text"), Map.of("text", content));
                 return api.request("POST", path(id, "/analyze"), Map.of("targetRole", role));
             }, data -> {
                 busy = false;
@@ -117,9 +129,11 @@ public class ResumePanel extends JPanel {
         });
         apply.addActionListener(event -> {
             String id = selectedId();
-            if (current == null || current.path("profile").isNull()) return;
+            if (current == null || !current.path("profile").isObject()) return;
             String persona = current.path("profile").path("persona").asText();
+            busy = true; controls();
             execute(() -> api.request("POST", path(id, "/apply-persona"), null), data -> {
+                busy = false; controls();
                 onPersonaApplied.accept(persona);
                 status.setText("已更新 AI 话术背景；接口、Key 和各平台话术选择保持原设置");
             });
@@ -129,34 +143,54 @@ public class ResumePanel extends JPanel {
             if (id.isEmpty()) return;
             if (JOptionPane.showConfirmDialog(this, "删除此简历在 JobPilot 中的副本和分析结果？原文件保留。",
                     "删除本地副本", JOptionPane.OK_CANCEL_OPTION) != JOptionPane.OK_OPTION) return;
+            busy = true; controls();
             execute(() -> api.request("DELETE", path(id, ""), null), data -> {
+                busy = false;
                 current = null; refresh(); onCatalogChanged.run();
             });
         });
         timer = new Timer(2000, event -> {
-            if (isShowing() && !loading && current != null && "RUNNING".equals(current.path("analysisState").asText())) loadSelected(true);
+            if (isShowing() && !busy && !loading && current != null
+                    && "RUNNING".equals(current.path("analysisState").asText())) loadSelected(true);
         });
         timer.start();
         controls();
     }
 
-    public void refresh() { refresh(selectedId()); }
-    private void refresh(String select) {
+    public void refresh() {
+        if (busy) return;
+        String select = selectedId();
+        busy = true;
+        loadVersion++;
+        loading = false;
+        controls();
         execute(() -> api.request("GET", "/api/resumes", null), catalog -> {
-            list.setValueIsAdjusting(true);
+            updatingList = true;
             model.clear();
             int selected = 0;
             for (JsonNode node : catalog.path("items")) {
                 if (node.path("id").asText().equals(select)) selected = model.size();
                 model.addElement(new Item(node.path("id").asText(), node.path("name").asText()));
             }
-            int limit = catalog.path("limit").asInt();
-            quota.setText("已导入 " + model.size() + " / " + (limit == 0 ? "不限" : limit) + " 份");
+            catalogLimit = catalog.path("limit").asInt();
+            updateQuota();
             if (!model.isEmpty()) list.setSelectedIndex(selected);
-            else { current = null; text.setText(""); report.setText("请先导入简历"); }
-            list.setValueIsAdjusting(false);
+            else {
+                current = null;
+                text.setText("");
+                report.setText("请先导入简历");
+                status.setText("导入简历后，可预览文本并开始 AI 分析");
+            }
+            updatingList = false;
+            busy = false;
+            if (!model.isEmpty()) loadSelected(false);
             controls();
         });
+    }
+
+    private void updateQuota() {
+        String limit = catalogLimit == null ? "" : " / " + (catalogLimit == 0 ? "不限" : catalogLimit);
+        quota.setText("已导入 " + model.size() + limit + " 份");
     }
 
     private void choose(boolean replacing) {
@@ -167,6 +201,9 @@ public class ResumePanel extends JPanel {
     }
 
     void importFile(Path file, String replaceId) {
+        if (busy) return;
+        loadVersion++;
+        loading = false;
         busy = true; controls(); status.setText("正在导入和解析简历…");
         execute(() -> {
             try {
@@ -181,8 +218,16 @@ public class ResumePanel extends JPanel {
                 return body.path("data");
             } catch (Exception error) { throw new IllegalStateException(error.getMessage()); }
         }, data -> {
-            busy = false; refresh(data.path("id").asText()); onCatalogChanged.run();
-            status.setText("简历已导入，点击 AI 分析画像可查看建议"); controls();
+            updatingList = true;
+            if (!replaceId.isBlank()) model.removeElementAt(list.getSelectedIndex());
+            model.add(0, new Item(data.path("id").asText(), data.path("name").asText()));
+            list.setSelectedIndex(0);
+            updatingList = false;
+            busy = false;
+            fill(data, false);
+            updateQuota();
+            tabs.setSelectedIndex(0);
+            onCatalogChanged.run();
         });
     }
 
@@ -190,7 +235,9 @@ public class ResumePanel extends JPanel {
         String id = selectedId();
         if (id.isEmpty()) return;
         String value = text.getText();
+        busy = true; controls();
         execute(() -> api.request("PUT", path(id, "/text"), Map.of("text", value)), data -> {
+            busy = false;
             if (id.equals(selectedId())) fill(data, false);
             status.setText("分析文本已保存，原附件内容未修改");
         });
@@ -199,12 +246,22 @@ public class ResumePanel extends JPanel {
     private void loadSelected(boolean polling) {
         String id = selectedId();
         if (id.isEmpty()) return;
-        if (!polling) { current = null; controls(); }
+        int version = ++loadVersion;
+        if (!polling) { current = null; status.setText("正在读取简历…"); }
         loading = true;
-        execute(() -> api.request("GET", path(id, ""), null), data -> {
-            loading = false;
-            if (id.equals(selectedId())) fill(data, polling);
-        });
+        controls();
+        new SwingWorker<JsonNode, Void>() {
+            @Override protected JsonNode doInBackground() { return api.request("GET", path(id, ""), null); }
+            @Override protected void done() {
+                if (version != loadVersion || !id.equals(selectedId())) return;
+                loading = false;
+                try { fill(get(), polling); }
+                catch (Exception error) {
+                    status.setText("简历读取失败，请点击刷新重试。" + errorMessage(error));
+                    controls();
+                }
+            }
+        }.execute();
     }
 
     private void fill(JsonNode data, boolean preserveText) {
@@ -218,6 +275,7 @@ public class ResumePanel extends JPanel {
         status.setText("RUNNING".equals(state) ? "AI 正在分析，请稍候；无需停留在本页"
                 : "FAILED".equals(state) ? "分析未完成：" + data.path("analysisError").asText()
                 : !data.path("warning").asText().isBlank() ? data.path("warning").asText()
+                : !data.path("analysisError").asText().isBlank() ? data.path("analysisError").asText()
                 : "DONE".equals(state) ? "分析完成，确认画像后可应用到话术背景" : "可修正文本后开始 AI 分析");
         report.setText(renderProfile(data.path("profile"))); report.setCaretPosition(0);
         controls();
@@ -248,11 +306,13 @@ public class ResumePanel extends JPanel {
     }
 
     private void controls() {
-        boolean selected = current != null && !selectedId().isEmpty();
+        boolean selected = current != null && current.path("id").asText().equals(selectedId());
         boolean running = selected && "RUNNING".equals(current.path("analysisState").asText());
         upload.setEnabled(!busy); replace.setEnabled(selected && !busy && !running); remove.setEnabled(selected && !busy && !running);
+        list.setEnabled(!busy);
+        refreshButton.setEnabled(!busy);
         save.setEnabled(selected && !busy && !running); analyze.setEnabled(selected && !busy && !running);
-        apply.setEnabled(selected && !busy && !running && !current.path("profile").isNull());
+        apply.setEnabled(selected && !busy && !running && current.path("profile").isObject());
         text.setEditable(selected && !busy && !running);
     }
 
@@ -264,6 +324,11 @@ public class ResumePanel extends JPanel {
         return area;
     }
 
+    private static String errorMessage(Exception error) {
+        Throwable cause = error.getCause() == null ? error : error.getCause();
+        return cause.getMessage() == null ? "操作未完成，请重试" : cause.getMessage();
+    }
+
     private void execute(Supplier<JsonNode> task, Consumer<JsonNode> done) {
         new SwingWorker<JsonNode, Void>() {
             @Override protected JsonNode doInBackground() { return task.get(); }
@@ -271,9 +336,9 @@ public class ResumePanel extends JPanel {
                 try { done.accept(get()); }
                 catch (Exception error) {
                     busy = false; loading = false; controls();
-                    Throwable cause = error.getCause() == null ? error : error.getCause();
-                    status.setText(cause.getMessage());
-                    JOptionPane.showMessageDialog(ResumePanel.this, cause.getMessage(), "简历与画像", JOptionPane.INFORMATION_MESSAGE);
+                    String message = errorMessage(error);
+                    status.setText(message);
+                    JOptionPane.showMessageDialog(ResumePanel.this, message, "简历与画像", JOptionPane.INFORMATION_MESSAGE);
                 }
             }
         }.execute();

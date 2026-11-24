@@ -27,7 +27,7 @@ public class UpdaterSmoke {
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final HttpClient HTTP = HttpClient.newHttpClient();
     private static final boolean MAC = System.getProperty("os.name").toLowerCase().contains("mac");
-    private static final String VERSION = "1.0.26";
+    private static final String VERSION = "1.0.27";
     private static Path temporary;
     private static Path isolatedHome;
     private static Path target;
@@ -63,14 +63,14 @@ public class UpdaterSmoke {
         try (ServerSocket port = new ServerSocket(0)) { appPort = port.getLocalPort(); }
         try {
             Process original = startInstalled(origin);
-            waitVersion("1.0.24");
+            waitVersion("1.0.26");
             JsonNode config = get("/api/boss/config");
             ((com.fasterxml.jackson.databind.node.ObjectNode) config).putArray("keywords").add("updater-test-data");
             request("PUT", "/api/boss/config", config);
             waitAvailable();
             request("POST", "/api/updates/install", Map.of("version", VERSION));
             waitResult("FAILED");
-            waitVersion("1.0.24");
+            waitVersion("1.0.26");
             if (original.isAlive()) throw new AssertionError("未实际进入替换和回滚阶段");
             assertSavedData();
             System.out.println("PASS: failed startup restored the previous app and preserved user data");
@@ -91,9 +91,9 @@ public class UpdaterSmoke {
                 stopInstalled();
                 Path configFile = target.resolve("app/JobPilot.cfg");
                 Files.writeString(configFile, Files.readString(configFile)
-                        .replace("jpackage.app-version=" + VERSION, "jpackage.app-version=1.0.24"));
+                        .replace("jpackage.app-version=" + VERSION, "jpackage.app-version=1.0.26"));
                 startInstalled(origin, true);
-                waitVersion("1.0.24");
+                waitVersion("1.0.26");
                 waitAvailable();
                 Files.delete(dataDir().resolve("updates/result.json"));
                 request("POST", "/api/updates/install", Map.of("version", VERSION));
@@ -170,8 +170,8 @@ public class UpdaterSmoke {
     private static void prepareInstalledCopy(Path repo, Path goodPackage) throws Exception {
         Path installed = Files.createDirectories(temporary.resolve("installed"));
         target = installed.resolve(MAC ? "JobPilot.app" : "JobPilot");
-        Path previous = repo.resolve("build/previous").resolve(MAC ? "JobPilot-1.0.24.dmg" : "JobPilot-windows.zip");
-        if (!Files.isRegularFile(previous)) throw new IllegalStateException("请先下载正式 v1.0.24 安装包至 build/previous");
+        Path previous = repo.resolve("build/previous").resolve(MAC ? "JobPilot-1.0.26.dmg" : "JobPilot-windows.zip");
+        if (!Files.isRegularFile(previous)) throw new IllegalStateException("请先下载正式 v1.0.26 安装包至 build/previous");
         if (MAC) {
             Path mount = Files.createDirectories(temporary.resolve("mount"));
             run("hdiutil", "attach", "-readonly", "-nobrowse", "-mountpoint", mount.toString(), previous.toString());
@@ -187,7 +187,7 @@ public class UpdaterSmoke {
                 }
             }
         }
-        System.out.println("Using the real published v1.0.24 client as the update source");
+        System.out.println("Using the real published v1.0.26 client as the update source");
     }
 
     private static Path executable(Path app) {

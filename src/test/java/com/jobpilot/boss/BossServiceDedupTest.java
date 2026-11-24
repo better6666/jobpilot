@@ -108,6 +108,34 @@ class BossServiceDedupTest {
     }
 
     @Test
+    void 验证打断沟通后保留待核对并跳过再次投递() {
+        when(driver.deliver(any(), any(), any(), anyBoolean(), any(), any()))
+                .thenReturn(DeliveryOutcome.unconfirmed("验证打断沟通，请核对结果"));
+        service.processCardForTest(card(), "新媒体运营", properties.get(), null);
+
+        ArgumentCaptor<Delivery> saved = ArgumentCaptor.forClass(Delivery.class);
+        verify(deliveryMapper).insert(saved.capture());
+        assertEquals("待核对", saved.getValue().getDeliveryStatus());
+        assertEquals(0, service.status().getFailed());
+        assertEquals(0, service.status().getDelivered());
+        verify(licenseService, never()).reportUsage(anyInt());
+
+        when(deliveryMapper.selectOne(any())).thenReturn(saved.getValue());
+        service.processCardForTest(card(), "新媒体运营", properties.get(), null);
+        verify(driver, times(1)).deliver(any(), any(), any(), anyBoolean(), any(), any());
+    }
+
+    @Test
+    void 旧版过短间隔按正式最低二十秒并保留较长设置() {
+        var config = properties.get();
+        config.setDryRun(false);
+        config.setWaitSeconds(1);
+        assertEquals(20, config.effectiveWaitSeconds());
+        config.setWaitSeconds(45);
+        assertEquals(45, config.effectiveWaitSeconds());
+    }
+
+    @Test
     void 企业规模超出范围时在沟通前过滤() {
         properties.get().setMinCompanySize(100);
         properties.get().setMaxCompanySize(499);

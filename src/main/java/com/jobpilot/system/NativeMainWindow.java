@@ -103,7 +103,7 @@ public class NativeMainWindow {
             new Choice("fixed", "固定话术"), new Choice("ai", "AI 话术")});
     private final JLabel greetingHint = new JLabel();
     private final JSpinner maxJobs = spinner(50, 1, 500);
-    private final JSpinner waitSeconds = spinner(10, 1, 120);
+    private final JSpinner waitSeconds = spinner(20, 1, 120);
     private final JSpinner loginTimeout = spinner(5, 1, 30);
     private final JTextArea sayHi = new JTextArea(3, 24);
     private final JCheckBox sendResume = new JCheckBox("聊天中自动发送所选简历（默认关闭）");
@@ -386,7 +386,7 @@ public class NativeMainWindow {
         basics.add(field("每个关键词最多处理", maxJobs));
         basics.add(field("企业最少人数（0 不限）", minCompanySize));
         basics.add(field("企业最多人数（0 不限）", maxCompanySize));
-        basics.add(field("岗位间隔 · 秒", waitSeconds));
+        basics.add(field("岗位间隔 · 秒（正式至少 20）", waitSeconds));
         basics.add(field("登录等待 · 分钟", loginTimeout));
         searchFields.add(basics, BorderLayout.CENTER);
         searchFields.add(label("<html>按网站公布的人数区间筛选，启用后跳过规模不明的企业。</html>",
@@ -669,7 +669,7 @@ public class NativeMainWindow {
         minCompanySize.setValue(config.path("minCompanySize").asInt(0));
         maxCompanySize.setValue(config.path("maxCompanySize").asInt(0));
         maxJobs.setValue(config.path("maxJobsPerKeyword").asInt(50));
-        waitSeconds.setValue(config.path("waitSeconds").asInt(10));
+        waitSeconds.setValue(config.path("waitSeconds").asInt(20));
         loginTimeout.setValue(config.path("loginTimeoutMinutes").asInt(5));
         sayHi.setText(config.path("sayHi").asText(""));
         sayHi.setCaretPosition(0);

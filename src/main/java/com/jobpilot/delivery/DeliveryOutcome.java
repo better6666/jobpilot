@@ -18,4 +18,8 @@ public record DeliveryOutcome(DeliveryStatus status, String failReason, String g
     public static DeliveryOutcome limit(String reason) {
         return new DeliveryOutcome(DeliveryStatus.LIMIT, reason, null);
     }
+
+    public static DeliveryOutcome unconfirmed(String reason) {
+        return new DeliveryOutcome(DeliveryStatus.UNCONFIRMED, reason, null);
+    }
 }

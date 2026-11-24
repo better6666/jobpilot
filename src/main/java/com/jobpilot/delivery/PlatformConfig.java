@@ -39,8 +39,13 @@ public class PlatformConfig {
     /** 每个关键词最多处理多少个岗位（防一次跑太久触发风控） */
     private int maxJobsPerKeyword = 50;
 
-    /** 两个岗位之间的随机间隔秒数（实际取 [waitSeconds/2, waitSeconds]） */
-    private int waitSeconds = 10;
+    /** 正式投递至少等待 20 秒，兼容旧版保存的较短间隔。 */
+    public static final int MIN_DELIVERY_WAIT_SECONDS = 20;
+    private int waitSeconds = MIN_DELIVERY_WAIT_SECONDS;
+
+    public int effectiveWaitSeconds() {
+        return Math.max(dryRun ? 1 : MIN_DELIVERY_WAIT_SECONDS, waitSeconds);
+    }
 
     /**
      * 固定话术。Boss 是发消息给 HR；其余平台是简历投递，用不上，

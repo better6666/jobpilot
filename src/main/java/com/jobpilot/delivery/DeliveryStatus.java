@@ -9,5 +9,7 @@ public enum DeliveryStatus {
     /** 单个岗位失败（继续跑下一个） */
     FAILED,
     /** 页面提示今日上限，必须停 */
-    LIMIT
+    LIMIT,
+    /** 验证打断操作，需先在平台核对结果。 */
+    UNCONFIRMED
 }

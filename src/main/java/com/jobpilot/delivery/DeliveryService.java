@@ -3,6 +3,7 @@ package com.jobpilot.delivery;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.jobpilot.ai.GreetingService;
 import com.jobpilot.browser.BrowserManager;
+import com.jobpilot.browser.HumanVerification;
 import com.jobpilot.license.LicenseService;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.impl.TargetClosedError;
@@ -12,7 +13,7 @@ import lombok.extern.slf4j.Slf4j;
 import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.Future;
-import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 投递编排的公共部分：登录 → 逐关键词采集 → 过滤 → 投递 → 落库 → 状态机。
@@ -62,8 +63,6 @@ public abstract class DeliveryService<C extends JobCard> {
     private volatile int consecutiveFailures;
     /** 连续失败到这个数就停：偶发失败（弹窗、超时）很少连着出现这么多次 */
     public static final int MAX_CONSECUTIVE_FAILURES = 8;
-    /** 低于这个间隔只提醒不拦：要不要冒险是用户自己的事 */
-    static final int MIN_SAFE_WAIT_SECONDS = 8;
     /** 各平台驱动在收到停止指令、还没动手投时返回的失败原因 */
     private static final String STOPPED = "已停止";
     private Future<?> currentRun;
@@ -193,10 +192,7 @@ public abstract class DeliveryService<C extends JobCard> {
         status = RunStatus.running(keywords.size(), config.isDryRun(), displayName());
         appendLog("投递任务启动：" + String.join("、", keywords)
                 + (config.isDryRun() ? "（预演模式，不会真发消息）" : ""));
-        if (!config.isDryRun() && config.getWaitSeconds() < MIN_SAFE_WAIT_SECONDS) {
-            appendLog("提醒：岗位间隔只有 " + config.getWaitSeconds() + " 秒，节奏太快容易被平台风控、"
-                    + "提前触发每日上限，建议设到 " + MIN_SAFE_WAIT_SECONDS + " 秒以上");
-        }
+        appendLog("本次岗位间隔至少 " + config.effectiveWaitSeconds() + " 秒");
         try {
             currentRun = browserManager.submitAsync(() -> {
                 try {
@@ -271,7 +267,7 @@ public abstract class DeliveryService<C extends JobCard> {
     private void runJob(List<String> keywords, PlatformConfig config) {
         try {
             appendLog("正在打开浏览器并检查登录态…");
-            LoginResult login = ensureLogin(config, this::appendLog, () -> stopRequested);
+            LoginResult login = ensureLogin(config, this::reportProgress, this::shouldStop);
             if (login != LoginResult.LOGGED_IN) {
                 finish("登录超时或已取消，请重试（扫码要在 " + config.getLoginTimeoutMinutes() + " 分钟内完成）");
                 return;
@@ -295,17 +291,18 @@ public abstract class DeliveryService<C extends JobCard> {
                 appendLog("【" + keyword + "】打开搜索页");
 
                 collect(keyword, searchUrl, config.getMaxJobsPerKeyword(),
-                        this::appendLog, () -> stopRequested,
+                        this::reportProgress, this::shouldStop,
                         (card, listPage) -> {
                             try {
                                 processCard(card, keyword, config, listPage);
+                            } catch (HumanVerification.PausedRun | TargetClosedError e) {
+                                throw e;
                             } catch (Exception e) {
                                 status.setFailed(status.getFailed() + 1);
                                 appendLog("处理岗位失败 | " + brief(card) + " | " + e.getMessage());
                                 log.warn("[{}] 处理岗位失败", platform(), e);
-                            } finally {
-                                pace(config);
                             }
+                            pace(config);
                         });
                 if (stopRequested) {
                     break;
@@ -324,6 +321,8 @@ public abstract class DeliveryService<C extends JobCard> {
                         + status.getPreviewed() + " 个，过滤 " + status.getFiltered()
                         + " 个，失败 " + status.getFailed() + " 个");
             }
+        } catch (HumanVerification.PausedRun e) {
+            finish(e.getMessage());
         } catch (TargetClosedError e) {
             log.info("投递任务因浏览器窗口或标签页关闭而结束", e);
             finish("浏览器窗口或标签页已关闭。请重新点击「开始投递」。");
@@ -349,6 +348,7 @@ public abstract class DeliveryService<C extends JobCard> {
      * 包成 protected 是为了能单测：mock 掉 mapper 和适配器，不碰浏览器。
      */
     protected void processCard(C card, String keyword, PlatformConfig config, Page listPage) {
+        if (shouldStop()) return;
         // 当日投递额度是硬闸：用完了必须停。不然体验版用户能靠反复点开始无限投，
         // 档位差别就成了摆设。自用模式和配额<=0（后台配成不限）时直接放行。
         if (remainingDailyApply() <= 0) {
@@ -361,9 +361,6 @@ public abstract class DeliveryService<C extends JobCard> {
             }
             return;
         }
-
-        // 每小时节流已按产品口径撤掉：速度只由"每个岗位间隔秒数"（waitSeconds）决定，
-        // 用户自己掌握节奏，被风控了由用户自己处理。日额度仍是硬闸，见上面。
 
         // 次数卡在投递过程中用完（上报后服务端确认剩余为 0）就得停：
         // 继续发就是免费帮客户投，卖卡的那一方白亏
@@ -378,10 +375,9 @@ public abstract class DeliveryService<C extends JobCard> {
         String target = brief(card);
         status.setScanned(status.getScanned() + 1);
         try {
-            // 去重：已投递过的不碰；预演只是模拟，真实投递不该被它挡住，
-            // 投递失败的也允许重试（更新原记录）
             Delivery existing = findExisting(card);
-            if (existing != null && "已投递".equals(existing.getDeliveryStatus())) {
+            if (existing != null && ("已投递".equals(existing.getDeliveryStatus())
+                    || "待核对".equals(existing.getDeliveryStatus()))) {
                 status.setSkipped(status.getSkipped() + 1);
                 appendLog("跳过 | " + target + " | 记录里已有（" + existing.getDeliveryStatus() + "）");
                 return;
@@ -407,7 +403,7 @@ public abstract class DeliveryService<C extends JobCard> {
 
             Integer score = verdict.score();
             appendLog("投递中 | " + target + (score != null ? " | 得分 " + score : ""));
-            DeliveryOutcome outcome = deliver(card, listPage, config, this::appendLog, () -> stopRequested);
+            DeliveryOutcome outcome = deliver(card, listPage, config, this::reportProgress, this::shouldStop);
 
             switch (outcome.status()) {
                 case DELIVERED -> {
@@ -432,6 +428,11 @@ public abstract class DeliveryService<C extends JobCard> {
                             + "。明天再跑，或先切到别的平台");
                     stopRequested = true;
                 }
+                case UNCONFIRMED -> {
+                    record(card, keyword, "待核对", outcome.failReason(), score, null, existing);
+                    status.setSkipped(status.getSkipped() + 1);
+                    appendLog("待核对 | " + target + " | " + outcome.failReason());
+                }
                 case FAILED -> {
                     if (stopRequested && STOPPED.equals(outcome.failReason())) {
                         // 用户点了停止、这个岗位压根没投：记成"投递失败"会污染统计，还会误触发熔断
@@ -455,6 +456,19 @@ public abstract class DeliveryService<C extends JobCard> {
                     }
                 }
             }
+        } catch (HumanVerification.PausedRun e) {
+            stopRequested = true;
+            if (e.actionUnconfirmed()) {
+                try {
+                    record(card, keyword, "待核对", e.getMessage(), null, null, findExisting(card));
+                    status.setSkipped(status.getSkipped() + 1);
+                } catch (RuntimeException error) {
+                    log.warn("待核对记录保存失败 | {}", target, error);
+                }
+            }
+            throw e;
+        } catch (TargetClosedError e) {
+            throw e;
         } catch (Exception e) {
             log.warn("处理岗位异常 | {}: {}", target, e.getMessage());
             status.setFailed(status.getFailed() + 1);
@@ -518,15 +532,22 @@ public abstract class DeliveryService<C extends JobCard> {
         status.setMessage(quotaExhaustedMessage());
     }
 
-    /**
-     * 节奏控制：随机 [wait/2, wait]，固定间隔是机器行为最明显的特征。
-     * 顺带在停顿里看一眼页面有没有弹上限提示——51job 和智联的上限 toast
-     * 只存在一两秒，投递完立刻探最容易抓到。
-     */
     private void pace(PlatformConfig config) {
-        int waitMs = 500 + ThreadLocalRandom.current()
-                .nextInt(Math.max(1, config.getWaitSeconds()) * 500);
-        sleep(waitMs);
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(config.effectiveWaitSeconds());
+        while (!shouldStop()) {
+            long remaining = deadline - System.nanoTime();
+            if (remaining <= 0) break;
+            sleep(Math.min(TimeUnit.NANOSECONDS.toMillis(remaining) + 1, 250));
+        }
+    }
+
+    private boolean shouldStop() {
+        return stopRequested || Thread.currentThread().isInterrupted();
+    }
+
+    private void reportProgress(String message) {
+        if (!shouldStop()) status.setMessage(message);
+        appendLog(message);
     }
 
     protected Delivery findExisting(C card) {

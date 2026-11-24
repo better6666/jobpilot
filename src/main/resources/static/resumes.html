@@ -21,30 +21,57 @@
 </main>
 <script>
 const $=id=>document.getElementById(id);
-let selected='',current=null,loadedText='',poll=null,replacing=false,busy=false;
+let selected='',current=null,loadedText='',poll=null,replacing=false,busy=false,selectionVersion=0;
+let items=[],catalogLimit=null;
 async function api(path,method='GET',body){
  const r=await fetch(path,{method,headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):undefined});
  const result=await r.json();if(!r.ok||!result.success)throw new Error(result.message||'请求失败');return result.data;
 }
 function status(message,error=false){$('status').textContent=message;$('status').classList.toggle('error',error);}
-function controls(){const valid=!!current,running=valid&&current.analysisState==='RUNNING';for(const id of ['replace','delete','save','analyze'])$(id).disabled=!valid||busy||running;$('apply').disabled=!valid||!current.profile||busy||running;$('text').disabled=!valid||busy||running;$('import').disabled=busy;}
+function controls(){const valid=current?.id===selected,running=valid&&current.analysisState==='RUNNING';for(const id of ['replace','delete','save','analyze'])$(id).disabled=!valid||busy||running;$('apply').disabled=!valid||!current.profile||busy||running;$('text').disabled=!valid||busy||running;$('import').disabled=busy;$('refresh').disabled=busy;document.querySelectorAll('.file').forEach(b=>b.disabled=busy);}
 function tab(name){$('textTab').hidden=name!=='text';$('profileTab').hidden=name!=='profile';document.querySelectorAll('[data-tab]').forEach(b=>b.classList.toggle('active',b.dataset.tab===name));}
 document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>tab(b.dataset.tab));
 async function catalog(preferred=selected){
- const result=await api('/api/resumes');$('files').replaceChildren();$('quota').textContent=`已导入 ${result.items.length} / ${result.limit||'不限'} 份`;
- for(const item of result.items){const button=document.createElement('button');button.className='file';button.dataset.id=item.id;button.textContent=item.name;const meta=document.createElement('small');meta.textContent=`${(item.size/1024).toFixed(1)} KB${item.analyzed?' · 已分析':''}`;button.appendChild(meta);button.onclick=()=>select(item.id);$('files').appendChild(button);}
- if(!result.items.length){selected='';current=null;$('name').textContent='请先导入简历';$('text').value='';$('target').value='';render(null);if(poll){clearInterval(poll);poll=null;}controls();return;}
- await select(result.items.some(i=>i.id===preferred)?preferred:result.items[0].id);
+ const result=await api('/api/resumes');items=result.items;catalogLimit=result.limit;renderFiles();
+ if(!items.length){selected='';current=null;$('name').textContent='请先导入简历';$('text').value='';$('target').value='';render(null);stopPoll();status('请先导入简历。');controls();return;}
+ await select(items.some(i=>i.id===preferred)?preferred:items[0].id);
 }
+function renderFiles(){
+ $('files').replaceChildren();
+ const limit=catalogLimit===null?'':` / ${catalogLimit||'不限'}`;
+ $('quota').textContent=`已导入 ${items.length}${limit} 份`;
+ for(const item of items){
+  const button=document.createElement('button');button.className='file';button.dataset.id=item.id;button.textContent=item.name;
+  const meta=document.createElement('small');meta.textContent=`${(item.size/1024).toFixed(1)} KB${item.analyzed?' · 已分析':''}`;
+  button.appendChild(meta);button.onclick=()=>select(item.id).catch(e=>status('简历读取失败，请刷新重试。'+e.message,true));$('files').appendChild(button);
+ }
+}
+function stopPoll(){if(poll){clearTimeout(poll);poll=null;}}
 async function select(id,preserve=false){
- if(!preserve){selected=id;current=null;controls();}
- const data=await api('/api/resumes/'+id);if(id!==selected)return;current=data;
+ const version=++selectionVersion;
+ stopPoll();
+ if(!preserve){selected=id;current=null;status('正在读取简历…');controls();}
+ try {
+  const data=await api('/api/resumes/'+id);
+  if(version===selectionVersion&&id===selected)showResume(data,preserve);
+ } catch(e) {
+  if(version!==selectionVersion||id!==selected)return;
+  if(preserve)schedulePoll(id);
+  throw e;
+ }
+}
+function schedulePoll(id){
+ stopPoll();
+ poll=setTimeout(()=>select(id,true).catch(e=>status('暂时无法读取分析状态，正在重试。'+e.message,true)),2000);
+}
+function showResume(data,preserve=false){
+ current=data;const id=data.id;
  document.querySelectorAll('.file').forEach(b=>b.classList.toggle('active',b.dataset.id===id));
  $('name').textContent=data.name+' · '+(data.size/1024).toFixed(1)+' KB';
  if(!preserve){loadedText=data.text;$('text').value=data.text;$('target').value=data.targetRole||'';}
  render(data.profile);controls();
- if(data.analysisState==='RUNNING'){status('AI 正在分析，可切换页面，结果会保留在本机。');if(!poll)poll=setInterval(()=>select(selected,true).catch(e=>status(e.message,true)),2000);}
- else{if(poll){clearInterval(poll);poll=null;}status(data.analysisState==='FAILED'?'分析未完成：'+data.analysisError:data.warning|| (data.profile?'分析完成，请确认画像后再应用。':'可修正文本后开始 AI 分析。'),data.analysisState==='FAILED');}
+ if(data.analysisState==='RUNNING'){status('AI 正在分析，可切换页面，结果会保留在本机。');schedulePoll(id);}
+ else{stopPoll();status(data.analysisState==='FAILED'?'分析未完成：'+data.analysisError:data.warning||data.analysisError||(data.profile?'分析完成，请确认画像后再应用。':'可修正文本后开始 AI 分析。'),data.analysisState==='FAILED');}
 }
 function render(profile){
  const root=$('report');root.replaceChildren();root.className=profile?'':'empty';if(!profile){root.textContent='尚未生成画像，点击“AI 分析画像”开始。';return;}
@@ -55,19 +82,25 @@ function render(profile){
  for(const issue of profile.improvements||[]){const h=document.createElement('h3');h.textContent=`【${issue.priority}】${issue.issue}`;root.appendChild(h);paragraph('依据：'+issue.evidence);paragraph('建议：'+issue.suggestion);if(issue.example)paragraph('改写参考：'+issue.example,'example');}
  list('待补充信息',profile.missingInformation);heading('可用于 AI 话术的背景（确认后应用）');paragraph(profile.persona);
 }
-async function action(task){try{await task();}catch(e){status(e.message,true);}finally{busy=false;controls();}}
+async function action(task){if(busy)return;busy=true;controls();try{await task();}catch(e){status(e.message,true);}finally{busy=false;controls();}}
 $('refresh').onclick=()=>action(()=>catalog());
 $('import').onclick=()=>{replacing=false;$('file').click();};$('replace').onclick=()=>{replacing=true;$('file').click();};
 $('file').onchange=()=>action(async()=>{
- const file=$('file').files[0];if(!file)return;if(file.size>10*1024*1024)throw new Error('简历文件不能超过 10 MB');busy=true;controls();status('正在导入和解析简历…');
+ const file=$('file').files[0];$('file').value='';if(!file)return;if(file.size>10*1024*1024)throw new Error('简历文件不能超过 10 MB');status('正在导入和解析简历…');
  const path='/api/resumes/import?filename='+encodeURIComponent(file.name)+(replacing?'&replaceId='+selected:'');
- const response=await fetch(path,{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:file});const body=await response.json();if(!body.success)throw new Error(body.message);await catalog(body.data.id);$('file').value='';tab('text');
+ const response=await fetch(path,{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:file});const body=await response.json();if(!body.success)throw new Error(body.message);
+ selectionVersion++;stopPoll();items=[body.data,...items.filter(item=>!replacing||item.id!==selected)];selected=body.data.id;
+ renderFiles();showResume(body.data);tab('text');
 });
 $('delete').onclick=()=>action(async()=>{if(!selected||!confirm('删除 JobPilot 中的副本和分析结果？原文件保留。'))return;await api('/api/resumes/'+selected,'DELETE');current=null;await catalog('');});
 $('save').onclick=()=>action(async()=>{await api('/api/resumes/'+selected+'/text','PUT',{text:$('text').value});await select(selected);status('文本修正已保存，原附件未修改。');});
 $('analyze').onclick=()=>action(async()=>{
- if(!selected)return;busy=true;controls();if($('text').value!==loadedText)await api('/api/resumes/'+selected+'/text','PUT',{text:$('text').value});
- await api('/api/resumes/'+selected+'/analyze','POST',{targetRole:$('target').value});await select(selected);tab('profile');
+ if(!selected)return;
+ const content=$('text').value;
+ if(content.trim().length<30){tab('text');status('请在简历文本中粘贴或补充至少 30 字，再点击 AI 分析画像。',true);return;}
+ if(content!==loadedText)await api('/api/resumes/'+selected+'/text','PUT',{text:content});
+ const data=await api('/api/resumes/'+selected+'/analyze','POST',{targetRole:$('target').value});
+ showResume(data);tab('profile');
 });
 $('apply').onclick=()=>action(async()=>{await api('/api/resumes/'+selected+'/apply-persona','POST');status('已更新 AI 话术背景；接口、Key 和各平台话术选择保留。');});
 action(()=>catalog());
