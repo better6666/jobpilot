@@ -4,6 +4,8 @@ package com.jobpilot.delivery;
 public enum DeliveryStatus {
     /** 真发成功了 */
     DELIVERED,
+    /** 平台已经有沟通记录，本次未发送。 */
+    ALREADY_APPLIED,
     /** 预演模式，没真发 */
     PREVIEW,
     /** 单个岗位失败（继续跑下一个） */

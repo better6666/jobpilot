@@ -30,6 +30,7 @@ dependencies {
     implementation("com.baomidou:mybatis-plus-spring-boot3-starter:3.5.9")
     implementation("org.xerial:sqlite-jdbc:3.45.1.0")
     implementation("com.formdev:flatlaf:3.7.2")
+    implementation("net.java.dev.jna:jna:5.17.0")
     implementation("org.apache.pdfbox:pdfbox:3.0.8")
     implementation("org.apache.poi:poi-scratchpad:6.0.0")
 

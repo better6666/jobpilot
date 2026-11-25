@@ -13,12 +13,14 @@ import com.jobpilot.delivery.DeliveryStatus;
 import com.jobpilot.delivery.RunCoordinator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.quality.Strictness;
 
+import java.nio.file.Path;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -105,6 +107,55 @@ class BossServiceDedupTest {
         verify(deliveryMapper, never()).insert(any(Delivery.class));
         verify(deliveryMapper, never()).updateById(any(Delivery.class));
         assertEquals(1, service.status().getSkipped());
+    }
+
+    @Test
+    void 旧记录缺失或更换HR时仍以已投递岗位为准(@TempDir Path dataDir) {
+        var dataSource = new org.springframework.jdbc.datasource.DriverManagerDataSource("jdbc:sqlite:" + dataDir.resolve("test.db"));
+        try (var paths = mockStatic(com.jobpilot.system.SystemPaths.class)) {
+            paths.when(com.jobpilot.system.SystemPaths::dataDir).thenReturn(dataDir);
+            new com.jobpilot.system.SchemaInitializer(new org.springframework.jdbc.core.JdbcTemplate(dataSource)).init();
+        }
+        var config = new com.baomidou.mybatisplus.core.MybatisConfiguration();
+        config.setEnvironment(new org.apache.ibatis.mapping.Environment("test",
+                new org.apache.ibatis.transaction.jdbc.JdbcTransactionFactory(), dataSource));
+        config.addMapper(DeliveryMapper.class);
+        try (var session = new com.baomidou.mybatisplus.core.MybatisSqlSessionFactoryBuilder().build(config).openSession()) {
+            var mapper = session.getMapper(DeliveryMapper.class);
+            mapper.insert(history("boss", "previous-hr", "已投递"));
+            mapper.insert(history("boss", "boss-1", "投递失败"));
+            mapper.insert(history("zhilian", "boss-1", "待核对"));
+            BossService persisted = new BossService(properties, driver, mapper, browserManager,
+                    new BossOptions(objectMapper), new RunCoordinator(), null, licenseService, null);
+            var card = card();
+            persisted.processCardForTest(card, "新媒体运营", properties.get(), null);
+            card.setEncryptUserId(null);
+            persisted.processCardForTest(card, "新媒体运营", properties.get(), null);
+            verifyNoInteractions(driver);
+            assertEquals(2, persisted.status().getSkipped());
+        }
+    }
+
+    private Delivery history(String platform, String hr, String status) {
+        Delivery row = new Delivery();
+        row.setPlatform(platform);
+        row.setEncryptId("enc-1");
+        row.setEncryptUserId(hr);
+        row.setDeliveryStatus(status);
+        return row;
+    }
+
+    @Test
+    void 平台已沟通过的岗位计为跳过且不消耗次数() {
+        when(driver.deliver(any(), any(), any(), anyBoolean(), any(), any()))
+                .thenReturn(DeliveryOutcome.alreadyApplied("BOSS 显示已沟通，本次已跳过"));
+        service.processCardForTest(card(), "新媒体运营", properties.get(), null);
+        ArgumentCaptor<Delivery> saved = ArgumentCaptor.forClass(Delivery.class);
+        verify(deliveryMapper).insert(saved.capture());
+        assertEquals("已投递", saved.getValue().getDeliveryStatus());
+        assertEquals(1, service.status().getSkipped());
+        assertEquals(0, service.status().getDelivered());
+        verify(licenseService, never()).reportUsage(anyInt());
     }
 
     @Test

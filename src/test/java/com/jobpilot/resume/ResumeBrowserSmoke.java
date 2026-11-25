@@ -49,6 +49,7 @@ public class ResumeBrowserSmoke {
             liepin(true, true, "已拦截", 0, 0);
             com.jobpilot.boss.BossVerificationSmoke.run(browser);
             browser.close();
+            com.jobpilot.boss.BossVerificationSmoke.verifyPersistentBrowser(playwright, executable);
         } finally { Files.deleteIfExists(original); }
         System.out.println("PASS resume browser: default off, dry run, BOSS upload/request/accept/guard/uncertain/dedup, Liepin consent/upload/exact attachment/guard");
     }

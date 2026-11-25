@@ -1,5 +1,6 @@
 package com.jobpilot.resume;
 
+import com.jobpilot.browser.BrowserManager;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jobpilot.delivery.JobCard;
@@ -152,7 +153,7 @@ public class ResumeAttachmentService {
     }
 
     private String uploadBoss(BrowserContext context, ResumeDocument document, BooleanSupplier stop) throws Exception {
-        Page upload = context.newPage();
+        Page upload = BrowserManager.newBackgroundPage(context);
         AtomicReference<String> id = new AtomicReference<>("");
         Consumer<Response> listener = response -> {
             if (!response.url().startsWith("https://www.zhipin.com/wapi/zpgeek/resume/attachment/save.json")) return;

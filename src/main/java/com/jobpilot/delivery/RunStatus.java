@@ -26,6 +26,7 @@ public class RunStatus {
     private int totalKeywords;
     private boolean dryRun;
     private boolean loggedIn;
+    private volatile boolean waitingForBrowser;
     private int scanned;
     private int delivered;
     private int filtered;

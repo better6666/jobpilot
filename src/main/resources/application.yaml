@@ -57,7 +57,7 @@ license:
 
 # 浏览器自动化（Boss 投递）
 # headless 必须 false：扫码登录、滑块验证都要真人看窗口
-# auto 依次尝试 Chrome、Edge 和随软件附带的 Chromium
+# auto 保留已有浏览器资料，新安装优先使用软件附带的 Chromium
 browser:
   headless: false
   slow-mo-ms: 50

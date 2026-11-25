@@ -56,9 +56,23 @@ class HumanVerificationTest {
         var events = new ArrayList<String>();
         assertTrue(HumanVerification.waitForUser(() -> List.of(page), "BOSS", events::add, () -> false, 0, 2));
         verify(page, times(6)).waitForTimeout(1000);
-        verify(page).bringToFront();
-        assertTrue(events.getFirst().contains("手动完成"));
+        verify(page, never()).bringToFront();
+        assertTrue(events.getFirst().contains("等待手动验证"));
         assertTrue(events.getLast().contains("继续处理"));
+    }
+
+    @Test
+    void 仅主动请求时打开失败后的验证页() {
+        var page = mock(com.microsoft.playwright.Page.class);
+        var listener = mock(com.jobpilot.delivery.ProgressListener.class);
+        when(page.url()).thenReturn("https://www.zhipin.com/web/geek/jobs");
+        when(page.evaluate(anyString())).thenReturn(List.of("BOSS", "岗位列表", List.of("验证失败，请重试"), List.of()),
+                List.of("BOSS", "岗位列表", List.of(), List.of()));
+        when(listener.takeBrowserRequest()).thenReturn(true, false);
+        assertTrue(HumanVerification.waitForUser(() -> List.of(page), "BOSS", listener, () -> false, 0, 0));
+        verify(listener).waitingForBrowser(true);
+        verify(page).bringToFront();
+        verify(listener).waitingForBrowser(false);
     }
 
     @Test

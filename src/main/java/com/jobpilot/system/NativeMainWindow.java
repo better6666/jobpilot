@@ -90,6 +90,7 @@ public class NativeMainWindow {
     private JScrollPane settingsScrollLeft;
     private final JButton start = new JButton("开始投递");
     private final JButton stop = new JButton("停止");
+    private final JButton showBrowser = new JButton("打开浏览器处理");
     private final JTextArea keywords = new JTextArea(4, 24);
     private final JComboBox<Choice> city = new JComboBox<>();
     private final JPanel filters = new JPanel(new GridLayout(0, 2, 12, 10));
@@ -325,7 +326,14 @@ public class NativeMainWindow {
         modeBadge.setForeground(MINT);
         modeBadge.setBackground(new Color(229, 247, 240));
         modeBadge.setBorder(new EmptyBorder(8, 14, 8, 14));
-        statusBar.add(modeBadge, BorderLayout.EAST);
+        JPanel statusActions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 0));
+        statusActions.setOpaque(false);
+        secondary(showBrowser);
+        showBrowser.setVisible(false);
+        showBrowser.setToolTipText("验证失败时，可以停止本轮，在保留的浏览器页面处理后重新开始");
+        statusActions.add(showBrowser);
+        statusActions.add(modeBadge);
+        statusBar.add(statusActions, BorderLayout.EAST);
         overview.add(statusBar, BorderLayout.CENTER);
 
         JPanel summary = new JPanel(new GridLayout(1, 4, 12, 0));
@@ -370,6 +378,12 @@ public class NativeMainWindow {
         platform.addActionListener(e -> loadPlatform());
         start.addActionListener(e -> runPlatform("start"));
         stop.addActionListener(e -> runPlatform("stop"));
+        showBrowser.addActionListener(e -> {
+            Platform selected = (Platform) platform.getSelectedItem();
+            if (selected != null && "boss".equals(selected.key())) {
+                async(() -> api("POST", path(selected, "browser/show"), null), data -> refreshStatus());
+            }
+        });
         return root;
     }
 
@@ -806,6 +820,7 @@ public class NativeMainWindow {
             runState.setText(stateLabel + "  ·  " + status.path("message").asText("")
                     + (status.path("currentKeyword").asText("").isEmpty() ? ""
                     : " · " + status.path("currentKeyword").asText("")));
+            runState.setToolTipText(status.path("message").asText(""));
             counters.setText("失败 " + status.path("failed").asInt()
                     + "   ·   跳过 " + status.path("skipped").asInt());
             metricValues[0].setText(String.valueOf(status.path("scanned").asInt()));
@@ -815,6 +830,8 @@ public class NativeMainWindow {
             boolean running = "RUNNING".equals(state) || "STOPPING".equals(state);
             start.setEnabled(!running);
             stop.setEnabled(running);
+            showBrowser.setVisible("boss".equals(selected.key()) && "RUNNING".equals(state)
+                    && status.path("waitingForBrowser").asBoolean());
             logs.setText(join(status.path("logs")));
             logs.setCaretPosition(logs.getDocument().getLength());
             ((CardLayout) logCards.getLayout()).show(logCards,

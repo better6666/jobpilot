@@ -1,7 +1,9 @@
 package com.jobpilot.browser;
 
+import com.google.gson.JsonObject;
 import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.BrowserType;
+import com.microsoft.playwright.CDPSession;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.Playwright;
 import com.microsoft.playwright.impl.TargetClosedError;
@@ -11,9 +13,11 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -60,7 +64,7 @@ public class BrowserManager {
         private boolean headless = false;
         /** 每个动作之间的额外停顿（毫秒），模拟真人节奏 */
         private int slowMoMs = 50;
-        /** auto 依次使用 Chrome、Edge 和随包 Chromium；bundled 仅用随包浏览器 */
+        /** auto 优先保留已有浏览器登录资料，新安装优先使用随包 Chromium。 */
         private String channel = "auto";
         /** 无头模式的视口尺寸。 */
         private int width = 1440;
@@ -196,40 +200,41 @@ public class BrowserManager {
             options.setViewportSize(null);
         }
         String channel = properties.getChannel();
+        Path dataDir = com.jobpilot.system.SystemPaths.dataDir();
+        Path bundled = BundledBrowser.executable();
         List<String> channels;
         if (channel == null || channel.isBlank() || "bundled".equals(channel)) {
-            channels = List.of();
-        } else if ("auto".equals(channel) || "chrome".equals(channel)) {
-            channels = List.of("chrome", "msedge");
+            channels = List.of("bundled");
+        } else if ("auto".equals(channel)) {
+            boolean existingExternalProfile = Files.isRegularFile(userDataDir(dataDir).resolve("Local State"))
+                    || Files.isRegularFile(dataDir.resolve("browser-data-msedge/Local State"));
+            channels = bundled != null && !existingExternalProfile
+                    ? List.of("bundled", "chrome", "msedge") : List.of("chrome", "msedge", "bundled");
+        } else if ("chrome".equals(channel)) {
+            channels = List.of("chrome", "msedge", "bundled");
         } else {
-            channels = List.of(channel);
+            channels = List.of(channel, "bundled");
         }
-        Path dataDir = com.jobpilot.system.SystemPaths.dataDir();
+        RuntimeException lastError = null;
         for (String candidate : channels) {
-            Path profile = "chrome".equals(candidate) ? userDataDir(dataDir)
-                    : dataDir.resolve("browser-data-" + candidate);
+            boolean useBundled = "bundled".equals(candidate);
+            Path profile = switch (candidate) {
+                case "chrome" -> userDataDir(dataDir);
+                case "bundled" -> dataDir.resolve("browser-data-chromium");
+                default -> dataDir.resolve("browser-data-" + candidate);
+            };
             try {
-                options.setChannel(candidate);
+                options.setChannel(useBundled ? null : candidate);
+                options.setExecutablePath(useBundled ? bundled : null);
                 BrowserContext launched = playwright.chromium().launchPersistentContext(profile, options);
-                log.info("使用浏览器 {}", candidate);
+                log.info("使用浏览器 {}", useBundled ? "Chromium" : candidate);
                 return launched;
             } catch (RuntimeException e) {
-                log.warn("浏览器 {} 启动失败，尝试下一个浏览器: {}", candidate, e.getMessage());
+                lastError = e;
+                log.warn("浏览器 {} 启动失败: {}", candidate, e.getMessage());
             }
         }
-        options.setChannel((String) null);
-        Path bundled = BundledBrowser.executable();
-        if (bundled != null) {
-            options.setExecutablePath(bundled);
-        }
-        try {
-            BrowserContext launched = playwright.chromium().launchPersistentContext(
-                    dataDir.resolve("browser-data-chromium"), options);
-            log.info("使用 Chromium 浏览器: {}", bundled == null ? "本机缓存" : bundled);
-            return launched;
-        } catch (RuntimeException e) {
-            throw new BrowserException("浏览器启动失败，请重新解压完整软件包，或安装 Chrome / Edge 后重试", e);
-        }
+        throw new BrowserException("浏览器启动失败，请重新解压完整软件包，或安装 Chrome / Edge 后重试", lastError);
     }
 
     private void closeContextQuietly() {
@@ -249,6 +254,30 @@ public class BrowserManager {
             throw new BrowserException("浏览器上下文未初始化");
         }
         return context;
+    }
+
+    /** 在当前登录上下文添加标签页，保留用户当前所在的标签页。 */
+    public Page newBackgroundPage() {
+        return newBackgroundPage(context());
+    }
+
+    public static Page newBackgroundPage(BrowserContext current) {
+        Page anchor = current.pages().stream().filter(page -> !page.isClosed()).findFirst()
+                .orElseThrow(() -> new BrowserException("浏览器窗口已关闭"));
+        CDPSession session = current.newCDPSession(anchor);
+        try {
+            JsonObject target = session.send("Target.getTargetInfo").getAsJsonObject("targetInfo");
+            JsonObject params = new JsonObject();
+            String initialUrl = "about:blank#jobpilot-" + UUID.randomUUID();
+            params.addProperty("url", initialUrl);
+            params.addProperty("background", true);
+            if (target.has("browserContextId")) params.add("browserContextId", target.get("browserContextId"));
+            return current.waitForPage(new BrowserContext.WaitForPageOptions()
+                    .setPredicate(page -> initialUrl.equals(page.url())).setTimeout(10_000),
+                    () -> session.send("Target.createTarget", params));
+        } finally {
+            session.detach();
+        }
     }
 
     public static class BrowserException extends RuntimeException {

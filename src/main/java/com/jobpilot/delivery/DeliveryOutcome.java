@@ -7,6 +7,10 @@ public record DeliveryOutcome(DeliveryStatus status, String failReason, String g
         return new DeliveryOutcome(DeliveryStatus.DELIVERED, null, greeting);
     }
 
+    public static DeliveryOutcome alreadyApplied(String reason) {
+        return new DeliveryOutcome(DeliveryStatus.ALREADY_APPLIED, reason, null);
+    }
+
     public static DeliveryOutcome preview(String greeting) {
         return new DeliveryOutcome(DeliveryStatus.PREVIEW, null, greeting);
     }

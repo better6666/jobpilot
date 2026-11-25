@@ -5,6 +5,7 @@ import com.jobpilot.ai.GreetingService;
 import com.jobpilot.browser.BrowserManager;
 import com.jobpilot.browser.HumanVerification;
 import com.jobpilot.license.LicenseService;
+import com.jobpilot.system.IdleSleepGuard;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.impl.TargetClosedError;
 import jakarta.annotation.PreDestroy;
@@ -14,6 +15,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * 投递编排的公共部分：登录 → 逐关键词采集 → 过滤 → 投递 → 落库 → 状态机。
@@ -51,6 +53,22 @@ public abstract class DeliveryService<C extends JobCard> {
     private final com.jobpilot.license.EntitlementService entitlementService;
 
     private volatile RunStatus status = RunStatus.idle();
+    private final AtomicBoolean browserRequested = new AtomicBoolean();
+    private final ProgressListener progress = new ProgressListener() {
+        @Override
+        public void onProgress(String message) { reportProgress(message); }
+
+        @Override
+        public void waitingForBrowser(boolean waiting) {
+            synchronized (DeliveryService.this) {
+                status.setWaitingForBrowser(waiting);
+                if (!waiting) browserRequested.set(false);
+            }
+        }
+
+        @Override
+        public boolean takeBrowserRequest() { return browserRequested.getAndSet(false); }
+    };
     private volatile boolean stopRequested;
     /** 已经因为"卡密不能用"停过一次了，避免每张卡片都打一行日志 */
     private volatile boolean stoppedForLicense;
@@ -186,6 +204,7 @@ public abstract class DeliveryService<C extends JobCard> {
             return "「" + holder + "」正在投递，请先等它结束";
         }
         stopRequested = false;
+        browserRequested.set(false);
         stoppedForLicense = false;
         stoppedForQuota = false;
         consecutiveFailures = 0;
@@ -195,7 +214,8 @@ public abstract class DeliveryService<C extends JobCard> {
         appendLog("本次岗位间隔至少 " + config.effectiveWaitSeconds() + " 秒");
         try {
             currentRun = browserManager.submitAsync(() -> {
-                try {
+                try (IdleSleepGuard awake = IdleSleepGuard.acquire()) {
+                    if (awake.active()) appendLog("投递期间电脑保持唤醒，屏幕可以正常熄灭");
                     runJob(keywords, config);
                 } finally {
                     // 不管正常结束还是抛异常，运行权都必须还回去，否则这个平台
@@ -225,6 +245,12 @@ public abstract class DeliveryService<C extends JobCard> {
         stopRequested = true;
         status.setState(RunStatus.RunState.STOPPING);
         appendLog("收到停止指令，将在当前动作完成后退出");
+    }
+
+    public synchronized boolean requestBrowser() {
+        if (!status.isWaitingForBrowser() || stopRequested) return false;
+        browserRequested.set(true);
+        return true;
     }
 
     public RunStatus status() {
@@ -267,7 +293,7 @@ public abstract class DeliveryService<C extends JobCard> {
     private void runJob(List<String> keywords, PlatformConfig config) {
         try {
             appendLog("正在打开浏览器并检查登录态…");
-            LoginResult login = ensureLogin(config, this::reportProgress, this::shouldStop);
+            LoginResult login = ensureLogin(config, progress, this::shouldStop);
             if (login != LoginResult.LOGGED_IN) {
                 finish("登录超时或已取消，请重试（扫码要在 " + config.getLoginTimeoutMinutes() + " 分钟内完成）");
                 return;
@@ -291,7 +317,7 @@ public abstract class DeliveryService<C extends JobCard> {
                 appendLog("【" + keyword + "】打开搜索页");
 
                 collect(keyword, searchUrl, config.getMaxJobsPerKeyword(),
-                        this::reportProgress, this::shouldStop,
+                        progress, this::shouldStop,
                         (card, listPage) -> {
                             try {
                                 processCard(card, keyword, config, listPage);
@@ -403,7 +429,7 @@ public abstract class DeliveryService<C extends JobCard> {
 
             Integer score = verdict.score();
             appendLog("投递中 | " + target + (score != null ? " | 得分 " + score : ""));
-            DeliveryOutcome outcome = deliver(card, listPage, config, this::reportProgress, this::shouldStop);
+            DeliveryOutcome outcome = deliver(card, listPage, config, progress, this::shouldStop);
 
             switch (outcome.status()) {
                 case DELIVERED -> {
@@ -415,6 +441,12 @@ public abstract class DeliveryService<C extends JobCard> {
                     }
                     // 次数卡扣减。异步发、失败不打断投递，见 LicenseService.reportUsage
                     licenseService.reportUsage(1);
+                }
+                case ALREADY_APPLIED -> {
+                    record(card, keyword, "已投递", outcome.failReason(), score, null, existing);
+                    status.setSkipped(status.getSkipped() + 1);
+                    consecutiveFailures = 0;
+                    appendLog("跳过 | " + target + " | " + outcome.failReason());
                 }
                 case PREVIEW -> {
                     record(card, keyword, "预演", null, score, outcome.greeting(), existing);
@@ -550,11 +582,20 @@ public abstract class DeliveryService<C extends JobCard> {
         appendLog(message);
     }
 
+    protected boolean usesStableJobId() { return false; }
+
     protected Delivery findExisting(C card) {
+        if (usesStableJobId() && card.getJobId() != null && !card.getJobId().isBlank()) {
+            return mapper.selectOne(new LambdaQueryWrapper<Delivery>()
+                    .eq(Delivery::getPlatform, platform())
+                    .eq(Delivery::getEncryptId, card.getJobId())
+                    .last("ORDER BY CASE delivery_status WHEN '已投递' THEN 0 WHEN '待核对' THEN 1 ELSE 2 END, id DESC LIMIT 1"));
+        }
         return mapper.selectOne(new LambdaQueryWrapper<Delivery>()
                 .eq(Delivery::getPlatform, platform())
                 .eq(Delivery::getEncryptId, card.getJobId())
-                .eq(Delivery::getEncryptUserId, card.getBossId())
+                .eq(card.getBossId() != null, Delivery::getEncryptUserId, card.getBossId())
+                .isNull(card.getBossId() == null, Delivery::getEncryptUserId)
                 .last("LIMIT 1"));
     }
 
@@ -568,8 +609,10 @@ public abstract class DeliveryService<C extends JobCard> {
         boolean isNew = existing == null;
         record.setPlatform(platform());
         record.setKeyword(keyword);
-        record.setEncryptId(card.getJobId());
-        record.setEncryptUserId(card.getBossId());
+        if (isNew) {
+            record.setEncryptId(card.getJobId());
+            record.setEncryptUserId(card.getBossId());
+        }
         record.setJobName(card.getJobName());
         record.setBrandName(card.getBrandName());
         record.setSalaryDesc(card.getSalaryDesc());
@@ -601,6 +644,7 @@ public abstract class DeliveryService<C extends JobCard> {
     }
 
     private void finishState() {
+        progress.waitingForBrowser(false);
         status.setState(RunStatus.RunState.FINISHED);
         status.setFinishedAt(Instant.now().toString());
     }

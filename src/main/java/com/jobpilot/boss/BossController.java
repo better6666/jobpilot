@@ -47,6 +47,12 @@ public class BossController {
         return ApiResponse.ok(bossService.status());
     }
 
+    @PostMapping("/browser/show")
+    public ApiResponse<RunStatus> showBrowser() {
+        return bossService.requestBrowser() ? ApiResponse.ok(bossService.status())
+                : ApiResponse.fail("当前没有需要手动处理的浏览器页面");
+    }
+
     @GetMapping("/config")
     public ApiResponse<BossProperties.BossConfig> config() {
         return ApiResponse.ok(bossService.configForPage());

@@ -63,6 +63,9 @@ public class BossService extends DeliveryService<BossJobCard> {
     }
 
     @Override
+    protected boolean usesStableJobId() { return true; }
+
+    @Override
     protected PlatformConfig config() {
         return properties.get();
     }

@@ -19,7 +19,9 @@ import static org.mockito.Mockito.*;
 class BrowserManagerFallbackTest {
     @Test
     void missingChromeFallsBackToEdgeWithIndependentProfile() throws Exception {
-        BrowserManager manager = new BrowserManager(new BrowserManager.BrowserProperties());
+        BrowserManager.BrowserProperties properties = new BrowserManager.BrowserProperties();
+        properties.setChannel("chrome");
+        BrowserManager manager = new BrowserManager(properties);
         Playwright playwright = mock(Playwright.class);
         BrowserType chromium = mock(BrowserType.class);
         BrowserContext context = mock(BrowserContext.class);

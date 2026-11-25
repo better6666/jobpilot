@@ -126,7 +126,8 @@
     <div class="row">
       <button id="btnStart">开始投递</button>
       <button id="btnStop" class="danger" disabled>停止</button>
-      <span id="loginHint" class="hint" style="margin:0">投递会在本机打开浏览器窗口，扫码登录后自动进行；窗口不要最小化。</span>
+      <button id="btnBrowser" hidden>打开浏览器处理</button>
+      <span id="loginHint" class="hint" style="margin:0"></span>
     </div>
   </div>
 
@@ -239,7 +240,7 @@ const PLATFORMS = {
     salaryKind: 'select',
     sayHi: true,
     filterInactiveHr: true,
-    loginHint: '投递会在本机打开浏览器窗口，扫码登录后自动进行；窗口不要最小化。'
+    loginHint: '登录后在后台处理岗位。需要扫码或验证时，点「打开浏览器处理」。'
   },
   liepin: {
     name: '猎聘',
@@ -492,6 +493,7 @@ async function refreshStatus() {
       : '';
     $('btnStart').disabled = s.state === 'RUNNING' || s.state === 'STOPPING';
     $('btnStop').disabled = !(s.state === 'RUNNING' || s.state === 'STOPPING');
+    $('btnBrowser').hidden = platform !== 'boss' || s.state !== 'RUNNING' || !s.waitingForBrowser;
     const logs = s.logs || [];
     $('logs').textContent = logs.length ? logs.join('\n') : '（还没有日志）';
     $('logs').scrollTop = $('logs').scrollHeight;
@@ -565,6 +567,11 @@ function init() {
   };
   $('btnStop').onclick = async () => {
     await api(`/api/${platform}/stop`, { method: 'POST' });
+    refreshStatus();
+  };
+  $('btnBrowser').onclick = async () => {
+    const json = await api('/api/boss/browser/show', { method: 'POST' });
+    if (!json.success) toast(json.message || '打开浏览器失败', false);
     refreshStatus();
   };
   $('btnSave').onclick = saveConfig;
