@@ -1,21 +1,23 @@
 /**
  * Get Jobs 下载站。
  *
- * 职责只有两件：渲染下载页、把安装包从 R2 转出来（统一域名，避免暴露
- * r2.dev 的裸桶地址，也方便以后加下载计数）。
+ * 渲染下载页。配置 R2 时流式提供安装包，否则转到已发布的发行附件。
  *
  * 安装包不放 Workers 静态资源：dmg 113MB、Windows 包也上百 MB，
  * 会撞静态资源体积上限。R2 由 binding 直接读，Worker 只做流式转发。
  */
 
 export interface Env {
-  DOWNLOADS: R2Bucket
+  ASSETS?: Fetcher
+  DOWNLOADS?: R2Bucket
   /** 卡密服务端（license-server），/manage、/admin/* 与 /api/* 全转给它 */
   LICENSE_ORIGIN?: string
   /** 会员页地址，页面上的"查看套餐"按钮指过去 */
   PLANS_URL?: string
   /** 卡密后台，页面上的"激活/续费"指过去 */
   LICENSE_URL?: string
+  /** 当前 Windows 安装包在国内镜像上的完整 HTTPS 地址 */
+  WINDOWS_DOWNLOAD_MIRROR_URL?: string
 }
 
 interface Release {
@@ -26,6 +28,14 @@ interface Release {
   size: string
   bytes: number
   available: boolean
+  publicUrl?: string
+  lite?: {
+    file: string
+    bytes: number
+    sha256: string
+    mirrorUrl?: string
+    backupUrl?: string
+  }
 }
 
 interface Plan {
@@ -52,32 +62,76 @@ async function loadPlans(env: Env): Promise<Plan[]> {
 
 /** 各平台安装包。available=false 时页面显示"即将提供"而不是死链 */
 const RELEASES: Release[] = [
-  { file: 'JobPilot-1.0.28.dmg', label: 'macOS 版', platform: 'mac',
-    arch: 'Apple Silicon（arm64）', size: '323.9 MB', bytes: 323867870, available: true },
-  { file: 'JobPilot-1.0.28-windows.zip', label: 'Windows 版', platform: 'win',
-    arch: 'Windows 10 / 11 64 位', size: '338.8 MB', bytes: 338784866, available: true },
+  { file: 'JobPilot-1.0.29.dmg', label: 'macOS 版', platform: 'mac',
+    arch: 'Apple Silicon（arm64）', size: '323.9 MB', bytes: 323868097, available: true,
+    publicUrl: 'https://github.com/better6666/jobpilot/releases/download/v1.0.29/JobPilot-1.0.29.dmg' },
+  { file: 'JobPilot-1.0.29-windows.zip', label: 'Windows 版', platform: 'win',
+    arch: 'Windows 10 / 11 64 位', size: '338.8 MB', bytes: 338784840, available: true,
+    publicUrl: 'https://github.com/better6666/jobpilot/releases/download/v1.0.29/JobPilot-windows.zip',
+    lite: {
+      file: 'JobPilot-1.0.29-windows-lite.zip',
+      bytes: 130880007,
+      sha256: '8432495066e1a2a97612a993a6a20b65319bc298bb0778700be479d4199a2297',
+      backupUrl: 'https://github.com/better6666/jobpilot/releases/download/v1.0.29/JobPilot-1.0.29-windows-lite.zip',
+    },
+  },
 ]
 
 /** 应用图标 64px（源图见 packaging/icon），内嵌成 data URI：Worker 不读本地文件，单独放 R2 又多一跳 */
 const ICON_DATA_URI = 'data:image/png;base64,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'
 
-const VERSION = '1.0.28'
+const VERSION = '1.0.29'
 const UPDATED = '2026-11-25'
 
 /**
  * 安装包的 SHA-256，页面上给用户校验用。
  * 必须声明在 page() 之前：const 不提升，模板字符串里引用了它们
  */
-const SHA_MAC = 'bd42dece37b3916685690a9e6ff3b57b20acddc9747c036d1338cad93c4f8f6a'
-const SHA_WIN = 'ff9c1b9278ba3bacfc75a93f49e338a1c20cf6c3496e20f38660369f48414bd4'
+const SHA_MAC = '3cb8b5899ff62dbeb9b7e6a0dcfbc2e0902b568bfb933216d047f2e3cdb58b26'
+const SHA_WIN = 'a96fd51f8bbf5b5ffb467e70d2a195061ef815e1fa38beb3c668c10af35f330b'
 
 const RELEASE_NOTES = [
-  "正式投递或预演运行时，JobPilot 会请求系统避免自动睡眠，屏幕仍可正常熄灭。任务结束后释放请求。",
-  "BOSS 已投递或已沟通的岗位会跳过。验证打断且结果不明时标为「待核对」，避免重复发送。",
-  "BOSS 常规投递使用后台标签。需要登录或验证时，可在工作台点击「打开浏览器处理」。",
-  "BOSS 验证失败时可以停止本轮并保留网页，在同一个浏览器里处理后重新开始。",
-  "新安装优先使用自带 Chromium，无需另装 Chrome。Windows 可在软件内一键更新，macOS 本次从下载站安装 DMG。"
+  "授权连接改用独立卡密服务，修复旧下载域名返回 403 导致的 NETWORK_BLOCKED。原卡密、设置、简历和投递记录继续沿用。",
+  "软件更新检查迁移到 cheshi.dpdns.org。Windows 旧版迁移一次后，可在软件内查看说明并更新重启。",
+  "Windows 完整版自带 Chromium，轻量版使用系统 Edge 或 Chrome。macOS 本次从下载站安装 DMG。"
 ]
+
+function windowsMirror(env: Env, release: Release): string | undefined {
+  if (release.platform !== 'win' || !env.WINDOWS_DOWNLOAD_MIRROR_URL) return
+  try {
+    const url = new URL(env.WINDOWS_DOWNLOAD_MIRROR_URL)
+    if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) return
+    if (!url.pathname.endsWith('/' + encodeURIComponent(release.file))) return
+    return url.href
+  } catch {
+    return
+  }
+}
+
+async function streamPublicPackage(request: Request, publicUrl: string, file: string): Promise<Response> {
+  if (request.method !== 'GET' && request.method !== 'HEAD') {
+    return new Response('Method not allowed', { status: 405, headers: { allow: 'GET, HEAD' } })
+  }
+  const headers = new Headers()
+  for (const name of ['range', 'if-range']) {
+    const value = request.headers.get(name)
+    if (value) headers.set(name, value)
+  }
+  try {
+    // The updater accepts the verified bytes from this host and rejects redirects.
+    const upstream = await fetch(publicUrl, { method: request.method, headers, redirect: 'follow' })
+    if (![200, 206, 416].includes(upstream.status)) {
+      await upstream.body?.cancel()
+      return new Response('安装包暂不可用，请稍后重试', { status: 502 })
+    }
+    const out = new Headers(upstream.headers)
+    out.set('content-disposition', `attachment; filename="${file}"`)
+    if (upstream.status !== 416) out.set('cache-control', 'public, max-age=31536000, immutable')
+    return new Response(upstream.body, { status: upstream.status, headers: out })
+  } catch {
+    return new Response('安装包暂不可用，请稍后重试', { status: 502 })
+  }
+}
 
 function page(env: Env, plans: Plan[]): string {
   const pricingCards = plans.map(plan => {
@@ -94,7 +148,24 @@ function page(env: Env, plans: Plan[]): string {
       <div class="price-features">${f.ai_match ? '<span>✓ AI 岗位匹配</span>' : ''}${f.auto_apply ? '<span>✓ 自动投递</span>' : ''}${f.advanced_filter ? '<span>✓ 高级筛选</span>' : ''}${f.ai_greeting ? '<span>✓ AI 招呼语</span>' : ''}${f.smart_apply ? '<span>✓ 智能投递策略</span>' : ''}${f.multi_resume ? '<span>✓ 多简历管理</span>' : ''}${f.ai_strategy ? '<span>✓ AI 策略</span>' : ''}</div>
     </article>`
   }).join('')
-  const cards = RELEASES.map(r => `
+  const windowsLite = RELEASES.find(r => r.platform === 'win' && r.available)?.lite
+  const installNote = 'Windows 已安装 v1.0.23–v1.0.28 的客户，如收不到提示，可按<a href="/guide/#restore-updates">旧版迁移指引</a>恢复软件内更新。本次 macOS 和 Windows v1.0.22 及更早版本可直接下载安装。'
+  const cards = RELEASES.map(r => {
+    const originalPath = '/download/' + encodeURIComponent(r.file)
+    const mirror = windowsMirror(env, r)
+    const downloadLabel = mirror ? '下载 ZIP（国内线路）' : r.platform === 'mac' ? '下载 DMG' : '下载 ZIP'
+    const downloadName = `下载 ${r.label}${mirror ? '（国内线路）' : ''}`
+    const lite = r.lite
+    const liteMirror = env.DOWNLOADS ? undefined : lite?.mirrorUrl
+    const fullPath = escapeHtml(mirror ?? originalPath)
+    const fallbackLink = mirror ? ` <span>·</span> <a href="${originalPath}" download>完整版备用线路</a>` : ''
+    const availableDownloads = lite
+      ? `<a class="download-button" href="${escapeHtml(liteMirror ?? ('/download/' + encodeURIComponent(lite.file)))}"${liteMirror ? '' : ' download'}>下载 Windows 轻量版 <span aria-hidden="true">↗</span></a>
+         <div class="download-meta">${(lite.bytes / 1e6).toFixed(1)} MB <span>·</span> 使用已安装的 Edge 或 Chrome${lite.backupUrl ? `<br><a href="${escapeHtml(lite.backupUrl)}">GitHub 备用下载</a>` : ''}</div>
+         <div class="download-meta"><a href="${fullPath}"${mirror ? '' : ' download'}>下载 Windows 完整版（${r.size}）${mirror ? ' · 国内线路' : ''}</a>${fallbackLink}<br>完整版自带 Chromium</div>`
+      : `<a class="download-button" href="${fullPath}"${mirror ? '' : ' download'} aria-label="${downloadName}">${downloadLabel} <span aria-hidden="true">↗</span></a>
+         <div class="download-meta">${r.size} <span>·</span> v${VERSION}${fallbackLink}</div>`
+    return `
     <article class="download-card">
       <div class="platform-icon ${r.platform}" aria-hidden="true">${r.platform === 'mac' ? '⌘' : '⊞'}</div>
       <div class="platform-copy">
@@ -103,10 +174,10 @@ function page(env: Env, plans: Plan[]): string {
         <p>${r.arch}</p>
       </div>
       ${r.available
-        ? `<a class="download-button" href="/download/${encodeURIComponent(r.file)}" download aria-label="下载 ${r.label}">下载 ${r.platform === 'mac' ? 'DMG' : 'ZIP'} <span aria-hidden="true">↗</span></a>
-           <div class="download-meta">${r.size} <span>·</span> v${VERSION}</div>`
+        ? availableDownloads
         : `<span class="download-button disabled">即将提供</span>`}
-    </article>`).join('')
+    </article>`
+  }).join('')
 
   return `<!DOCTYPE html>
 <html lang="zh-CN">
@@ -125,7 +196,7 @@ function page(env: Env, plans: Plan[]): string {
 .topbar{height:72px;background:var(--navy);color:#fff;border-bottom:1px solid rgba(255,255,255,.1)}.topbar .container{height:100%;display:flex;align-items:center;justify-content:space-between}.brand{display:flex;align-items:center;gap:11px;font-size:17px;font-weight:800;letter-spacing:-.03em;text-decoration:none}.brand-mark{font-size:29px;line-height:1;color:#b9c3ff}.nav-link{color:#c2cbe0;text-decoration:none;font-size:13px;font-weight:600}.nav-link:hover{color:#fff}
 .hero{background:var(--navy);color:#fff;overflow:hidden}.hero .container{display:grid;grid-template-columns:.92fr 1.08fr;gap:54px;align-items:center;min-height:490px;padding-top:62px;padding-bottom:68px}.eyebrow{display:inline-flex;gap:9px;align-items:center;font-size:12px;font-weight:800;letter-spacing:.14em;color:#bcc7ff}.eyebrow:before{content:"";width:7px;height:7px;border-radius:50%;background:#7ce0b4;box-shadow:0 0 0 5px rgba(124,224,180,.12)}h1{font-size:clamp(40px,5vw,66px);line-height:1.13;letter-spacing:-.065em;margin:25px 0 21px;font-weight:850}.hero p{color:#c0cadb;font-size:16px;line-height:1.85;max-width:510px;margin:0}.hero-actions{display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-top:31px}.hero-cta{display:inline-flex;align-items:center;gap:24px;padding:14px 20px;background:#7585f3;color:#fff;border-radius:10px;font-size:14px;font-weight:750;text-decoration:none;box-shadow:0 12px 24px rgba(25,29,79,.25)}.hero-cta:hover{background:#8b9aff}.hero-secondary{font-size:13px;color:#c0cadb;text-decoration:none;border-bottom:1px solid #69748e;padding-bottom:3px}.version{font-size:12px;color:#8996af;margin-top:23px}
 .app-preview{background:#f9faff;border:1px solid #77829d;border-radius:15px;box-shadow:0 28px 70px rgba(2,7,24,.42);transform:rotate(-2deg) translateX(12px);overflow:hidden;min-width:0}.preview-top{height:25px;background:#eceef5;display:flex;gap:5px;padding:9px 12px}.preview-top i{width:7px;height:7px;border-radius:50%;background:#c2c7d3}.preview-body{display:grid;grid-template-columns:112px 1fr;min-height:293px}.preview-sidebar{background:#1d2538;color:#abb6cd;padding:18px 10px;font-size:8px}.preview-logo{color:#fff;font-weight:800;font-size:11px;margin:0 0 30px 5px}.preview-nav{padding:9px 8px;border-radius:5px;margin:5px 0}.preview-nav.active{background:#4b5bc0;color:#fff}.preview-main{padding:21px 23px;color:#273248}.preview-main strong{font-size:17px}.preview-main small{display:block;color:#8791a3;font-size:8px;margin-top:3px}.preview-status{background:#fff;border:1px solid #e6e9f0;border-radius:8px;padding:11px 12px;margin-top:18px;display:flex;align-items:center;justify-content:space-between;font-size:9px}.preview-status b{color:#263854}.preview-pill{color:#47735f;background:#e6f4ed;border-radius:20px;padding:4px 7px}.preview-metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin-top:10px}.preview-metric{background:#fff;border:1px solid #e6e9f0;border-radius:7px;padding:10px 7px;color:#8b95a5;font-size:7px}.preview-metric b{display:block;color:#263854;font-size:16px;margin-bottom:4px}.preview-tabs{font-size:8px;font-weight:700;color:#4b5bc0;border-bottom:1px solid #e0e5ee;margin-top:21px;padding-bottom:9px}.preview-form{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}.preview-form span{height:69px;background:#fff;border:1px solid #e6e9f0;border-radius:7px;padding:10px;font-size:8px;font-weight:700}.preview-form span:after{content:"关键词   新媒体运营";display:block;color:#8d99ac;margin-top:14px;font-weight:400}.preview-form span+span:after{content:"预演模式   已开启"}
-.section{padding:78px 0}.section-head{display:flex;justify-content:space-between;align-items:end;gap:24px;margin-bottom:25px}.section-kicker{color:var(--blue);letter-spacing:.15em;font-size:11px;font-weight:850}.section h2{font-size:31px;letter-spacing:-.04em;line-height:1.25;margin:10px 0 0}.section-intro{font-size:13px;color:var(--muted);line-height:1.65;margin:0;max-width:360px}.download-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}.download-card{background:#fff;border:1px solid var(--line);border-radius:18px;padding:27px;display:grid;grid-template-columns:55px 1fr;column-gap:17px;box-shadow:0 8px 24px rgba(27,39,65,.035)}.platform-icon{width:54px;height:54px;border-radius:14px;display:grid;place-items:center;font-size:26px;font-weight:500;background:#e9eaf0;color:#1e2638}.platform-icon.win{background:#e6edff;color:#3857b7}.platform-copy{min-width:0}.platform-kicker{font-size:10px;letter-spacing:.13em;font-weight:800;color:#8995aa}.platform-copy h3{font-size:22px;margin:3px 0 4px;letter-spacing:-.035em}.platform-copy p{margin:0;color:var(--muted);font-size:12px}.download-button{grid-column:1/-1;margin-top:27px;border-radius:9px;background:var(--blue);color:#fff;text-decoration:none;display:flex;align-items:center;justify-content:space-between;padding:13px 16px;font-size:14px;font-weight:750;transition:background .18s,transform .18s}.download-button:hover{background:#3444ae;transform:translateY(-2px)}.download-button span{font-size:20px;line-height:1}.download-button.disabled{background:#e7eaf0;color:#8992a4}.download-meta{grid-column:1/-1;text-align:center;font-size:11px;color:#929bad;margin-top:11px}.download-meta span{padding:0 5px}.release-note{font-size:12px;color:#69758b;margin-top:20px;line-height:1.7}
+.section{padding:78px 0}.section-head{display:flex;justify-content:space-between;align-items:end;gap:24px;margin-bottom:25px}.section-kicker{color:var(--blue);letter-spacing:.15em;font-size:11px;font-weight:850}.section h2{font-size:31px;letter-spacing:-.04em;line-height:1.25;margin:10px 0 0}.section-intro{font-size:13px;color:var(--muted);line-height:1.65;margin:0;max-width:360px}.download-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}.download-card{background:#fff;border:1px solid var(--line);border-radius:18px;padding:27px;display:grid;grid-template-columns:55px 1fr;align-content:start;column-gap:17px;box-shadow:0 8px 24px rgba(27,39,65,.035)}.platform-icon{width:54px;height:54px;border-radius:14px;display:grid;place-items:center;font-size:26px;font-weight:500;background:#e9eaf0;color:#1e2638}.platform-icon.win{background:#e6edff;color:#3857b7}.platform-copy{min-width:0}.platform-kicker{font-size:10px;letter-spacing:.13em;font-weight:800;color:#8995aa}.platform-copy h3{font-size:22px;margin:3px 0 4px;letter-spacing:-.035em}.platform-copy p{margin:0;color:var(--muted);font-size:12px}.download-button{grid-column:1/-1;margin-top:27px;border-radius:9px;background:var(--blue);color:#fff;text-decoration:none;display:flex;align-items:center;justify-content:space-between;padding:13px 16px;font-size:14px;font-weight:750;transition:background .18s,transform .18s}.download-button:hover{background:#3444ae;transform:translateY(-2px)}.download-button span{font-size:20px;line-height:1}.download-button.disabled{background:#e7eaf0;color:#8992a4}.download-meta{grid-column:1/-1;text-align:center;font-size:12px;line-height:1.6;color:var(--muted);margin-top:11px}.download-meta span{padding:0 5px}.download-meta a{color:var(--blue);text-underline-offset:2px}.release-note{font-size:12px;color:#69758b;margin-top:20px;line-height:1.7}
 .steps-section{background:#fff;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}.steps-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:20px;margin-top:32px}.step{border-top:2px solid #dce2ee;padding-top:20px}.step-number{color:var(--blue);font-size:12px;font-weight:850;letter-spacing:.12em}.step h3{font-size:16px;margin:16px 0 9px}.step p{font-size:12px;color:var(--muted);line-height:1.8;margin:0}.step b{color:var(--ink)}
 .pricing-section{background:#fff;border-top:1px solid var(--line)}.pricing-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}.price-card{border:1px solid var(--line);border-radius:18px;padding:26px;background:#fff;box-shadow:0 8px 24px rgba(27,39,65,.035);display:flex;flex-direction:column;min-height:390px}.price-card.recommended{border:2px solid var(--blue);padding:25px}.price-label{font-size:11px;letter-spacing:.08em;font-weight:850;color:var(--blue)}.price-card h3{font-size:22px;margin:17px 0 4px}.price-sub{font-size:12px;color:var(--muted);margin:0}.price-number{font-size:36px;font-weight:850;letter-spacing:-.05em;margin:27px 0 17px}.price-number small{display:block;font-size:12px;font-weight:500;letter-spacing:0;color:var(--muted);margin-top:2px}.price-periods{display:grid;gap:10px}.price-periods span{display:flex;justify-content:space-between;font-size:13px;color:var(--muted)}.price-periods b{color:var(--ink)}.price-quotas{border-top:1px solid var(--line);margin-top:auto;padding-top:19px;display:grid;gap:7px;font-size:12px;color:var(--muted)}.price-quotas b{font-size:14px;color:var(--ink)}.price-features{display:flex;flex-wrap:wrap;gap:7px;margin-top:17px;min-height:23px}.price-features span{background:#eef1ff;color:#4555b4;border-radius:5px;padding:5px 7px;font-size:11px}.price-note{color:var(--muted);font-size:12px;line-height:1.7;margin:20px 0 0}
 .details-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}.detail-card{background:#fff;border:1px solid var(--line);border-radius:16px;padding:26px}.detail-card h3{margin:0 0 11px;font-size:17px}.detail-card p{margin:0;color:var(--muted);font-size:12px;line-height:1.85}.detail-card code{background:#f2f4f8;padding:2px 5px;border-radius:3px;color:#344260}.hash{margin-top:27px;padding:18px;background:#eef1f7;border-radius:10px;color:#627086;font-size:10px;line-height:1.85;overflow-wrap:anywhere}.hash b{color:#35425b}.resource-links{display:flex;gap:10px;flex-wrap:wrap;margin-top:25px}.resource-links a{font-size:13px;font-weight:700;color:var(--blue);text-decoration:none;border:1px solid #cdd4ee;background:#f9faff;border-radius:8px;padding:10px 14px}.resource-links a:hover{background:#edf0ff}
@@ -137,11 +208,11 @@ footer{background:var(--navy);color:#aebad0;padding:33px 0;font-size:11px;line-h
 <body>
 <header class="topbar"><div class="container"><a class="brand" href="/"><img class="brand-mark" src="${ICON_DATA_URI}" alt="" width="30" height="30" style="border-radius:7px"> JobPilot</a><a class="nav-link" href="#download">下载安装 <span aria-hidden="true">↗</span></a></div></header>
 <main>
-<section class="hero"><div class="container"><div><div class="eyebrow">原生桌面应用 · WINDOWS & MAC</div><h1>让求职投递<br>有条理地进行。</h1><p>在自己的电脑上设置岗位条件、先预演筛选结果，再启动投递。运行状态、投递记录与操作日志，随时看得见。</p><div class="hero-actions"><a class="hero-cta" href="#download">下载桌面版 <span aria-hidden="true">↓</span></a><a class="hero-secondary" href="#start">了解如何开始</a></div><div class="version">当前版本 v${VERSION} · 更新于 ${UPDATED}</div></div><div class="app-preview" role="img" aria-label="JobPilot 原生桌面工作台界面示意"><div class="preview-top"><i></i><i></i><i></i></div><div class="preview-body"><div class="preview-sidebar"><div class="preview-logo">◇ JobPilot</div><div class="preview-nav active">投递工作台</div><div class="preview-nav">AI 话术</div><div class="preview-nav">卡密管理</div><div class="preview-nav">会员套餐</div></div><div class="preview-main"><strong>投递工作台</strong><small>设置求职条件，查看任务运行状态</small><div class="preview-status"><b>准备就绪 · 空闲</b><span class="preview-pill">预演模式</span></div><div class="preview-metrics"><div class="preview-metric"><b>0</b>发现岗位</div><div class="preview-metric"><b>0</b>符合要求</div><div class="preview-metric"><b>0</b>已投递</div><div class="preview-metric"><b>0</b>已跳过</div></div><div class="preview-tabs">投递设置　　投递记录　　运行日志</div><div class="preview-form"><span>搜索范围</span><span>投递策略</span></div></div></div></div></div></section>
-<section class="section" id="download"><div class="container"><div class="section-head"><div><div class="section-kicker">DOWNLOAD</div><h2>选择你的系统</h2></div><p class="section-intro">下载后直接在本机运行。两个版本都提供预演模式，方便先核对岗位与操作流程。</p></div><div class="download-grid">${cards}</div><p class="release-note">支持 macOS 13+（Apple Silicon）及 Windows 10 / 11（64 位）。Windows 下载为免安装 ZIP，解压后运行 JobPilot.exe。两个版本均附带浏览器。</p><h3 style="margin:24px 0 10px">v${VERSION} 更新内容</h3><ul style="padding-left:20px;font-size:13px;line-height:1.9;color:#627086">${RELEASE_NOTES.map(note => `<li>${escapeHtml(note)}</li>`).join('')}</ul><p class="release-note">Windows 已安装 v1.0.23 或更新版本的客户可在软件内查看说明并一键更新、重启。macOS 本次请从上方下载 DMG 后安装。v1.0.22 及更早版本需先手动下载安装。</p></div></section>
+<section class="hero"><div class="container"><div><div class="eyebrow">原生桌面应用 · WINDOWS & MAC</div><h1>让求职投递<br>有条理地进行。</h1><p>在自己的电脑上设置岗位条件、先预演筛选结果，再启动投递。运行状态、投递记录与操作日志，随时看得见。</p><div class="hero-actions"><a class="hero-cta" href="#download">下载桌面版 <span aria-hidden="true">↓</span></a><a class="hero-secondary" href="${env.ASSETS ? '/guide/' : '#start'}">${env.ASSETS ? 'Windows 图文教程' : '了解如何开始'}</a></div><div class="version">当前版本 v${VERSION} · 更新于 ${UPDATED}</div></div><div class="app-preview" role="img" aria-label="JobPilot 原生桌面工作台界面示意"><div class="preview-top"><i></i><i></i><i></i></div><div class="preview-body"><div class="preview-sidebar"><div class="preview-logo">◇ JobPilot</div><div class="preview-nav active">投递工作台</div><div class="preview-nav">AI 话术</div><div class="preview-nav">卡密管理</div><div class="preview-nav">会员套餐</div></div><div class="preview-main"><strong>投递工作台</strong><small>设置求职条件，查看任务运行状态</small><div class="preview-status"><b>准备就绪 · 空闲</b><span class="preview-pill">预演模式</span></div><div class="preview-metrics"><div class="preview-metric"><b>0</b>发现岗位</div><div class="preview-metric"><b>0</b>符合要求</div><div class="preview-metric"><b>0</b>已投递</div><div class="preview-metric"><b>0</b>已跳过</div></div><div class="preview-tabs">投递设置　　投递记录　　运行日志</div><div class="preview-form"><span>搜索范围</span><span>投递策略</span></div></div></div></div></div></section>
+<section class="section" id="download"><div class="container"><div class="section-head"><div><div class="section-kicker">DOWNLOAD</div><h2>选择你的系统</h2></div><p class="section-intro">下载后直接在本机运行。所有安装包均支持预演模式，方便先核对岗位与操作流程。</p></div><div class="download-grid">${cards}</div><p class="release-note">支持 macOS 13+（Apple Silicon）及 Windows 10 / 11（64 位）。Windows 下载为免安装 ZIP，解压后运行 JobPilot.exe。如需使用随包浏览器，请下载 Windows 完整版。</p><h3 style="margin:24px 0 10px">v${VERSION} 更新内容</h3><ul style="padding-left:20px;font-size:13px;line-height:1.9;color:#627086">${RELEASE_NOTES.map(note => `<li>${escapeHtml(note)}</li>`).join('')}</ul><p class="release-note">${installNote}</p></div></section>
 <section class="section pricing-section" id="plans"><div class="container"><div class="section-head"><div><div class="section-kicker">MEMBERSHIP</div><h2>套餐与价格</h2></div><p class="section-intro">先看每天的投递额度和 AI 能力，再选择适合自己的使用时长。投递额度按平台各算一份。软件不内置每小时上限，正式投递的岗位间隔至少 20 秒，填写更长间隔时按设置等待。</p></div>${plans.length ? `<div class="pricing-grid">${pricingCards}</div><p class="price-note">价格与权益从套餐服务实时读取；实际可用额度以激活后的账户状态为准。完整功能对比可在桌面应用「会员套餐」查看。</p>` : '<p class="price-note">套餐暂时无法加载，请稍后刷新页面。</p>'}</div></section>
 <section class="section steps-section" id="start"><div class="container"><div class="section-kicker">GET STARTED</div><h2>从设置到投递，四步就绪</h2><div class="steps-grid"><div class="step"><div class="step-number">01 / 安装</div><h3>打开桌面应用</h3><p>macOS 安装 DMG 中的应用；Windows 解压 ZIP 后启动 JobPilot.exe。</p></div><div class="step"><div class="step-number">02 / 激活</div><h3>输入卡密</h3><p>在「卡密管理」中完成激活，随后即可配置求职条件。</p></div><div class="step"><div class="step-number">03 / 设置</div><h3>填写目标岗位</h3><p>选择平台、关键词和筛选条件，按需配置 AI 话术与投递策略。</p></div><div class="step"><div class="step-number">04 / 预演</div><h3>先检查再开始</h3><p><b>保持预演模式开启</b>运行一次，核对岗位结果后再正式投递。</p></div></div></div></section>
-<section class="section"><div class="container"><div class="section-head"><div><div class="section-kicker">GOOD TO KNOW</div><h2>安装与校验</h2></div><p class="section-intro">首次运行时，系统可能显示安全提示。以下是当前版本的处理方式。</p></div><div class="details-grid"><div class="detail-card"><h3>macOS</h3><p>如果提示无法验证开发者，请前往「系统设置 → 隐私与安全性」找到 JobPilot，选择「仍要打开」。当前安装包尚未完成 Apple 公证。</p></div><div class="detail-card"><h3>Windows</h3><p>解压后运行 <code>JobPilot.exe</code>。若 SmartScreen 提示「Windows 已保护你的电脑」，可选择「更多信息 → 仍要运行」。当前版本尚未提供代码签名。</p></div></div><div class="hash"><b>SHA-256 校验值</b><br>macOS　${SHA_MAC}<br>Windows　${SHA_WIN}</div><div class="resource-links"><a href="#plans">查看套餐与价格 ↑</a><a href="/manage" target="_blank" rel="noopener">卡密管理后台 ↗</a></div></div></section>
+<section class="section"><div class="container"><div class="section-head"><div><div class="section-kicker">GOOD TO KNOW</div><h2>安装与校验</h2></div><p class="section-intro">首次运行时，系统可能显示安全提示。以下是当前版本的处理方式。</p></div><div class="details-grid"><div class="detail-card"><h3>macOS</h3><p>如果提示无法验证开发者，请前往「系统设置 → 隐私与安全性」找到 JobPilot，选择「仍要打开」。当前安装包尚未完成 Apple 公证。</p></div><div class="detail-card"><h3>Windows</h3><p>解压后运行 <code>JobPilot.exe</code>。若 SmartScreen 提示「Windows 已保护你的电脑」，可选择「更多信息 → 仍要运行」。当前版本尚未提供代码签名。</p></div></div><div class="hash"><b>SHA-256 校验值</b><br>macOS　${SHA_MAC}<br>Windows 完整版　${SHA_WIN}${windowsLite ? `<br>Windows 轻量版　${windowsLite.sha256}` : ''}</div><div class="resource-links"><a href="#plans">查看套餐与价格 ↑</a><a href="/manage" target="_blank" rel="noopener">卡密管理后台 ↗</a></div></div></section>
 </main>
 <footer><div class="container"><div><b>◇ JobPilot</b><br>在本机管理求职投递</div><p>招聘平台登录由本机浏览器完成。请遵守所用平台的规则与要求。</p></div></footer>
 </body>
@@ -175,8 +246,12 @@ function parseRange(header: string, size: number):
 }
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url)
+
+    if (env.ASSETS && (url.pathname === '/guide' || url.pathname.startsWith('/guide/'))) {
+      return env.ASSETS.fetch(request)
+    }
 
     if (url.pathname === '/updates.json') {
       // 旧 macOS 客户端的安装器无法从无启动参数的进程重启，先保留手动下载。
@@ -225,12 +300,31 @@ export default {
       if (!key || key.includes('..')) {
         return new Response('Not found', { status: 404 })
       }
-      const hasRange = request.headers.has('range')
-      // 先探一次拿大小：get 不读 body，成本可忽略。有了 size 才能自己判
-      // 分段合法性——R2 对越界区间是直接抛异常变成 500 的，必须先拦掉
-      const meta = await env.DOWNLOADS.get(key)
+      const downloads = env.DOWNLOADS
+      const release = RELEASES.find(item => item.available && (item.file === key || item.lite?.file === key))
+      const publicUrl = release?.file === key ? release.publicUrl : release?.lite?.backupUrl
+      if (!downloads) {
+        return publicUrl ? streamPublicPackage(request, publicUrl, key) : new Response('Not found', { status: 404 })
+      }
+      const rangeHeader = request.headers.get('range')
+      const isHead = request.method === 'HEAD'
+      const cache = request.method === 'GET' && !request.headers.has('if-range')
+        && RELEASES.some(release => release.platform === 'win' && release.available
+          && (release.file === key || release.lite?.file === key))
+        ? caches.default : undefined
+      const cacheKey = new URL('/download/' + encodeURIComponent(key), url.origin).href
+      if (cache) {
+        const headers = new Headers()
+        if (rangeHeader) headers.set('range', rangeHeader)
+        const hit = await cache.match(new Request(cacheKey, { headers })).catch(() => undefined)
+        if (hit && (!rangeHeader || hit.status === 206 || hit.status === 416)) return hit
+      }
+
+      const object = isHead || rangeHeader ? null : await downloads.get(key)
+      const meta = isHead || rangeHeader ? await downloads.head(key) : object
       if (!meta) {
-        return new Response('安装包不存在：' + key, { status: 404 })
+        return publicUrl ? streamPublicPackage(request, publicUrl, key)
+          : new Response('安装包不存在：' + key, { status: 404 })
       }
       const baseHeaders = new Headers()
       meta.writeHttpMetadata(baseHeaders)
@@ -238,12 +332,29 @@ export default {
       baseHeaders.set('content-disposition', `attachment; filename="${meta.key}"`)
       baseHeaders.set('cache-control', 'public, max-age=31536000, immutable')
       baseHeaders.set('accept-ranges', 'bytes')
+      baseHeaders.set('content-length', String(meta.size))
+      if (cache) baseHeaders.set('x-jobpilot-download-cache', 'MISS')
 
-      if (!hasRange) {
-        return new Response(meta.body, { status: 200, headers: baseHeaders })
+      if (isHead) return new Response(null, { headers: baseHeaders })
+      if (!rangeHeader) {
+        if (cache && meta.size <= 512 * 1024 * 1024) {
+          // 缓存写入使用独立流，避免客户端较慢时 tee 为 339 MB 文件积压内存。
+          ctx.waitUntil((async () => {
+            const source = await downloads.get(key)
+            if (!source || source.etag !== meta.etag) return
+            const { readable, writable } = new FixedLengthStream(source.size)
+            const headers = new Headers(baseHeaders)
+            headers.set('x-jobpilot-download-cache', 'HIT')
+            await Promise.all([
+              source.body.pipeTo(writable),
+              cache.put(cacheKey, new Response(readable, { headers })),
+            ])
+          })().catch(() => {}))
+        }
+        return new Response(object?.body, { status: 200, headers: baseHeaders })
       }
 
-      const range = parseRange(request.headers.get('range')!, meta.size)
+      const range = parseRange(rangeHeader, meta.size)
       if (!range) {
         // 单段 Range 解析不了或越界：按规范回 416，客户端会整体重新下
         return new Response(null, {
@@ -255,18 +366,22 @@ export default {
       // 把原 Range 头交给 R2 切片，206 的头自己写——R2 的 object.range
       // 元数据不可靠（range 从 0 开始时它根本不标，客户端会以为不支持分段），
       // 而 {offset,length} 的对象形式在这套后端上直接抛，两条路都不全能信
-      let sliced: R2ObjectBody | null = null
+      let sliced: R2ObjectBody | null
       try {
-        sliced = await env.DOWNLOADS.get(key, { range: request.headers })
-      } catch (e) {
-        // 切片失败就整体给：下载成功比断点续传重要
-        return new Response(meta.body, { status: 200, headers: baseHeaders })
+        sliced = await downloads.get(key, { range: request.headers })
+      } catch {
+        sliced = null
+      }
+      if (!sliced) {
+        const full = await downloads.get(key)
+        if (!full) return new Response('安装包不存在：' + key, { status: 404 })
+        return new Response(full.body, { status: 200, headers: baseHeaders })
       }
       const headers = new Headers(baseHeaders)
       headers.set('content-range',
         `bytes ${range.start}-${range.end}/${meta.size}`)
       headers.set('content-length', String(range.end - range.start + 1))
-      return new Response(sliced?.body ?? meta.body, { status: 206, headers })
+      return new Response(sliced.body, { status: 206, headers })
     }
 
     if (url.pathname === '/' || url.pathname === '/index.html') {
