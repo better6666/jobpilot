@@ -35,7 +35,7 @@ public class CorsFilter implements Filter {
         if (origin != null) {
             String own = request.getScheme() + "://" + host + ":" + request.getServerPort();
             boolean same = origin.equals(own) || request.getServerPort() == 80 && origin.equals("http://" + host);
-            boolean activation = origin.equals("https://getjobs.dpdns.org") && request.getRequestURI().startsWith("/api/license/");
+            boolean activation = origin.equals("https://cheshi.dpdns.org") && request.getRequestURI().startsWith("/api/license/");
             if (!same && !activation) {
                 response.sendError(HttpServletResponse.SC_FORBIDDEN);
                 return;

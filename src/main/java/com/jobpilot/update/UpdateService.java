@@ -58,7 +58,7 @@ public class UpdateService {
 
     public UpdateService(ObjectMapper mapper, RunCoordinator coordinator, ApplicationArguments arguments,
                          ServletWebServerApplicationContext context,
-                         @Value("${updates.manifest-url:https://getjobs.dpdns.org/updates.json}") URI manifestUri) {
+                         @Value("${updates.manifest-url:https://cheshi.dpdns.org/updates.json}") URI manifestUri) {
         this.mapper = mapper;
         this.coordinator = coordinator;
         this.arguments = arguments;

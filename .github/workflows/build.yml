@@ -40,7 +40,7 @@ jobs:
           [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
           [[ "$EXPECTED_SHA256" =~ ^[a-f0-9]{64}$ ]]
           FILE="JobPilot-${RELEASE_TAG#v}.dmg"
-          curl -fL --retry 5 --retry-all-errors --output "$FILE" "https://getjobs.dpdns.org/download/$FILE"
+          curl -fL --retry 5 --retry-all-errors --output "$FILE" "https://cheshi.dpdns.org/download/$FILE"
           echo "$EXPECTED_SHA256  $FILE" | sha256sum --check
           gh release upload "$RELEASE_TAG" "$FILE" --clobber
 
@@ -137,11 +137,11 @@ jobs:
           # dmg 由这个 app-image 转出来，图标跟着走，不用再传
           ICON=packaging/icon/JobPilot.ico
           [ "$RUNNER_OS" = "macOS" ] && ICON=packaging/icon/JobPilot.icns
-          jpackage --type app-image --name JobPilot --app-version 1.0.28 \
+          jpackage --type app-image --name JobPilot --app-version 1.0.29 \
             --input build/stage --main-jar jobpilot-0.1.0.jar \
             --runtime-image build/runtime --dest build/dist \
             --icon "$ICON" \
-            --java-options "-Dlicense.api-base=https://getjobs.dpdns.org"
+            --java-options "-Dlicense.api-base=https://jobpilot.better999.dpdns.org"
           # jpackage 会尝试重新签名嵌套浏览器，先创建应用再加入已签名的 Chromium。
           if [ "$RUNNER_OS" = "macOS" ]; then
             cp -R build/bundled-browser build/dist/JobPilot.app/Contents/app/browser
@@ -241,24 +241,29 @@ jobs:
       - name: macOS 转 dmg
         if: runner.os == 'macOS'
         run: |
-          jpackage --type dmg --name JobPilot --app-version 1.0.28 \
+          jpackage --type dmg --name JobPilot --app-version 1.0.29 \
             --app-image build/dist/JobPilot.app --dest build/dist
           rm -rf build/dist/JobPilot.app
 
       - name: Windows 产物打 zip
         if: runner.os == 'Windows'
         shell: pwsh
-        run: Compress-Archive -Path build/dist/JobPilot -DestinationPath JobPilot-windows.zip
+        run: |
+          Compress-Archive -Path build/dist/JobPilot -DestinationPath JobPilot-windows.zip
+          New-Item -ItemType Directory -Path build/lite -Force | Out-Null
+          Copy-Item -LiteralPath build/dist/JobPilot -Destination build/lite/JobPilot -Recurse
+          Remove-Item -LiteralPath build/lite/JobPilot/app/browser -Recurse
+          Compress-Archive -Path build/lite/JobPilot -DestinationPath JobPilot-1.0.29-windows-lite.zip
 
-      - name: 获取正式 1.0.27 客户端（验证旧版接收更新）
+      - name: 获取正式 1.0.28 客户端（验证迁移后接收更新）
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p build/previous
           if [ "$RUNNER_OS" = "macOS" ]; then
-            gh release download v1.0.27 --pattern 'JobPilot-1.0.27.dmg' --dir build/previous
+            gh release download v1.0.28 --pattern 'JobPilot-1.0.28.dmg' --dir build/previous
           else
-            gh release download v1.0.27 --pattern 'JobPilot-windows.zip' --dir build/previous
+            gh release download v1.0.28 --pattern 'JobPilot-windows.zip' --dir build/previous
           fi
 
       - name: 验证一键升级与失败回滚
@@ -271,6 +276,7 @@ jobs:
           path: |
             build/dist/*.dmg
             JobPilot-windows.zip
+            JobPilot-1.0.29-windows-lite.zip
           if-no-files-found: error
 
       - name: 附到 Release（仅 tag 触发）
@@ -285,6 +291,7 @@ jobs:
           FILES=""
           ls build/dist/*.dmg >/dev/null 2>&1 && FILES="build/dist/*.dmg"
           [ -f JobPilot-windows.zip ] && FILES="$FILES JobPilot-windows.zip"
+          [ -f JobPilot-1.0.29-windows-lite.zip ] && FILES="$FILES JobPilot-1.0.29-windows-lite.zip"
           # 正式更新前先收集两端的已验收产物。
           gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --draft --title "JobPilot $TAG" --generate-notes
           gh release upload "$TAG" $FILES --clobber

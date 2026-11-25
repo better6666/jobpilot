@@ -41,7 +41,7 @@ class ResumeControllerTest {
 
     @Test void localUiAndKnownActivationPageKeepWorkingAndRebindingHostsAreDenied() throws Exception {
         var filter=new CorsFilter();
-        for(String origin:List.of("http://127.0.0.1:9527","https://getjobs.dpdns.org")){
+        for(String origin:List.of("http://127.0.0.1:9527","https://cheshi.dpdns.org")){
             var request=new MockHttpServletRequest("POST","/api/license/activate");request.setServerName("127.0.0.1");request.setServerPort(9527);request.addHeader("Origin",origin);
             var response=new MockHttpServletResponse();AtomicBoolean invoked=new AtomicBoolean();
             filter.doFilter(request,response,(req,res)->invoked.set(true));assertThat(invoked).isTrue();

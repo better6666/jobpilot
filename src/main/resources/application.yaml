@@ -46,10 +46,10 @@ mybatis-plus:
 
 # 卡密校验配置
 # enabled=false 时完全跳过校验（自用模式）
-# 默认经下载站同域名代理卡密接口；命令行或环境配置仍可覆盖
+# 客户端直接访问卡密服务，命令行或环境配置仍可覆盖。
 license:
   enabled: true
-  api-base: https://getjobs.dpdns.org
+  api-base: https://jobpilot.better999.dpdns.org
   card-key: ""
   verify-interval-minutes: 10
   grace-hours: 72
