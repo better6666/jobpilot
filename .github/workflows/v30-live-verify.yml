@@ -44,7 +44,15 @@ jobs:
               throw 'Previous official package digest mismatch'
             }
             Expand-Archive (Join-Path $work 'JobPilot-windows.zip') -DestinationPath $work
-            $old = Start-Process $app -ArgumentList '--server.port=19945','--jobpilot.console=false','--license.enabled=false' -PassThru
+            $launch = New-Object Diagnostics.ProcessStartInfo
+            $launch.FileName = $app
+            $launch.Arguments = '--server.port=19945 --jobpilot.console=false --license.enabled=false'
+            $launch.WorkingDirectory = $work
+            $launch.UseShellExecute = $false
+            # Run like a normal desktop launch. The automation shell is PowerShell 7,
+            # whereas the Windows installer helper runs in Windows PowerShell 5.1.
+            $launch.EnvironmentVariables.Remove('PSModulePath')
+            $old = [Diagnostics.Process]::Start($launch)
             Wait-Until { (Invoke-RestMethod "$api/health" -TimeoutSec 6).data.version -eq '1.0.29' } 90 'Previous client did not start'
             $config = (Invoke-RestMethod "$api/boss/config" -TimeoutSec 10).data
             $config.keywords = @('live-update-smoke')
