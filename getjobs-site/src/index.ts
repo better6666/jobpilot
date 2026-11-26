@@ -108,7 +108,31 @@ function windowsMirror(env: Env, release: Release): string | undefined {
   }
 }
 
-async function streamPublicPackage(request: Request, publicUrl: string, file: string): Promise<Response> {
+const PACKAGE_SEGMENT_BYTES = 32 * 1024 * 1024
+
+async function readPackageSegment(publicUrl: string, offset: number, size: number) {
+  const end = Math.min(offset + PACKAGE_SEGMENT_BYTES, size) - 1
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const response = await fetch(publicUrl, {
+        headers: { range: `bytes=${offset}-${end}`, 'accept-encoding': 'identity' },
+        redirect: 'follow',
+      })
+      if (response.status !== 206 || response.headers.get('content-range') !== `bytes ${offset}-${end}/${size}`
+          || Number(response.headers.get('content-length')) !== end - offset + 1) {
+        await response.body?.cancel()
+        continue
+      }
+      const data = new Uint8Array(await response.arrayBuffer())
+      if (data.byteLength === end - offset + 1) return { data, headers: response.headers }
+    } catch {
+      // Retry only this segment when the release CDN closes its connection early.
+    }
+  }
+  throw new Error('Incomplete release asset segment')
+}
+
+async function streamPublicPackage(request: Request, publicUrl: string, file: string, size: number): Promise<Response> {
   if (request.method !== 'GET' && request.method !== 'HEAD') {
     return new Response('Method not allowed', { status: 405, headers: { allow: 'GET, HEAD' } })
   }
@@ -119,6 +143,32 @@ async function streamPublicPackage(request: Request, publicUrl: string, file: st
   }
   try {
     // The updater accepts the verified bytes from this host and rejects redirects.
+    if (request.method === 'GET' && !headers.has('range')) {
+      const first = await readPackageSegment(publicUrl, 0, size)
+      let buffered: Uint8Array | null = first.data
+      let offset = 0
+      const source = new ReadableStream<Uint8Array>({
+        async pull(controller) {
+          const data = buffered ?? (await readPackageSegment(publicUrl, offset, size)).data
+          buffered = null
+          offset += data.byteLength
+          controller.enqueue(data)
+          if (offset === size) controller.close()
+        },
+      })
+      const { readable, writable } = new FixedLengthStream(size)
+      // On failure pipeTo aborts the response body, so the client can detect a short download.
+      void source.pipeTo(writable).catch(() => {})
+      const out = new Headers({
+        'accept-ranges': 'bytes',
+        'content-type': 'application/octet-stream',
+        'content-disposition': `attachment; filename="${file}"`,
+        'cache-control': 'public, max-age=31536000, immutable',
+      })
+      const etag = first.headers.get('etag')
+      if (etag) out.set('etag', etag)
+      return new Response(readable, { headers: out })
+    }
     const upstream = await fetch(publicUrl, { method: request.method, headers, redirect: 'follow' })
     if (![200, 206, 416].includes(upstream.status)) {
       await upstream.body?.cancel()
@@ -303,8 +353,10 @@ export default {
       const downloads = env.DOWNLOADS
       const release = RELEASES.find(item => item.available && (item.file === key || item.lite?.file === key))
       const publicUrl = release?.file === key ? release.publicUrl : release?.lite?.backupUrl
+      const publicSize = release?.file === key ? release.bytes : release?.lite?.bytes
       if (!downloads) {
-        return publicUrl ? streamPublicPackage(request, publicUrl, key) : new Response('Not found', { status: 404 })
+        return publicUrl && publicSize ? streamPublicPackage(request, publicUrl, key, publicSize)
+          : new Response('Not found', { status: 404 })
       }
       const rangeHeader = request.headers.get('range')
       const isHead = request.method === 'HEAD'
@@ -323,7 +375,7 @@ export default {
       const object = isHead || rangeHeader ? null : await downloads.get(key)
       const meta = isHead || rangeHeader ? await downloads.head(key) : object
       if (!meta) {
-        return publicUrl ? streamPublicPackage(request, publicUrl, key)
+        return publicUrl && publicSize ? streamPublicPackage(request, publicUrl, key, publicSize)
           : new Response('安装包不存在：' + key, { status: 404 })
       }
       const baseHeaders = new Headers()
