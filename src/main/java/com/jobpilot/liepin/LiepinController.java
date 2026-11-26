@@ -47,6 +47,12 @@ public class LiepinController {
         return ApiResponse.ok(liepinService.status());
     }
 
+    @PostMapping("/browser/show")
+    public ApiResponse<RunStatus> showBrowser() {
+        return liepinService.requestBrowser() ? ApiResponse.ok(liepinService.status())
+                : ApiResponse.fail("当前没有需要手动处理的浏览器页面");
+    }
+
     @GetMapping("/config")
     public ApiResponse<LiepinProperties.LiepinConfig> config() {
         return ApiResponse.ok(liepinService.configForPage());

@@ -108,6 +108,7 @@ public class NativeMainWindow {
     private final JSpinner loginTimeout = spinner(5, 1, 30);
     private final JTextArea sayHi = new JTextArea(3, 24);
     private final JCheckBox sendResume = new JCheckBox("聊天中自动发送所选简历（默认关闭）");
+    private final JCheckBox requestWechat = new JCheckBox("平台允许时申请交换微信（默认关闭）");
     private final JCheckBox liepinResumeSync = new JCheckBox("允许猎聘上传附件时解析并完善在线简历");
     private final JComboBox<Choice> resumeSelection = new JComboBox<>();
     private ResumePanel resumePanel;
@@ -380,7 +381,7 @@ public class NativeMainWindow {
         stop.addActionListener(e -> runPlatform("stop"));
         showBrowser.addActionListener(e -> {
             Platform selected = (Platform) platform.getSelectedItem();
-            if (selected != null && "boss".equals(selected.key())) {
+            if (selected != null && showBrowser.isVisible()) {
                 async(() -> api("POST", path(selected, "browser/show"), null), data -> refreshStatus());
             }
         });
@@ -440,6 +441,10 @@ public class NativeMainWindow {
         fields.add(liepinResumeSync);
         fields.add(field("简历附件 · 在“简历与画像”中导入", resumeSelection));
         fields.add(label("<html>仅用于本次投递打开的 BOSS / 猎聘聊天；发送受平台权限限制。<br>预演不上传，需对方同意的会话会单独提示。</html>", 12, MUTED, Font.PLAIN));
+        requestWechat.setOpaque(false);
+        requestWechat.setVisible(false);
+        requestWechat.setToolTipText("BOSS 直聘本次新沟通成功后才尝试。每个会话一次，等待对方同意。");
+        fields.add(requestWechat);
         JToggleButton advanced = new JToggleButton("▸  高级筛选规则");
         advanced.setHorizontalAlignment(SwingConstants.LEFT);
         advanced.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 12));
@@ -695,6 +700,8 @@ public class NativeMainWindow {
         sayHi.setEnabled(usesGreeting);
         sendResume.setSelected(config.path("sendResume").asBoolean(false));
         sendResume.setEnabled(usesGreeting);
+        requestWechat.setVisible("boss".equals(selected.key()));
+        requestWechat.setSelected(config.path("requestWechat").asBoolean(false));
         liepinResumeSync.setVisible("liepin".equals(selected.key()));
         liepinResumeSync.setSelected(config.path("liepinResumeSync").asBoolean(false));
         resumeSelection.setEnabled(usesGreeting);
@@ -785,6 +792,7 @@ public class NativeMainWindow {
         }
         if ("boss".equals(selected.key())) {
             body.put("filterInactiveHr", inactiveHr.isSelected());
+            body.put("requestWechat", requestWechat.isSelected());
         }
         return body;
     }
@@ -830,7 +838,7 @@ public class NativeMainWindow {
             boolean running = "RUNNING".equals(state) || "STOPPING".equals(state);
             start.setEnabled(!running);
             stop.setEnabled(running);
-            showBrowser.setVisible("boss".equals(selected.key()) && "RUNNING".equals(state)
+            showBrowser.setVisible("RUNNING".equals(state)
                     && status.path("waitingForBrowser").asBoolean());
             logs.setText(join(status.path("logs")));
             logs.setCaretPosition(logs.getDocument().getLength());

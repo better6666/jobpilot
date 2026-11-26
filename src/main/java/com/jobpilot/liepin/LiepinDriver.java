@@ -1,6 +1,7 @@
 package com.jobpilot.liepin;
 
 import com.jobpilot.browser.BrowserManager;
+import com.jobpilot.browser.HumanVerification;
 import com.jobpilot.delivery.CardConsumer;
 import com.jobpilot.delivery.DeliveryOutcome;
 import com.jobpilot.delivery.DeliveryStatus;
@@ -11,18 +12,20 @@ import com.jobpilot.resume.ResumeAttachmentService;
 import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.Response;
+import com.microsoft.playwright.impl.TargetClosedError;
 import com.microsoft.playwright.options.WaitUntilState;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.nio.file.Path;
+import java.net.URI;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Locale;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
+import java.util.regex.Pattern;
 
 /**
  * 猎聘浏览器操作层。
@@ -32,16 +35,14 @@ import java.util.function.BooleanSupplier;
  * <p>
  * 已知猎聘的坑（都来自实测，改这段代码前先读）：
  * <ul>
- *   <li>搜索页是 AntD 服务端分页，不是无限滚动：翻页只能点
+ *   <li>搜索页有多页时用 AntD 服务端分页：翻页点击
  *       {@code li.ant-pagination-next} 里的 {@code button.ant-pagination-item-link}，
  *       改 URL 的 currentPage 没用</li>
- *   <li>总页数要取分页框下<b>倒数第二个</b> li——最后一个是 next 按钮，
- *       取最后一个会解析失败</li>
  *   <li>结构化数据来自拦截 {@code api-c.liepin.com/.../pc-search-job}，
  *       <b>必须排除同前缀的 pc-search-job-cond-init</b>（筛选项初始化，拦了会
  *       白白等一次响应）</li>
- *   <li>接口返回的实体列表<b>按下标与 DOM 卡片一一对应</b>：第 i 张卡用第 i 个
- *       实体。响应是整页替换的，所以每次要等"新一次响应"再读缓存，不能读旧页的</li>
+ *   <li>搜索结果以可见卡片为准，优先按岗位编号关联接口数据。卡片未暴露编号时，
+ *       仅在当前页卡片数与接口实体数一致的情况下按顺序关联</li>
  *   <li>沟通按钮要 hover HR 区才渲染，不 hover 就整张卡被静默跳过</li>
  *   <li>卡片里同时有收藏/分享等 round 按钮，<b>只能按自身文本"聊一聊"判定</b>；
  *       "继续聊"是已投递状态，点了只会重开旧会话</li>
@@ -86,8 +87,10 @@ public class LiepinDriver {
      *  用 class*='jobCardPcContainer' 部分匹配绕过哈希，
      *  不能用 data-nick——那是岗位标题链接不是卡片容器，
      *  选了它的话 card.locator("聊一聊按钮") 就找不到了 */
-    private static final String CARD_SELECTOR = "[class*='jobCardPcContainer']";
+    private static final String CARD_SELECTOR = "[class*='jobCardPcContainer']:visible";
     private static final String PAGINATION_BOX = ".list-pagination-box";
+    private static final Pattern NO_JOBS = Pattern.compile(
+            "^(暂无相关职位|暂无符合条件的职位|没有找到相关职位|未找到相关职位|暂无相关岗位)[，。！!\\s]*$");
     /**
      * 聊天窗容器。2026-09 实测：猎聘把整套 IM 换成 ant-im/im-ui 组件，
      * 老的 {@code __im_basic__*} 前缀一个都不剩（选择器留个兜底，平台回滚时不至于全瞎）。
@@ -212,10 +215,9 @@ public class LiepinDriver {
                                CardConsumer<LiepinJobCard> consumer) {
         Page page = browserManager.context().newPage();
         configureTimeouts(page);
-        // 本页接口实体的缓存。每次命中搜索接口就整页替换，所以读之前必须确认
-        // 是一次"新"响应，否则拿到的是上一页的数据（下标对不上 DOM）
+        // 按照浏览器当前搜索页缓存，导航或翻页前清除旧结果。
         AtomicReference<List<LiepinJobCard>> cache = new AtomicReference<>(List.of());
-        AtomicLong responseSeq = new AtomicLong();
+        boolean keepPage = false;
         AtomicReference<Map<String, String>> eduOptions = new AtomicReference<>(Map.of());
         page.onResponse(response -> {
             if (isCondInitResponse(response)) {
@@ -229,48 +231,22 @@ public class LiepinDriver {
             if (isSearchResponse(response)) {
                 List<LiepinJobCard> cards = LiepinJobCard.parseList(safeBody(response));
                 cache.set(cards);
-                responseSeq.incrementAndGet();
                 log.debug("【{}】拦截到 {} 个岗位实体", keyword, cards.size());
             }
         });
         try {
             navigate(page, searchUrl, listener);
-            dismissBlockingModals(page);
-            if (!waitForPagination(page, listener)) {
-                listener.onProgress("【" + keyword + "】搜索结果分页未出现（可能被登录或验证弹窗挡住），跳过");
-                return;
-            }
             if (LiepinEduLevel.worthFiltering(myDegree) && !searchUrl.contains("eduLevel=")) {
-                String filtered = applyEduLevel(page, searchUrl, myDegree, eduOptions, keyword, listener, stop);
-                if (filtered != null && !waitForPagination(page, listener)) {
-                    listener.onProgress("【" + keyword + "】按学历「" + myDegree + "」筛选后没有岗位");
-                    return;
-                }
+                if (!waitForSearchResults(page, keyword, null, listener, stop)) return;
+                applyEduLevel(page, searchUrl, myDegree, eduOptions, cache, keyword, listener, stop);
             }
-            int maxPage = readMaxPage(page);
-            listener.onProgress("【" + keyword + "】搜索页就绪，共 " + maxPage + " 页可翻");
 
             int processed = 0;
-            for (int pageIndex = 1; pageIndex <= Math.min(maxPage, MAX_PAGE); pageIndex++) {
-                if (stop.getAsBoolean()) {
-                    listener.onProgress("收到停止指令，中断采集（已处理 " + processed + " 个）");
-                    break;
-                }
-                if (pageIndex > 1) {
-                    // 翻页后必须等一次新的接口响应，缓存里才是这一页的实体
-                    if (!clickNextPage(page, listener)) {
-                        listener.onProgress("【" + keyword + "】已到最后一页");
-                        break;
-                    }
-                    waitForNewResponse(responseSeq, RESPONSE_TIMEOUT_MS, stop);
-                }
-                dismissBlockingModals(page);
-                if (!waitForCards(page, listener)) {
-                    listener.onProgress("【" + keyword + "】页面未显示岗位卡片，请检查猎聘页面是否要求登录或验证；本关键词停止采集");
-                    break;
-                }
-                int count = page.locator(CARD_SELECTOR).count();
-                // 快照：这一轮的卡片和实体必须来自同一次响应
+            String previousPage = null;
+            for (int pageIndex = 1; pageIndex <= MAX_PAGE && !stop.getAsBoolean(); pageIndex++) {
+                if (!waitForSearchResults(page, keyword, previousPage, listener, stop)) break;
+                Locator cards = page.locator(CARD_SELECTOR);
+                int count = cards.count();
                 List<LiepinJobCard> entities = cache.get();
                 listener.onProgress("【" + keyword + "】第 " + pageIndex + " 页 " + count + " 个岗位");
                 for (int i = 0; i < count; i++) {
@@ -278,24 +254,28 @@ public class LiepinDriver {
                         break;
                     }
                     try {
-                        Locator card = page.locator(CARD_SELECTOR).nth(i);
+                        checkSearchAccess(page, listener, stop);
+                        if (stop.getAsBoolean()) break;
+                        Locator card = cards.nth(i);
                         if (card.count() == 0) {
                             break;
                         }
                         dismissBlockingModals(page);
                         prepareCard(page, card, i);
                         currentCardIndex = i;
-                        LiepinJobCard jobCard = i < entities.size() ? entities.get(i) : null;
+                        LiepinJobCard fromPage = fallbackCard(card);
+                        LiepinJobCard jobCard = fromPage == null
+                                ? (count == entities.size() ? entities.get(i) : null)
+                                : entities.stream().filter(item -> fromPage.getJobId().equals(item.getJobId()))
+                                        .findFirst().orElse(fromPage);
                         if (jobCard == null) {
-                            // 接口没拦到时至少有 jobId 能去重，其余字段留空
-                            jobCard = fallbackCard(card);
-                            if (jobCard == null) {
-                                log.debug("【{}】第 {} 张卡既没拦到实体也提不到 jobId，跳过", keyword, i + 1);
-                                continue;
-                            }
+                            log.debug("【{}】第 {} 张卡缺少可对应的岗位编号，跳过", keyword, i + 1);
+                            continue;
                         }
                         processed++;
                         consumer.accept(jobCard, page);
+                    } catch (HumanVerification.PausedRun | TargetClosedError e) {
+                        throw e;
                     } catch (Exception e) {
                         log.debug("【{}】处理第 {} 张卡异常: {}", keyword, i + 1, e.getMessage());
                     }
@@ -304,15 +284,27 @@ public class LiepinDriver {
                     listener.onProgress("【" + keyword + "】已达单关键词上限 " + maxCards + " 个");
                     break;
                 }
+                if (stop.getAsBoolean() || pageIndex == MAX_PAGE) break;
+                checkSearchAccess(page, listener, stop);
+                if (stop.getAsBoolean()) break;
+                previousPage = pageIdentity(cards);
+                cache.set(List.of());
+                if (!clickNextPage(page, listener)) {
+                    checkSearchAccess(page, listener, stop);
+                    break;
+                }
             }
             listener.onProgress("【" + keyword + "】处理完成，共 " + processed + " 个");
+        } catch (HumanVerification.PausedRun e) {
+            keepPage = true;
+            throw e;
         } finally {
             currentCardIndex = -1;
-            closeQuietly(page);
+            if (!keepPage) closeQuietly(page);
         }
     }
 
-    /** 接口没拦到时从卡片 DOM 提 jobId（data-tlg-ext / data-tlg-scm） */
+    /** 用卡片里的岗位详情地址或平台记录的编号识别岗位。 */
     private LiepinJobCard fallbackCard(Locator card) {
         try {
             Object result = card.evaluate("el => {" +
@@ -333,6 +325,12 @@ public class LiepinDriver {
                     "    const m = raw.match(/jobId=(\\d+)/);" +
                     "    return m ? m[1] : null;" +
                     "  };" +
+                    "  const link = el.querySelector('a[href*=\"/job/\"]');" +
+                    "  if (link) {" +
+                    "    const url = new URL(link.href);" +
+                    "    const detail = url.pathname.match(/^[/]job[/](\\d+)[.]shtml$/);" +
+                    "    if (url.hostname === 'www.liepin.com' && detail) return detail[1];" +
+                    "  }" +
                     "  return fromExt() || fromScm();" +
                     "}");
             if (result == null) {
@@ -465,6 +463,10 @@ public class LiepinDriver {
             Locator cardLocator = listPage.locator(CARD_SELECTOR).nth(index);
             if (cardLocator.count() == 0) {
                 return DeliveryOutcome.failed("卡片已不在列表里（页面可能刷新过）");
+            }
+            LiepinJobCard visibleCard = fallbackCard(cardLocator);
+            if (visibleCard != null && !visibleCard.getJobId().equals(card.getJobId())) {
+                return DeliveryOutcome.failed("岗位列表已变化，请核对后再投递");
             }
             prepareCard(listPage, cardLocator, index);
             Locator button = findChatButton(cardLocator);
@@ -652,81 +654,73 @@ public class LiepinDriver {
     // 分页
     // ------------------------------------------------------------------
 
-    /** 等分页框出现。返回 false = 一直没出现（被登录/验证弹窗挡住） */
-    private boolean waitForPagination(Page page, ProgressListener listener) {
-        for (int i = 0; i < 20; i++) {
-            try {
-                Locator box = page.locator(PAGINATION_BOX);
-                if (box.count() > 0 && box.first().isVisible()) {
-                    return true;
-                }
-            } catch (Exception ignore) {
+    /** 等岗位列表渲染。只在翻页后要求卡片内容与上一页不同。 */
+    private boolean waitForSearchResults(Page page, String keyword, String previousPage,
+                                         ProgressListener listener, BooleanSupplier stop) {
+        long deadline = System.nanoTime() + RESPONSE_TIMEOUT_MS * 1_000_000L;
+        while (!stop.getAsBoolean()) {
+            if (checkSearchAccess(page, listener, stop)) {
+                deadline = System.nanoTime() + RESPONSE_TIMEOUT_MS * 1_000_000L;
             }
-            sleep(1000);
+            if (stop.getAsBoolean()) return false;
+            Locator cards = page.locator(CARD_SELECTOR);
+            if (cards.count() > 0) {
+                if (previousPage == null || !previousPage.equals(pageIdentity(cards))) return true;
+            } else if (page.getByText(NO_JOBS).filter(new Locator.FilterOptions().setVisible(true)).count() > 0) {
+                listener.onProgress("【" + keyword + "】猎聘当前筛选条件下无匹配岗位");
+                return false;
+            }
+            if (System.nanoTime() >= deadline) {
+                listener.onProgress("【" + keyword + "】"
+                        + (previousPage == null ? "未读取到猎聘岗位列表，请检查浏览器里的搜索页"
+                        : "翻页后未读取到新岗位，已停止本关键词"));
+                return false;
+            }
+            // 由 Playwright 等待，以便处理 SPA 渲染期间到达的网络事件。
+            page.waitForTimeout(250);
         }
         return false;
     }
 
-    /**
-     * 读总页数：分页框下<b>倒数第二个</b> li。
-     * 最后一个是 next 按钮，取它会解析失败；解析不出来按 1 页处理（只跑当前页）。
-     */
-    private int readMaxPage(Page page) {
-        try {
-            Object result = page.evaluate("() => {" +
-                    "  const box = document.querySelector('.list-pagination-box');" +
-                    "  if (!box) return 0;" +
-                    "  const lis = box.querySelectorAll('li');" +
-                    "  if (lis.length < 2) return 0;" +
-                    "  const n = parseInt(lis[lis.length - 2].textContent.trim(), 10);" +
-                    "  return isNaN(n) ? 0 : n;" +
-                    "}");
-            int pages = result instanceof Number number ? number.intValue() : 0;
-            return pages > 1 ? pages : 1;
-        } catch (Exception e) {
-            return 1;
+    private boolean checkSearchAccess(Page page, ProgressListener listener, BooleanSupplier stop) {
+        boolean waited = HumanVerification.waitForUser(() -> List.of(page), "猎聘", listener, stop);
+        if (stop.getAsBoolean()) return waited;
+        String path = URI.create(page.url()).getPath();
+        if ("/login".equals(path) || (path != null && path.startsWith("/login/"))
+                || page.locator(".switch-type-mask-img-box:visible").count() > 0) {
+            throw new HumanVerification.PausedRun("猎聘需要重新登录，浏览器页面已保留。登录后请重新开始");
         }
+        dismissBlockingModals(page);
+        return waited;
     }
 
-    /** 点下一页。返回 false = 已经是最后一页或点不动 */
+    private String pageIdentity(Locator cards) {
+        return (String) cards.evaluateAll("""
+                cards => JSON.stringify(cards.map(card =>
+                  card.querySelector('a[href*="/job/"]')?.getAttribute('href') ||
+                  card.getAttribute('data-tlg-ext') || card.getAttribute('data-tlg-scm') ||
+                  card.innerText.trim()))
+                """);
+    }
+
+    /** 只有页面显示可用的下一页入口时才翻页。 */
     private boolean clickNextPage(Page page, ProgressListener listener) {
+        Locator next = page.locator(PAGINATION_BOX
+                + " li.ant-pagination-next:not(.ant-pagination-disabled):not([aria-disabled=true]):visible").first();
+        if (next.count() == 0) return false;
+        Locator link = next.locator("button.ant-pagination-item-link");
+        Locator target = link.count() > 0 ? link.first() : next;
+        if (!target.isEnabled()) return false;
         try {
-            Locator next = page.locator(PAGINATION_BOX + " li.ant-pagination-next");
-            if (next.count() == 0) {
-                return false;
-            }
-            String cls = next.first().getAttribute("class");
-            if (cls != null && cls.contains("ant-pagination-disabled")) {
-                return false;
-            }
-            Locator link = next.locator("button.ant-pagination-item-link");
-            Locator target = link.count() > 0 ? link.first() : next.first();
-            try {
-                target.click(new Locator.ClickOptions().setTimeout(ACTION_TIMEOUT_MS));
-            } catch (Exception e) {
-                // 被弹窗遮住就关掉再原样重试一次
-                dismissBlockingModals(page);
-                target.click(new Locator.ClickOptions().setTimeout(ACTION_TIMEOUT_MS));
-            }
+            target.click(new Locator.ClickOptions().setTimeout(ACTION_TIMEOUT_MS));
             return true;
+        } catch (TargetClosedError e) {
+            throw e;
         } catch (Exception e) {
+            listener.onProgress("猎聘下一页未打开，本关键词停止采集");
             log.debug("翻页失败: {}", e.getMessage());
             return false;
         }
-    }
-
-    /** 等岗位卡片出现。返回 false = 一直没出现 */
-    private boolean waitForCards(Page page, ProgressListener listener) {
-        for (int i = 0; i < 15; i++) {
-            try {
-                if (page.locator(CARD_SELECTOR).count() > 0) {
-                    return true;
-                }
-            } catch (Exception ignore) {
-            }
-            sleep(1000);
-        }
-        return false;
     }
 
     // ------------------------------------------------------------------
@@ -740,59 +734,50 @@ public class LiepinDriver {
      */
     private void dismissBlockingModals(Page page) {
         try {
-            page.evaluate("() => {" +
-                    "  const visible = el => el && el.offsetParent !== null;" +
-                    "  let closed = false;" +
-                    "  document.querySelectorAll('.ant-modal-wrap').forEach(w => {" +
-                    "    if (!visible(w)) return;" +
-                    "    const btn = w.querySelector('.ant-modal-close');" +
-                    "    if (btn) { btn.click(); closed = true; }" +
-                    "  });" +
-                    "  document.querySelectorAll(\"div[class*='subscribe-close-btn']\").forEach(b => {" +
-                    "    if (visible(b)) { b.click(); closed = true; }" +
-                    "  });" +
-                    "  if (!closed) {" +
-                    "    const still = [...document.querySelectorAll('.ant-modal-wrap')].some(visible);" +
-                    "    if (still) return 'escape';" +
-                    "  }" +
-                    "  return closed ? 'closed' : 'none';" +
-                    "}");
+            page.evaluate("""
+                    () => {
+                      const visible = node => node.getClientRects().length &&
+                        getComputedStyle(node).visibility === 'visible';
+                      for (const modal of document.querySelectorAll('.ant-modal-wrap')) {
+                        if (!visible(modal)) continue;
+                        const title = modal.querySelector('.ant-modal-title')?.innerText?.trim() || '';
+                        if (/^(完善(?:个人)?简历|简历完善提醒|职位订阅|订阅职位)$/.test(title)) {
+                          modal.querySelector('.ant-modal-close')?.click();
+                        }
+                      }
+                      for (const button of document.querySelectorAll("div[class*='subscribe-close-btn']")) {
+                        if (visible(button)) button.click();
+                      }
+                    }
+                    """);
+        } catch (TargetClosedError e) {
+            throw e;
         } catch (Exception ignore) {
-        }
-        try {
-            // 没有关闭按钮的弹窗只能按 Esc
-            if (page.locator(".ant-modal-wrap").count() > 0) {
-                page.keyboard().press("Escape");
-                sleep(300);
-            }
-        } catch (Exception ignore) {
+            // 页面切换中，下一轮会重新检查。
         }
     }
 
-    /**
-     * 按学历重开搜索页。选项要等页面自己的 cond-init 请求回来才知道，最多等几秒；
-     * 拿不到就不筛，照旧靠本地过滤，并把原因写进日志。
-     *
-     * @return 用上的新地址；没筛返回 null
-     */
-    private String applyEduLevel(Page page, String searchUrl, String myDegree,
-                                 AtomicReference<Map<String, String>> eduOptions, String keyword,
-                                 ProgressListener listener, BooleanSupplier stop) {
+    private void applyEduLevel(Page page, String searchUrl, String myDegree,
+                               AtomicReference<Map<String, String>> eduOptions,
+                               AtomicReference<List<LiepinJobCard>> cache, String keyword,
+                               ProgressListener listener, BooleanSupplier stop) {
         for (int i = 0; i < 16 && eduOptions.get().isEmpty() && !stop.getAsBoolean(); i++) {
-            sleep(300);
+            page.waitForTimeout(300);
         }
+        if (stop.getAsBoolean()) return;
+        checkSearchAccess(page, listener, stop);
+        if (stop.getAsBoolean()) return;
         String code = LiepinEduLevel.pick(eduOptions.get(), myDegree);
         if (code == null) {
             listener.onProgress("【" + keyword + "】没拿到猎聘的学历选项，按全部学历搜索，"
                     + "高于「" + myDegree + "」的岗位在本地过滤");
-            return null;
+            return;
         }
         String url = LiepinEduLevel.withEduLevel(searchUrl, code);
         listener.onProgress("【" + keyword + "】只看要求「" + myDegree + "」的岗位"
                 + "（猎聘的学历筛选只能单选，标「学历不限」的岗位不在这批结果里）");
+        cache.set(List.of());
         navigate(page, url, listener);
-        dismissBlockingModals(page);
-        return url;
     }
 
     private static boolean isCondInitResponse(Response response) {
@@ -823,18 +808,6 @@ public class LiepinDriver {
         } catch (Exception e) {
             // 响应体读不了（已销毁等）：本页按空数据处理
             return "{}";
-        }
-    }
-
-    /** 等到一次新的接口响应。等不到也返回——用旧缓存总比卡死强 */
-    private void waitForNewResponse(AtomicLong seq, int timeoutMs, BooleanSupplier stop) {
-        long before = seq.get();
-        long deadline = System.currentTimeMillis() + timeoutMs;
-        while (System.currentTimeMillis() < deadline && !stop.getAsBoolean()) {
-            if (seq.get() > before) {
-                return;
-            }
-            sleep(300);
         }
     }
 

@@ -138,8 +138,10 @@ public class BossService extends DeliveryService<BossJobCard> {
         if (greeting.note() != null) {
             appendLog("话术兜底 | " + brief(card) + " | " + greeting.note());
         }
-        return bossConfig.isSendResume() ? driver.deliverWithResume(listPage, card, greeting.text(), bossConfig, listener, stop)
-                : driver.deliver(listPage, card, greeting.text(), bossConfig.isDryRun(), listener, stop);
+        if (bossConfig.isSendResume() || bossConfig.isRequestWechat()) {
+            return driver.deliver(listPage, card, greeting.text(), bossConfig, listener, stop);
+        }
+        return driver.deliver(listPage, card, greeting.text(), bossConfig.isDryRun(), listener, stop);
     }
 
     @Override

@@ -56,5 +56,6 @@ public class BossProperties {
 
         /** HR 活跃描述里带"年"（如"3年前活跃"）视为不活跃，跳过 */
         private boolean filterInactiveHr = false;
+        private boolean requestWechat;
     }
 }

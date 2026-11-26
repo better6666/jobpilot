@@ -53,15 +53,17 @@ public class BossDriver {
 
     private final BrowserManager browserManager;
     private final ResumeAttachmentService resumes;
+    private final BossWechatExchange wechat;
 
     public BossDriver(BrowserManager browserManager) {
-        this(browserManager, null);
+        this(browserManager, null, null);
     }
 
     @org.springframework.beans.factory.annotation.Autowired
-    public BossDriver(BrowserManager browserManager, ResumeAttachmentService resumes) {
+    public BossDriver(BrowserManager browserManager, ResumeAttachmentService resumes, BossWechatExchange wechat) {
         this.browserManager = browserManager;
         this.resumes = resumes;
+        this.wechat = wechat;
     }
 
     public String validateResume(PlatformConfig config) {
@@ -342,14 +344,14 @@ public class BossDriver {
         return deliverInternal(listPage, card, greeting, dryRun, listener, stop, null);
     }
 
-    public DeliveryOutcome deliverWithResume(Page listPage, BossJobCard card, String greeting,
-                                             PlatformConfig config, ProgressListener listener, BooleanSupplier stop) {
+    public DeliveryOutcome deliver(Page listPage, BossJobCard card, String greeting,
+                                   BossProperties.BossConfig config, ProgressListener listener, BooleanSupplier stop) {
         return deliverInternal(listPage, card, greeting, config.isDryRun(), listener, stop, config);
     }
 
     private DeliveryOutcome deliverInternal(Page listPage, BossJobCard card, String greeting,
                                             boolean dryRun, ProgressListener listener, BooleanSupplier stop,
-                                            PlatformConfig resumeConfig) {
+                                            BossProperties.BossConfig config) {
         String target = (card.getBrandName() != null ? card.getBrandName() : "?")
                 + " | " + (card.getJobName() != null ? card.getJobName() : "?");
         if (dryRun) {
@@ -518,9 +520,12 @@ public class BossDriver {
             }
             greetingConfirmed = true;
             listener.onProgress("已发送打招呼语 | " + target);
-            String note = resumeConfig != null && resumeConfig.isSendResume()
-                    ? resumes.send("boss", chatPage, resumeConfig, card, stop) : null;
+            String note = config != null && config.isSendResume()
+                    ? resumes.send("boss", chatPage, config, card, stop) : null;
             if (note != null) listener.onProgress(note + " | " + target);
+            String exchangeNote = config != null && wechat != null ? wechat.request(chatPage, card, config, stop) : null;
+            if (exchangeNote != null) listener.onProgress(exchangeNote + " | " + target);
+            if (exchangeNote != null) note = note == null ? exchangeNote : note + "。" + exchangeNote;
             return new DeliveryOutcome(DeliveryStatus.DELIVERED, note, greeting);
         } catch (HumanVerification.PausedRun e) {
             keepPages = true;

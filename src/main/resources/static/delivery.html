@@ -84,7 +84,7 @@
     .cardbar .exit:hover { background:#fbe7e5; }
     .cardbar .exit:disabled { opacity:.6; cursor:default; }
     .cardbar a + .exit { margin-left:0; }
-#liepinResumeSyncWrap[hidden]{display:none}
+#liepinResumeSyncWrap[hidden], #requestWechatWrap[hidden]{display:none}
 </style>
   <script src="/gate.js"></script>
   <script src="/card-bar.js"></script>
@@ -171,6 +171,7 @@
         <textarea id="sayHi" rows="3" placeholder="您好，看到{公司}在招{岗位}，我做过……&#10;您好，我对{岗位}很感兴趣……"></textarea>
         <div class="hint">固定话术按填写内容发送，多行轮换，仅替换 {公司} 和 {岗位}。选择 AI 话术后，到 <a href="/ai.html">AI 话术</a> 页填写求职背景和接口配置。</div>
         <label class="switch" style="margin-top:14px"><input type="checkbox" id="sendResume">聊天中自动发送所选简历（默认关闭）</label>
+        <label class="switch" id="requestWechatWrap" style="margin-top:14px" hidden><input type="checkbox" id="requestWechat">平台允许时申请交换微信（默认关闭）</label>
         <label for="resumeId">简历附件</label><select id="resumeId"><option value="">请选择要发送的简历</option></select>
         <label class="switch" id="liepinResumeSyncWrap" hidden><input type="checkbox" id="liepinResumeSync">允许猎聘上传附件时解析并完善在线简历（猎聘网站规则；默认关闭）</label>
         <div class="hint">在 <a href="/resumes.html">简历与画像</a> 中导入 PDF 或 Word；仅用于本次投递打开的 BOSS / 猎聘聊天，发送受平台权限限制。预演不上传，需对方同意的会话会单独提示。</div>
@@ -403,6 +404,7 @@ async function loadConfig() {
   $('scoreRules').value = JSON.stringify(c.scoreRules || {}, null, 2);
   $('dryRun').checked = !!c.dryRun;
   if (meta.filterInactiveHr) $('filterInactiveHr').checked = !!c.filterInactiveHr;
+  if (platform === 'boss') $('requestWechat').checked = !!c.requestWechat;
 }
 
 /** 只提交这个平台认的字段，别的字段后端不认，发了也是白发 */
@@ -443,6 +445,7 @@ function readConfig() {
     body.resumeId=$('resumeId').value;
   }
   if (meta.filterInactiveHr) body.filterInactiveHr = $('filterInactiveHr').checked;
+  if (platform === 'boss') body.requestWechat = $('requestWechat').checked;
   return body;
 }
 
@@ -493,7 +496,7 @@ async function refreshStatus() {
       : '';
     $('btnStart').disabled = s.state === 'RUNNING' || s.state === 'STOPPING';
     $('btnStop').disabled = !(s.state === 'RUNNING' || s.state === 'STOPPING');
-    $('btnBrowser').hidden = platform !== 'boss' || s.state !== 'RUNNING' || !s.waitingForBrowser;
+    $('btnBrowser').hidden = s.state !== 'RUNNING' || !s.waitingForBrowser;
     const logs = s.logs || [];
     $('logs').textContent = logs.length ? logs.join('\n') : '（还没有日志）';
     $('logs').scrollTop = $('logs').scrollHeight;
@@ -559,6 +562,7 @@ function init() {
 
   $('sayHiWrap').style.display = meta.sayHi || platform === 'liepin' ? '' : 'none';
   $('inactiveHrWrap').style.display = meta.filterInactiveHr ? '' : 'none';
+  $('requestWechatWrap').hidden = platform !== 'boss';
 
   $('btnStart').onclick = async () => {
     const json = await api(`/api/${platform}/start`, { method: 'POST' });
@@ -570,7 +574,7 @@ function init() {
     refreshStatus();
   };
   $('btnBrowser').onclick = async () => {
-    const json = await api('/api/boss/browser/show', { method: 'POST' });
+    const json = await api(`/api/${platform}/browser/show`, { method: 'POST' });
     if (!json.success) toast(json.message || '打开浏览器失败', false);
     refreshStatus();
   };
