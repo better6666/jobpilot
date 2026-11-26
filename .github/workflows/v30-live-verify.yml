@@ -61,12 +61,17 @@ jobs:
 
             $install = Invoke-RestMethod "$api/updates/install" -Method Post -TimeoutSec 10 -ContentType 'application/json' -Body (@{version=$release} | ConvertTo-Json)
             if (-not $install.success) { throw $install.message }
-            Wait-Until { (Test-Path $resultFile) -and ((Get-Content $resultFile -Raw | ConvertFrom-Json).state -eq 'DONE') } 300 'Live installation did not finish'
+            Wait-Until { (Test-Path $resultFile) -and ((Get-Content $resultFile -Raw | ConvertFrom-Json).state -in @('DONE','FAILED')) } 240 'Live installation did not finish'
+            if ((Get-Content $resultFile -Raw | ConvertFrom-Json).state -ne 'DONE') { throw 'Installer did not reach DONE' }
             Wait-Until { (Invoke-RestMethod "$api/health" -TimeoutSec 7).data.version -eq $release } 90 'Updated client did not restart'
             if ((Invoke-RestMethod "$api/boss/config" -TimeoutSec 10).data.keywords -notcontains 'live-update-smoke') { throw 'Local settings were not preserved' }
             Write-Host 'PASS live Windows update downloaded, verified, installed, restarted and preserved settings'
           } catch {
             if (Test-Path $resultFile) { Get-Content $resultFile }
+            Get-ChildItem (Join-Path $env:APPDATA 'JobPilot') -Filter '*.log' -Recurse -File -ErrorAction SilentlyContinue |
+              ForEach-Object { Write-Host ("Diagnostic " + $_.Name); Get-Content $_.FullName -Tail 35 }
+            Get-ChildItem (Join-Path $env:APPDATA 'JobPilot/updates') -Filter 'package.zip' -Recurse -File -ErrorAction SilentlyContinue |
+              ForEach-Object { Write-Host ("Installer ZIP " + $_.Length + " SHA-256 " + (Get-FileHash $_.FullName).Hash) }
             try {
               $failed = (Invoke-RestMethod "$api/updates" -TimeoutSec 6).data
               $failed | Select-Object state,progress,message | ConvertTo-Json -Compress
