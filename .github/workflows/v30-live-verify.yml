@@ -1,0 +1,77 @@
+name: Verify JobPilot v1.0.30 live Windows update
+on:
+  push:
+    branches: ['codex/verify-v1-0-30-download']
+    paths: ['.github/workflows/v30-live-verify.yml']
+permissions:
+  contents: read
+jobs:
+  update:
+    runs-on: windows-latest
+    timeout-minutes: 12
+    steps:
+      - name: Upgrade the published v1.0.29 from the live download site
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $work = Join-Path $env:RUNNER_TEMP 'jobpilot-live-check'
+          New-Item -ItemType Directory -Path $work | Out-Null
+          $env:APPDATA = Join-Path $work 'profile'
+          New-Item -ItemType Directory -Path $env:APPDATA | Out-Null
+          $env:JAVA_TOOL_OPTIONS = '-Duser.home="' + $work + '"'
+          $api = 'http://127.0.0.1:19945/api'
+          $repo = 'better6666/jobpilot'
+          $release = '1.0.30'
+          $expectedHash = '8c4564c01dfddc99c12d3d8208c9cd2dc4166199dc0c40d58c8ca9c43d554769'
+          $resultFile = Join-Path $env:APPDATA 'JobPilot/updates/result.json'
+          $app = Join-Path $work 'JobPilot/JobPilot.exe'
+
+          function Wait-Until([scriptblock] $predicate, [int] $seconds, [string] $message) {
+            $deadline = (Get-Date).AddSeconds($seconds)
+            do {
+              try { if (& $predicate) { return } } catch {}
+              Start-Sleep -Seconds 2
+            } while ((Get-Date) -lt $deadline)
+            throw $message
+          }
+
+          try {
+            gh release download v1.0.29 --repo $repo --pattern JobPilot-windows.zip --dir $work
+            if ($LASTEXITCODE -ne 0) { throw 'Could not download the previous release' }
+            if ((Get-FileHash (Join-Path $work 'JobPilot-windows.zip')).Hash.ToLower() -ne 'a96fd51f8bbf5b5ffb467e70d2a195061ef815e1fa38beb3c668c10af35f330b') {
+              throw 'Previous official package digest mismatch'
+            }
+            Expand-Archive (Join-Path $work 'JobPilot-windows.zip') -DestinationPath $work
+            $old = Start-Process $app -ArgumentList '--server.port=19945','--jobpilot.console=false','--license.enabled=false' -PassThru
+            Wait-Until { (Invoke-RestMethod "$api/health" -TimeoutSec 6).data.version -eq '1.0.29' } 90 'Previous client did not start'
+            $config = (Invoke-RestMethod "$api/boss/config" -TimeoutSec 10).data
+            $config.keywords = @('live-update-smoke')
+            Invoke-RestMethod "$api/boss/config" -Method Put -ContentType 'application/json' -Body ($config | ConvertTo-Json -Depth 15) | Out-Null
+
+            $manifest = Invoke-RestMethod 'https://cheshi.dpdns.org/updates.json' -TimeoutSec 20
+            if ($manifest.version -ne $release -or $manifest.assets.'windows-x64'.sha256 -ne $expectedHash) { throw 'Unexpected live Windows manifest' }
+            Invoke-RestMethod "$api/updates/check" -Method Post -TimeoutSec 10 | Out-Null
+            Wait-Until {
+              $status = (Invoke-RestMethod "$api/updates" -TimeoutSec 6).data
+              $status.available -and $status.installable -and $status.latestVersion -eq $release -and $status.notes.Count -eq 3
+            } 45 'Client did not show the live update and release notes'
+            Write-Host 'PASS official v1.0.29 detects production v1.0.30 with three release notes'
+
+            $install = Invoke-RestMethod "$api/updates/install" -Method Post -TimeoutSec 10 -ContentType 'application/json' -Body (@{version=$release} | ConvertTo-Json)
+            if (-not $install.success) { throw $install.message }
+            Wait-Until { (Test-Path $resultFile) -and ((Get-Content $resultFile -Raw | ConvertFrom-Json).state -eq 'DONE') } 300 'Live installation did not finish'
+            Wait-Until { (Invoke-RestMethod "$api/health" -TimeoutSec 7).data.version -eq $release } 90 'Updated client did not restart'
+            if ((Invoke-RestMethod "$api/boss/config" -TimeoutSec 10).data.keywords -notcontains 'live-update-smoke') { throw 'Local settings were not preserved' }
+            Write-Host 'PASS live Windows update downloaded, verified, installed, restarted and preserved settings'
+          } catch {
+            if (Test-Path $resultFile) { Get-Content $resultFile }
+            try {
+              $failed = (Invoke-RestMethod "$api/updates" -TimeoutSec 6).data
+              $failed | Select-Object state,progress,message | ConvertTo-Json -Compress
+            } catch {}
+            throw
+          } finally {
+            Get-Process JobPilot -ErrorAction SilentlyContinue | Stop-Process -ErrorAction SilentlyContinue
+          }
